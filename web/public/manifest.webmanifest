@@ -1,0 +1,21 @@
+{
+  "name": "Terram Butchery",
+  "short_name": "Terram",
+  "description": "Orders, cutting, packing and fulfilment for Terram Farm's butchery.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f6f3ee",
+  "theme_color": "#7b2d26",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Paste WhatsApp", "url": "/import" },
+    { "name": "Cutting", "url": "/cutting" },
+    { "name": "Packing", "url": "/packing" }
+  ]
+}

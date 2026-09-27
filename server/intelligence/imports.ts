@@ -565,7 +565,7 @@ export function commitDraft(batchId: string | null, stored: Pick<StoredDraft, 'd
   }
   if (hasBlocking) {
     for (const it of badItems) {
-      raiseException(unknownItemException(it, order.id, first, batchId));
+      raiseException(unknownItemException(it, order.id, messageFor(od, it) ?? first, batchId));
       result.exceptions++;
     }
     if (placeholder || codes.has('ambiguous_customer') || codes.has('unknown_customer')) {
@@ -604,6 +604,14 @@ export function commitDraft(batchId: string | null, stored: Pick<StoredDraft, 'd
   }
   result.created.push({ order_id: order.id, order_number: order.order_number, status: order.status });
   return { status: 'committed', orderId: order.id, summary: hasBlocking ? 'Created — needs clarification' : 'Created and confirmed' };
+}
+
+/** The message a line came from, so the evidence shown is the right one. */
+function messageFor(d: Draft, it: DraftItem): { id: string | null; text: string } | null {
+  const needle = (it.source_text ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!needle) return null;
+  const m = d.messages.find((x) => x.direction === 'in' && x.text.toLowerCase().replace(/\s+/g, ' ').includes(needle));
+  return m ? { id: (m as any).message_id ?? null, text: m.text } : null;
 }
 
 function itemBlocked(d: OrderDraft, it: DraftItem) {

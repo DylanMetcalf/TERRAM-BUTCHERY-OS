@@ -1,0 +1,169 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/fraunces';
+
+/*
+ * Terram design tokens — "modern rural premium".
+ * Warm paper, deep ink, an oxblood accent, field green for done, ochre for attention.
+ */
+:root {
+  --bg: #f6f3ee;
+  --surface: #ffffff;
+  --surface-2: #fbf9f6;
+  --sunken: #efebe4;
+  --ink: #1d1b18;
+  --ink-2: #5b554d;
+  --ink-3: #8a8378;
+  --line: #e7e1d7;
+  --line-strong: #d5ccbe;
+  --brand: #7b2d26;
+  --brand-hover: #682520;
+  --brand-ink: #ffffff;
+  --brand-soft: #f5e8e4;
+  --brand-soft-ink: #6a241e;
+  --field: #43613f;
+  --field-soft: #e6eee2;
+  --field-soft-ink: #2f4a2c;
+  --ochre: #9a6412;
+  --ochre-soft: #f8edd8;
+  --ochre-soft-ink: #6f470b;
+  --danger: #b3261e;
+  --danger-soft: #fbe8e6;
+  --danger-soft-ink: #8c1d17;
+  --slate: #3f5b73;
+  --slate-soft: #e7eef4;
+  --slate-soft-ink: #2e4558;
+  --shadow: 0 1px 2px rgb(40 30 20 / 0.05), 0 2px 8px rgb(40 30 20 / 0.04);
+  --shadow-lg: 0 8px 30px rgb(40 30 20 / 0.12), 0 2px 6px rgb(40 30 20 / 0.06);
+  --focus: #7b2d26;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #161412;
+    --surface: #1f1c19;
+    --surface-2: #24211d;
+    --sunken: #12100e;
+    --ink: #f3efe8;
+    --ink-2: #c4bcb0;
+    --ink-3: #8f877c;
+    --line: #34302b;
+    --line-strong: #463f38;
+    --brand: #c9584c;
+    --brand-hover: #d86a5e;
+    --brand-ink: #1a0d0b;
+    --brand-soft: #3a211d;
+    --brand-soft-ink: #f2b9b0;
+    --field: #7fae76;
+    --field-soft: #203020;
+    --field-soft-ink: #b8d8b0;
+    --ochre: #e0a445;
+    --ochre-soft: #3a2c15;
+    --ochre-soft-ink: #f1cf94;
+    --danger: #ef6f64;
+    --danger-soft: #3d1a17;
+    --danger-soft-ink: #f6b3ad;
+    --slate: #8fb0cc;
+    --slate-soft: #1c2a36;
+    --slate-soft-ink: #bcd3e6;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 10px 30px rgb(0 0 0 / 0.45);
+    --focus: #e27b70;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-sunken: var(--sunken);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-soft-ink: var(--brand-soft-ink);
+  --color-field: var(--field);
+  --color-field-soft: var(--field-soft);
+  --color-field-soft-ink: var(--field-soft-ink);
+  --color-ochre: var(--ochre);
+  --color-ochre-soft: var(--ochre-soft);
+  --color-ochre-soft-ink: var(--ochre-soft-ink);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-soft-ink: var(--danger-soft-ink);
+  --color-slate: var(--slate);
+  --color-slate-soft: var(--slate-soft);
+  --color-slate-soft-ink: var(--slate-soft-ink);
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Fraunces Variable', ui-serif, Georgia, serif;
+  --shadow-card: var(--shadow);
+  --shadow-float: var(--shadow-lg);
+  --radius-xl: 14px;
+  --radius-2xl: 18px;
+  --animate-rise: rise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-pop: pop 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+  --animate-fade: fade 0.18s ease-out;
+  --animate-sheet: sheet 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-drawer: drawer 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sheet { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes drawer { from { transform: translateX(100%); } to { transform: none; } }
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  ::selection { background: var(--brand-soft); color: var(--brand-soft-ink); }
+  button, [role='button'] { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  input, textarea, select { font: inherit; color: inherit; }
+}
+
+@layer components {
+  .font-display { font-family: var(--font-display); font-optical-sizing: auto; letter-spacing: -0.01em; }
+  .tabular { font-variant-numeric: tabular-nums; }
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  .safe-top { padding-top: env(safe-area-inset-top); }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+  .scrollbar-none { scrollbar-width: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+}

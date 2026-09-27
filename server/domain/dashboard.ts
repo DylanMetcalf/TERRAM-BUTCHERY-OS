@@ -46,6 +46,9 @@ export function dashboard() {
         `SELECT e.id, e.order_id, e.type, e.summary, e.created_at, e.actor_kind, u.name AS actor_name, o.order_number, c.name AS customer_name
          FROM order_events e JOIN orders o ON o.id = e.order_id JOIN customers c ON c.id = o.customer_id LEFT JOIN users u ON u.id = e.actor_user_id
          WHERE e.type IN ('created','status_changed','item_amended','item_added','item_removed','exception_resolved','amendment_applied')
+           AND e.rowid = (SELECT e2.rowid FROM order_events e2 WHERE e2.order_id = e.order_id
+                          AND e2.type IN ('created','status_changed','item_amended','item_added','item_removed','exception_resolved','amendment_applied')
+                          ORDER BY e2.created_at DESC, e2.rowid DESC LIMIT 1)
          ORDER BY e.created_at DESC LIMIT 12`,
       )
       .all() as any[]

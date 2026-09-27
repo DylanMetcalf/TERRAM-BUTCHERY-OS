@@ -1,0 +1,10 @@
+import { chromium } from 'playwright-core';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const p = await (await b.newContext({ viewport: { width: 1200, height: 900 } })).newPage();
+p.on('console', (m) => console.log('console', m.type(), m.text()));
+p.on('pageerror', (e) => console.log('pageerror', e.message));
+p.on('response', (r) => r.status() >= 400 && console.log('http', r.status(), r.url()));
+await p.goto('http://localhost:8092/'); await p.fill('#email', 'dylan@terram.test'); await p.fill('#password', 'butchery123'); await p.click('button[type=submit]'); await p.waitForTimeout(1000);
+await p.goto('http://localhost:8092' + process.argv[2]); await p.waitForTimeout(2500);
+console.log((await p.innerText('body')).slice(0, 600));
+await b.close();

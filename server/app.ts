@@ -87,10 +87,16 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
       c.header('Cache-Control', 'public, max-age=31536000, immutable');
     });
     app.use('*', serveStatic({ root: rel }));
-    const index = fs.readFileSync(path.join(staticDir, 'index.html'), 'utf8');
+    // Missing hashed assets must 404 (never fall through to index.html) so a client
+    // running an older build can detect it and reload.
+    app.get('/assets/*', (c) => c.text('Not found', 404));
+    const indexPath = path.join(staticDir, 'index.html');
+    let cached = { mtime: 0, html: '' };
     app.get('*', (c) => {
+      const m = fs.statSync(indexPath).mtimeMs;
+      if (m !== cached.mtime) cached = { mtime: m, html: fs.readFileSync(indexPath, 'utf8') };
       c.header('Cache-Control', 'no-cache');
-      return c.html(index);
+      return c.html(cached.html);
     });
   }
   return app;

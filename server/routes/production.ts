@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { addDays, localDate, weekRange } from '../lib/time.js';
+import { addDays, localDate } from '../lib/time.js';
 import { businessTz } from '../services/settings.js';
 import { cuttingSheet, fulfilmentBoard, packingQueue } from '../domain/production.js';
 import { dashboard } from '../domain/dashboard.js';
@@ -22,11 +22,9 @@ r.get('/cutting', requirePerm('orders.read'), (c) => {
       from = null;
       to = null;
     } else {
-      const w = weekRange(today);
-      from = today < w.from ? w.from : today;
-      to = w.to;
-      // Include anything overdue so nothing falls off the sheet
-      from = addDays(today, -30) < from ? addDays(today, -30) : from;
+      // Next 7 days, plus anything overdue so nothing falls off the sheet
+      from = addDays(today, -30);
+      to = addDays(today, 6);
     }
   }
   const includeUndated = c.req.query('undated') !== '0';

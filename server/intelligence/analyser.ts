@@ -2,6 +2,7 @@ import { db } from '../db/db.js';
 import { formatQty, qtyEquals, type Qty } from '../../shared/quantity.js';
 import { normalise } from '../../shared/text.js';
 import { matchCustomer } from '../domain/customers.js';
+import { getProduct } from '../domain/products.js';
 import type { Dictionary } from './matcher.js';
 import type { ParsedItem, ParsedMessage } from './parser.js';
 import type { SplitMessage } from './splitter.js';
@@ -355,9 +356,12 @@ function mergeFulfilment(d: OrderDraft, p: ParsedMessage) {
 function referenceSuggestions(item: DraftItem, current: DraftItem[], customerId: string | null) {
   const words = nounTokens(item.phrase);
   const inConv = current.filter((i) => i.product_id);
+  // "those steaks" → only products that are steaks (by name, piece noun or an alias)
   const related = inConv.filter((i) => {
-    const p = i.product_id ? i.product_name ?? '' : '';
-    return words.some((w) => nounTokens(p).includes(w)) || words.some((w) => ['steak', 'piece', 'one'].includes(w));
+    const p = i.product_id ? getProduct(i.product_id) : undefined;
+    if (!p) return false;
+    const vocab = new Set([...nounTokens(p.canonical_name), ...nounTokens(p.piece_noun), ...p.aliases.flatMap((a) => a.alias.split(' '))]);
+    return words.some((w) => vocab.has(w));
   });
   const out = (related.length ? related : inConv).map((i) => ({ product_id: i.product_id!, name: i.product_name ?? '' }));
   if (customerId) {
