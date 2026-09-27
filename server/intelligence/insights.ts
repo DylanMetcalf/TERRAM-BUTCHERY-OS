@@ -89,6 +89,7 @@ export function operationsIntelligence() {
   }
   const stages = Object.entries(stageTime)
     .map(([status, hs]) => ({ status, label: STATUS_LABEL[status as OrderStatus] ?? status, avg_hours: Math.round((hs.reduce((a, b) => a + b, 0) / hs.length) * 10) / 10, samples: hs.length }))
+    .filter((st) => st.samples >= 3 && st.avg_hours >= 0.05)
     .sort((a, b) => b.avg_hours - a.avg_hours);
   const created30 = (db().prepare('SELECT COUNT(*) n FROM orders WHERE created_at >= ?').get(since) as any).n || 0;
   const clarified30 = (db().prepare("SELECT COUNT(DISTINCT order_id) n FROM exceptions WHERE created_at >= ? AND order_id IS NOT NULL").get(since) as any).n || 0;
@@ -119,7 +120,7 @@ export function operationsIntelligence() {
     { key: 'order-analyst', name: 'Order Analyst', role: 'Reads incoming messages and proposes orders', status: 'active', note: aiAvailable() ? 'Rules first, assistant for messy messages' : 'Rules engine (assistant not configured)' },
     { key: 'product-matcher', name: 'Product Matcher', role: 'Matches customer wording to your product list', status: 'active', note: `${listProducts().reduce((n, p) => n + p.aliases.length, 0)} known phrases` },
     { key: 'validation', name: 'Validation Engine', role: 'Checks every proposal against products, quantities and rules', status: 'active', note: 'Always on — nothing bypasses it' },
-    { key: 'amendments', name: 'Amendment Analyst', role: 'Understands “actually make that 3kg”', status: 'active', note: `${amended30} orders amended in 30 days` },
+    { key: 'amendments', name: 'Amendment Analyst', role: 'Understands “actually make that 3kg”', status: 'active', note: `${amended30} order${amended30 === 1 ? '' : 's'} amended in 30 days` },
     { key: 'duplicates', name: 'Duplicate Detector', role: 'Flags repeated orders — never deletes', status: 'active', note: `Window: ${settings.orders.duplicateWindowHours}h` },
     { key: 'planner', name: 'Production Planner', role: 'Builds the cutting sheet from confirmed orders', status: 'active' },
     { key: 'workflow', name: 'Workflow Monitor', role: 'Finds stalled and overdue orders', status: stalled.length || overdue.length ? 'attention' : 'active', note: `${stalled.length} stalled · ${overdue.length} overdue` },

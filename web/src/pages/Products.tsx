@@ -71,7 +71,7 @@ export default function Products() {
                       {p.allows_portions && <Badge size="sm">Packs</Badge>}
                       {!p.active && <Badge size="sm" tone="danger">Unavailable</Badge>}
                       {!p.customer_visible && <Badge size="sm" tone="slate"><EyeOff className="size-3" />Internal</Badge>}
-                      {!!p.orders_90d && <Badge size="sm" tone="field">{p.orders_90d} orders · 90d</Badge>}
+                      {!!p.orders_90d && <Badge size="sm" tone="field">{p.orders_90d} order{p.orders_90d === 1 ? "" : "s"} · 90d</Badge>}
                     </div>
                   </button>
                 ))}

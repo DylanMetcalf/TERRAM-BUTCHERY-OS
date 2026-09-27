@@ -190,9 +190,11 @@ export default function NewOrder() {
                       <span className="font-display text-[20px] font-semibold leading-none">{Number(ymd.slice(8))}</span>
                     </button>
                   ))}
-                  <Input type="date" value={d.date} onChange={(e) => set({ date: e.target.value })} className="h-16 w-40 shrink-0" aria-label="Other date" />
                 </div>
-                <p className="mt-2 text-[13px] text-ink-3">{d.date ? friendlyDate(d.date, today, { long: true }) : 'No date yet — you can add it later.'}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <Input type="date" value={d.date} onChange={(e) => set({ date: e.target.value })} className="w-44" aria-label="Other date" />
+                  <p className="text-[13px] text-ink-3">{d.date ? friendlyDate(d.date, today, { long: true }) : 'No date yet — you can add it later.'}</p>
+                </div>
               </div>
               <Field label="Time" optional><Input value={d.time} onChange={(e) => set({ time: e.target.value })} placeholder="e.g. after 2pm" /></Field>
               {d.fulfilment === 'delivery' && (
