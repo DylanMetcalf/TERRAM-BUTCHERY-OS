@@ -5,8 +5,8 @@ import { Link } from 'react-router-dom';
 import { StatusPill } from '../components/order-bits';
 import { Badge, Button, Card, cx, EmptyState, ErrorState, LoadingBlock, PageHeader, SectionTitle, Segmented, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
-import { useCan } from '../lib/auth';
-import { friendlyDate, timeAgo, todayYmd } from '../lib/format';
+import { useCan, useMe } from '../lib/auth';
+import { friendlyDate, readyMessage, timeAgo, todayYmd, waLink } from '../lib/format';
 import type { OrderItem, OrderSummary } from '../lib/types';
 
 type FOrder = OrderSummary & { items: OrderItem[] };
@@ -79,6 +79,7 @@ function ReadyCard({ o, today }: { o: FOrder; today: string }) {
   const qc = useQueryClient();
   const toast = useToast();
   const can = useCan();
+  const me = useMe();
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['fulfilment'] });
     qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -121,7 +122,20 @@ function ReadyCard({ o, today }: { o: FOrder; today: string }) {
       {canAct && (
         <div className="flex flex-wrap gap-2 border-t border-line bg-surface-2 p-3">
           {phone && <a href={`tel:${phone}`}><Button size="md" variant="ghost" icon={<Phone className="size-4" />} aria-label="Call" /></a>}
-          {!o.customer_notified_at && <Button size="md" icon={<MessageCircle className="size-4" />} loading={notify.isPending} onClick={() => notify.mutate()}>Told customer</Button>}
+          {!o.customer_notified_at && (
+            <Button
+              size="md"
+              icon={<MessageCircle className="size-4" />}
+              loading={notify.isPending}
+              onClick={() => {
+                const link = waLink(phone, readyMessage(o, me.business.name));
+                if (link) window.open(link, '_blank', 'noopener');
+                notify.mutate();
+              }}
+            >
+              {phone ? 'Tell customer' : 'Told customer'}
+            </Button>
+          )}
           <div className="ml-auto flex gap-2">
             {delivery && o.status === 'ready' && <Button size="md" icon={<Truck className="size-4" />} loading={move.isPending && move.variables === 'out_for_delivery'} onClick={() => move.mutate('out_for_delivery')}>Out for delivery</Button>}
             {o.status === 'packed' && <Button size="md" onClick={() => move.mutate('ready')}>Mark ready</Button>}

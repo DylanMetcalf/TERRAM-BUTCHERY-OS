@@ -449,7 +449,7 @@ function DraftCard({ d, onEdit, busy, committed, canCancel }: { d: StoredDraft; 
         {/* Items */}
         <ul className="mt-4 divide-y divide-line rounded-xl border border-line">
           {(x.items ?? []).map((it: any) => {
-            const its = itemIssues(it.key).filter((i) => i.code !== 'unrecognised_words');
+            const its = itemIssues(it.key).filter((i) => i.code !== 'unrecognised_words' && !(i.code === 'unknown_product' && !it.product_id));
             const blocking = its.some((i) => i.severity === 'blocking');
             return (
               <li key={it.key} className={cx('px-3.5 py-3', blocking && !committed && 'bg-brand-soft/50')}>

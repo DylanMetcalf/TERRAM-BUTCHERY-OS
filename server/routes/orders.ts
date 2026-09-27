@@ -157,7 +157,8 @@ r.get('/:id', requirePerm('orders.read'), (c) => {
   const role = roleOf(c);
   const transitions = allowedTransitions(order.status).filter((t) => (t === 'cancelled' ? can(role, 'orders.cancel') : true));
   const customer = db().prepare('SELECT id, name, phone, email, address, notes FROM customers WHERE id = ?').get(order.customer_id);
-  return c.json({ order, items, events, messages, interpretations, exceptions, transitions, customer });
+  const replies = db().prepare("SELECT id, body, created_at FROM notifications WHERE order_id = ? AND kind = 'reply_suggestion' ORDER BY created_at DESC LIMIT 3").all(order.id);
+  return c.json({ order, items, events, messages, interpretations, exceptions, transitions, customer, replies });
 });
 
 r.patch('/:id', requirePerm('orders.write'), async (c) => {

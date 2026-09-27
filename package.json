@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Terram Farm Butchery OS — one central order engine for the butchery.",
+  "description": "Terram Farm Butchery OS \u2014 one central order engine for the butchery.",
   "scripts": {
     "dev": "concurrently -k -n server,web -c auto \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "tsx watch server/index.ts",
@@ -12,9 +12,10 @@
     "start": "NODE_ENV=production node dist/server/server/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "vitest run",
-    "seed:demo": "tsx server/scripts/seed-demo.ts",
-    "create-admin": "tsx server/scripts/create-admin.ts",
-    "backup": "tsx server/scripts/backup.ts"
+    "seed:demo": "node dist/server/server/scripts/seed-demo.js",
+    "create-admin": "node dist/server/server/scripts/create-admin.js",
+    "backup": "node dist/server/server/scripts/backup.js",
+    "qa:screens": "bash scripts/qa-server.sh && node scripts/screenshots.mjs"
   },
   "engines": {
     "node": ">=20"

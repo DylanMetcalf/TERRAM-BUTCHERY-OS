@@ -25,7 +25,7 @@ import { FulfilmentLabel, SourceIcon, StageTrack, StatusPill } from '../componen
 import { Badge, Button, Card, cx, ErrorState, Field, Input, KeyValue, LoadingBlock, SectionTitle, Segmented, Sheet, Textarea, useConfirm, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
-import { dateTime, estimateLinePrice, formatMoney, friendlyDate, longDate, timeAgo, todayYmd } from '../lib/format';
+import { dateTime, estimateLinePrice, formatMoney, friendlyDate, longDate, timeAgo, todayYmd, waLink } from '../lib/format';
 import type { ExceptionRow, OrderEvent, OrderItem, OrderSummary } from '../lib/types';
 
 interface Detail {
@@ -37,6 +37,7 @@ interface Detail {
   exceptions: ExceptionRow[];
   transitions: OrderStatus[];
   customer: { id: string; name: string; phone: string | null; email: string | null; address: string | null; notes: string | null };
+  replies: { id: string; body: string; created_at: string }[];
 }
 
 const SECONDARY_LABEL: Partial<Record<OrderStatus, string>> = {
@@ -329,6 +330,22 @@ export default function OrderDetail() {
             </Card>
           </section>
 
+          {data.replies?.length > 0 && !['completed', 'cancelled'].includes(o.status) && (
+            <section>
+              <SectionTitle>Suggested reply</SectionTitle>
+              <Card className="p-4">
+                <p className="rounded-2xl bg-field-soft px-3.5 py-2.5 text-[14.5px] text-field-soft-ink">{data.replies[0].body}</p>
+                <div className="mt-3 flex gap-2">
+                  {waLink(o.contact_phone ?? data.customer.phone, data.replies[0].body) && (
+                    <a className="flex-1" href={waLink(o.contact_phone ?? data.customer.phone, data.replies[0].body)!} target="_blank" rel="noreferrer"><Button full size="sm" icon={<MessageCircle className="size-3.5" />}>Send on WhatsApp</Button></a>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={() => { navigator.clipboard?.writeText(data.replies[0].body).catch(() => undefined); toast({ tone: 'success', title: 'Copied' }); }}>Copy</Button>
+                </div>
+                <p className="mt-2 text-[12px] text-ink-3">Nothing is sent automatically — you decide.</p>
+              </Card>
+            </section>
+          )}
+
           <section>
             <SectionTitle>Customer</SectionTitle>
             <Card className="p-4">
@@ -336,7 +353,7 @@ export default function OrderDetail() {
               {(o.contact_phone || data.customer.phone) && (
                 <div className="mt-3 flex gap-2">
                   <a href={`tel:${o.contact_phone ?? data.customer.phone}`} className="flex-1"><Button full size="sm" icon={<Phone className="size-3.5" />}>Call</Button></a>
-                  <a href={`https://wa.me/${(o.contact_phone ?? data.customer.phone ?? '').replace(/\D/g, '').replace(/^0/, '27')}`} target="_blank" rel="noreferrer" className="flex-1"><Button full size="sm" icon={<MessageCircle className="size-3.5" />}>WhatsApp</Button></a>
+                  <a href={waLink(o.contact_phone ?? data.customer.phone) ?? '#'} target="_blank" rel="noreferrer" className="flex-1"><Button full size="sm" icon={<MessageCircle className="size-3.5" />}>WhatsApp</Button></a>
                 </div>
               )}
               {data.customer.notes && <p className="mt-3 rounded-xl bg-ochre-soft px-3 py-2 text-[13.5px] text-ochre-soft-ink">{data.customer.notes}</p>}

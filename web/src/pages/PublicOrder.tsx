@@ -134,8 +134,11 @@ export default function PublicOrder() {
               <button key={c} onClick={() => setCat(c)} className={cx('h-10 shrink-0 rounded-full border px-4 text-[14px] font-medium', cat_ === c ? 'border-ink bg-ink text-bg' : 'border-line-strong bg-surface text-ink-2')}>{c}</button>
             ))}
           </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {shown.map((p) => {
+          {(cat_ === 'All' ? cats.slice(1) : [cat_]).map((group) => (
+            <section key={group} className="mt-6">
+              {cat_ === 'All' && <h2 className="mb-2.5 font-display text-[20px] font-semibold">{group}</h2>}
+              <div className="grid gap-3 sm:grid-cols-2">
+            {shown.filter((p) => p.category === group).map((p) => {
               const inCart = s.lines.filter((l) => l.product_id === p.id);
               return (
                 <button key={p.id} onClick={() => setAdding({ p })} className={cx('flex items-start gap-3 rounded-2xl border bg-surface p-4 text-left shadow-card transition hover:shadow-float active:scale-[0.99]', inCart.length ? 'border-brand/50' : 'border-line')}>
@@ -153,7 +156,9 @@ export default function PublicOrder() {
                 </button>
               );
             })}
-          </div>
+              </div>
+            </section>
+          ))}
         </div>
       )}
 

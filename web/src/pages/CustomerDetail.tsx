@@ -6,7 +6,7 @@ import { OrderRow } from '../components/OrderRow';
 import { Avatar, Button, Card, EmptyState, ErrorState, LoadingBlock, SectionTitle } from '../components/ui';
 import { api } from '../lib/api';
 import { useCan } from '../lib/auth';
-import { dateTime, shortDate, timeAgo, todayYmd } from '../lib/format';
+import { dateTime, shortDate, timeAgo, todayYmd, waLink } from '../lib/format';
 import type { Customer, OrderSummary } from '../lib/types';
 import { CustomerForm } from './Customers';
 
@@ -22,7 +22,7 @@ export default function CustomerDetail() {
   const open = data.orders.filter((o) => !['completed', 'cancelled'].includes(o.status));
   const past = data.orders.filter((o) => ['completed', 'cancelled'].includes(o.status));
   const today = todayYmd();
-  const wa = c.phone ? `https://wa.me/${c.phone.replace(/\D/g, '').replace(/^0/, '27')}` : null;
+  const wa = waLink(c.phone);
   return (
     <div className="animate-rise">
       <button onClick={() => navigate(-1)} className="mb-4 inline-flex items-center gap-1.5 text-[14px] font-medium text-ink-2 hover:text-ink"><ArrowLeft className="size-4" /> Back</button>

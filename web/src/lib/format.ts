@@ -95,3 +95,19 @@ import type { Qty } from '../../../shared/quantity';
 export function qtyBeforeName(q: Qty): string {
   return q.kind === 'count' ? `${q.count} ×` : _fq(q);
 }
+
+/** wa.me link with an optional prefilled message. A person still presses send. */
+export function waLink(phone: string | null | undefined, text?: string): string | null {
+  if (!phone) return null;
+  let digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('0')) digits = '27' + digits.slice(1);
+  if (digits.length < 9) return null;
+  return `https://wa.me/${digits}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
+}
+
+export function readyMessage(o: { customer_name: string; order_number: number; fulfilment_type: string | null }, business = 'Terram Farm'): string {
+  const first = o.customer_name.split(' ')[0];
+  return o.fulfilment_type === 'delivery'
+    ? `Hi ${first}, your ${business} order #${o.order_number} is packed and will be delivered soon. Thank you!`
+    : `Hi ${first}, your ${business} order #${o.order_number} is ready for collection. See you soon!`;
+}
