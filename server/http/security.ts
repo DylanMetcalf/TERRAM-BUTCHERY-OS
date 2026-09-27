@@ -11,7 +11,7 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'same-origin');
   c.header('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
-  if (!c.req.path.startsWith('/api/')) {
+  if (!c.req.path.startsWith('/api/') && !c.res.headers.get('Content-Security-Policy')) {
     c.header(
       'Content-Security-Policy',
       "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",

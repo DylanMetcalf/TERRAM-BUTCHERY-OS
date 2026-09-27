@@ -17,16 +17,16 @@ export function OrderRow({ o, today, dense, showStatus = true }: { o: OrderSumma
           {o.open_exceptions > 0 && <AlertTriangle className="size-3.5 shrink-0 text-ochre" aria-label="Has open questions" />}
         </div>
         <div className="mt-0.5 truncate text-[13.5px] text-ink-2">{o.items_preview || <span className="italic text-ink-3">No items yet</span>}</div>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 sm:hidden">
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 xl:hidden">
           <FulfilmentLabel type={o.fulfilment_type} date={o.requested_date} time={o.time_window} today={today} />
         </div>
       </div>
-      <div className="hidden w-48 shrink-0 sm:block">
+      <div className="hidden w-48 shrink-0 xl:block">
         <FulfilmentLabel type={o.fulfilment_type} date={o.requested_date} time={o.time_window} today={today} />
       </div>
       <SourceIcon source={o.source} className="hidden shrink-0 text-ink-3 md:block" />
       {showStatus && (
-        <div className="w-auto shrink-0 sm:w-40 sm:text-right">
+        <div className="w-auto shrink-0 xl:w-40 xl:text-right">
           <StatusPill status={o.status} size="sm" />
         </div>
       )}

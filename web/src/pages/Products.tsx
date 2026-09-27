@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Beef, EyeOff, Plus, Search, Sparkles, Trash2, X } from 'lucide-react';
+import { Beef, EyeOff, Plus, Search, Sparkles, Tags, Trash2, X } from 'lucide-react';
+import { PriceImport } from '../components/PriceImport';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useProducts } from '../components/pickers';
@@ -20,6 +21,7 @@ export default function Products() {
   const [show, setShow] = useState<'active' | 'all' | 'inactive'>('active');
   const openId = params.get('open');
   const [creating, setCreating] = useState(false);
+  const [pricing, setPricing] = useState(false);
   const { data: intel } = useQuery({ queryKey: ['intelligence'], queryFn: () => api.get<any>('/api/intelligence'), enabled: can('intelligence.read') });
   const suggestions = intel?.suggestions?.length ?? 0;
   const products = useMemo(() => {
@@ -33,7 +35,14 @@ export default function Products() {
       <PageHeader
         title="Products"
         subtitle="The dictionary everything is matched against. One product, many ways of saying it."
-        actions={can('products.write') && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>Add product</Button>}
+        actions={
+          can('products.write') && (
+            <>
+              <Button icon={<Tags className="size-4" />} onClick={() => setPricing(true)}>Update prices</Button>
+              <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>Add product</Button>
+            </>
+          )
+        }
       />
       {suggestions > 0 && can('intelligence.approve') && (
         <Callout tone="ochre" icon={<Sparkles className="size-5" />} className="mb-5" action={<Link to="/intelligence"><Button size="sm">Review</Button></Link>}>
@@ -80,6 +89,7 @@ export default function Products() {
           ))}
         </div>
       )}
+      <PriceImport open={pricing} onClose={() => setPricing(false)} />
       <ProductEditor open={!!current || creating} product={current} onClose={() => { setCreating(false); setParams({}); }} readOnly={!can('products.write')} />
     </div>
   );

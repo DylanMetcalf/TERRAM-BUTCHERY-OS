@@ -55,6 +55,8 @@ export interface ParsedMessage {
   fulfilment: { type: 'collection' | 'delivery' | null; date: string | null; dateText: string | null; time_window: string | null; address: string | null };
   phone: string | null;
   email: string | null;
+  /** A name written in the message itself ("…\nJohn Smith") — e.g. group-chat posts made on a customer's behalf. */
+  customerName: string | null;
   notes: string[];
   flags: { amendment: boolean; addition: boolean; removal: boolean; cancellation: boolean; reference: boolean; replacement: boolean; question: boolean };
   unparsed: string[];
@@ -79,6 +81,34 @@ const PHONE_RE = /(?:\+|00)?\d[\d\s()-]{7,}\d/;
 const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.-]+/;
 const NOTE_RE = /^(?:note|notes|nb|n\.b\.|ps|p\.s\.|special instructions?|instructions?)\s*[:\-]\s*(.+)$/i;
 const FILLER_AFTER_STRIP = /^(?:for|on|please|pls|thanks|thank you|by|at|in the|the|this|that|it|i|we|will|would|like|to|want|can|you|,|\.|!|-|\s|and|my|order|me|please\.)*$/i;
+
+const NOT_NAMES = new Set([
+  'note', 'notes', 'address', 'delivery', 'deliver', 'collection', 'collect', 'order', 'phone', 'cell', 'tel', 'mobile', 'email',
+  'date', 'time', 'total', 'pickup', 'pick up', 'ps', 'nb', 'instruction', 'instructions', 'special instruction', 're', 'subject',
+  'to', 'fulfilment', 'customer', 'name', 'item', 'items', 'qty', 'quantity', 'price', 'extra', 'also', 'plus', 'and', 'please', 'pls',
+  'hi', 'hello', 'hey', 'morning', 'thanks', 'update', 'change', 'actually', 'correction', 'amendment', 'when', 'where', 'what',
+  'sorry', 'ok', 'okay', 'dear', 'attention', 'attn', 'from', 'for', 'message', 'reply', 'answer', 'yes', 'no', 'reminder',
+]);
+
+/**
+ * Is this line a person's name? Used for "John Smith" on its own line above or
+ * below an order. Rejects products, preparations, dates, collection words and chatter.
+ */
+export function looksLikeName(candidate: string, dict: Dictionary): boolean {
+  const c = candidate.trim().replace(/^[-~–—*•]+\s*/, '').replace(/[,.:;!-]+$/, '').trim();
+  if (!c || c.length > 40) return false;
+  if (/\d/.test(c)) return false;
+  const n = normalise(c);
+  if (!n || NOT_NAMES.has(n) || NOT_NAMES.has(n.split(' ')[0])) return false;
+  if (isChatter(c)) return false;
+  const words = n.split(' ');
+  if (words.length > 4) return false;
+  if (COLLECT_RE.test(c) || DELIVER_RE.test(c) || extractDate(c, '2000-01-01').date) return false;
+  if (dict.products.some((p) => p.aliasStrings.some((a) => a === n || (words.length === 1 && a.split(' ').includes(n))))) return false;
+  if (dict.products.some((p) => p.preps.some((o) => o.keywords.some((k) => k.join(' ') === n || (words.length === 1 && k.includes(n)))))) return false;
+  if (matchProduct(c, dict).product) return false;
+  return true;
+}
 
 let keySeq = 0;
 export const nextKey = () => `i${(++keySeq).toString(36)}`;
@@ -122,6 +152,7 @@ export function parseMessage(text: string, refDate: string, dict: Dictionary): P
     fulfilment: { type: null, date: null, dateText: null, time_window: null, address: null },
     phone: null,
     email: null,
+    customerName: null,
     notes: [],
     flags: { amendment: false, addition: false, removal: false, cancellation: false, reference: false, replacement: false, question: false },
     unparsed: [],
@@ -141,6 +172,23 @@ export function parseMessage(text: string, refDate: string, dict: Dictionary): P
   result.flags.question = /\?\s*$/.test(whole);
 
   const lines = whole.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  // A name on its own line at the bottom (or top) of the order, possibly with a phone number
+  if (lines.length >= 2) {
+    for (const idx of [lines.length - 1, 0]) {
+      let candidate = lines[idx].replace(/^(?:name|customer|for|from|order for)\s*[:\-]\s*/i, '');
+      const ph = PHONE_RE.exec(candidate);
+      if (ph && normalisePhone(ph[0]) && ph[0].replace(/\D/g, '').length >= 9) {
+        result.phone ??= normalisePhone(ph[0]);
+        candidate = candidate.replace(ph[0], ' ');
+      }
+      candidate = candidate.replace(/[\s,;:()\-–]+$/, '').replace(/^[\s,;:()\-–~*•]+/, '').trim();
+      if (looksLikeName(candidate, dict)) {
+        result.customerName = candidate.replace(/\s+/g, ' ');
+        lines.splice(idx, 1);
+        break;
+      }
+    }
+  }
   for (const rawLine of lines) {
     let line = rawLine.replace(/^[-*•·>]+\s*/, '').replace(/^\d+[.)]\s+(?=\D)/, '');
     const email = EMAIL_RE.exec(line);

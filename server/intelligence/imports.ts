@@ -13,7 +13,7 @@ import { createCustomer, requireCustomer } from '../domain/customers.js';
 import { raiseException } from '../domain/exceptions.js';
 import { addEvent, addItem, createOrder, removeItem, requireOrder, transition, updateItem, updateOrder, type ItemInput } from '../domain/orders.js';
 import { getProduct, listProducts } from '../domain/products.js';
-import { analyse } from './analyser.js';
+import { analyse, teamNamesFromDb } from './analyser.js';
 import { draftStatus, refreshItem, validateDraft, type Change, type Draft, type DraftItem, type OrderDraft } from './drafts.js';
 import { interpretAll } from './interpret.js';
 import { recordAliasCorrection, recordUnknownPhrase } from './learning.js';
@@ -66,7 +66,9 @@ export async function analyseImport(input: AnalyseInput, actor: Actor): Promise<
     }
     if (!split.length) throw badRequest('No messages were found in that text.');
     const interpreted = await interpretAll(split, dict, { useAi: input.useAi });
-    const { drafts, messageDraft } = analyse(interpreted, dict, today());
+    // A customer chosen under “From” beats any name found in the text
+    if (input.customer) for (const im of interpreted) im.parsed.customerName = null;
+    const { drafts, messageDraft } = analyse(interpreted, dict, today(), { teamNames: [...teamNamesFromDb(), settings.business.name, 'Terram', 'Terram Farm'] });
     if (input.customer?.id) {
       const c = requireCustomer(input.customer.id);
       for (const d of drafts) d.customer = { ...d.customer, match: 'matched', via: 'chosen', customer_id: c.id, customer_name: c.name, name: c.name, candidates: undefined };

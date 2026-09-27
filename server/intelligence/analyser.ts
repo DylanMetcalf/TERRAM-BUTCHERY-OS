@@ -127,7 +127,17 @@ interface ConvState {
   targets: TargetOrder[] | null;
 }
 
-export function analyse(messages: InterpretedMessage[], dict: Dictionary, today: string): AnalysisResult {
+export interface AnalyseOptions {
+  /** People on the Terram team: when they post in a group chat, they're not the customer. */
+  teamNames?: string[];
+}
+
+export function teamNamesFromDb(): string[] {
+  return (db().prepare('SELECT name FROM users WHERE active = 1').all() as { name: string }[]).map((u) => u.name);
+}
+
+export function analyse(messages: InterpretedMessage[], dict: Dictionary, today: string, opts: AnalyseOptions = {}): AnalysisResult {
+  const team = new Set((opts.teamNames ?? []).map((n) => normalise(n)).filter(Boolean));
   const drafts: Draft[] = [];
   const messageDraft = new Map<number, number>();
   const convs = new Map<string, ConvState>();
@@ -135,11 +145,16 @@ export function analyse(messages: InterpretedMessage[], dict: Dictionary, today:
 
   const convFor = (im: InterpretedMessage): ConvState => {
     const s = im.split;
-    const phone = s.senderPhone ?? im.parsed.phone;
-    const key = s.senderPhone ? `p:${s.senderPhone}` : s.sender ? `n:${normalise(s.sender)}` : `u:${s.index}`;
+    // Whose order is it? A name written in the message wins (group-chat posts on a customer's
+    // behalf); otherwise the sender — unless the sender is on the Terram team.
+    const senderIsTeam = !!s.sender && team.has(normalise(s.sender));
+    const named = im.parsed.customerName;
+    const who = named ?? (senderIsTeam ? null : s.sender);
+    const phone = im.parsed.phone ?? (named || senderIsTeam ? null : s.senderPhone);
+    const key = named ? `n:${normalise(named)}` : phone ? `p:${phone}` : who ? `n:${normalise(who)}` : `u:${s.index}`;
     let c = convs.get(key);
     if (!c) {
-      c = { key, customer: resolveCustomer(s.sender, phone, im.parsed.email), current: null, lastItemKeys: [], targets: null };
+      c = { key, customer: resolveCustomer(who, phone, im.parsed.email), current: null, lastItemKeys: [], targets: null };
       convs.set(key, c);
     } else if (!c.customer.phone && phone) {
       c.customer = resolveCustomer(s.sender, phone, im.parsed.email);

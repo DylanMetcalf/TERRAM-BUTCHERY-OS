@@ -6,6 +6,7 @@ import path from 'node:path';
 import { AppError } from './lib/errors.js';
 import { recordSystemEvent } from './services/health.js';
 import { subscribe } from './services/realtime.js';
+import { getSettings } from './services/settings.js';
 import { loadUser, requireAuth, type Env } from './http/context.js';
 import { csrfGuard, idempotency, securityHeaders } from './http/security.js';
 import auth from './routes/auth.js';
@@ -78,6 +79,68 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
 
   api.all('*', (c) => c.json({ error: 'Not found', code: 'not_found' }, 404));
   app.route('/api', api);
+
+  // Brand kit assets (logo, app icons) and a manifest that follows the brand
+  const fromDataUrl = (d: string) => {
+    const m = /^data:([^;]+);base64,(.*)$/.exec(d)!;
+    return { type: m[1], body: Buffer.from(m[2], 'base64') };
+  };
+  const brandAsset = (key: 'logo' | 'icon192' | 'icon512') => (c: any) => {
+    const b = getSettings().brand;
+    const data = b[key];
+    if (!data) return c.notFound();
+    const { type, body } = fromDataUrl(data);
+    c.header('Content-Type', type);
+    c.header('Cache-Control', 'public, max-age=300');
+    // An uploaded SVG must never be able to run script on our origin
+    c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
+    c.header('X-Content-Type-Options', 'nosniff');
+    return c.body(body);
+  };
+  app.get('/brand/logo', brandAsset('logo'));
+  app.get('/brand/icon-192.png', brandAsset('icon192'));
+  app.get('/brand/icon-512.png', brandAsset('icon512'));
+  app.get('/manifest.webmanifest', (c) => {
+    const s = getSettings();
+    const custom = !!s.brand.icon512;
+    const v = s.brand.version;
+    c.header('Cache-Control', 'no-cache');
+    return c.json(
+      {
+        name: `${s.business.name} Butchery`,
+        short_name: s.business.name.split(' ')[0] || 'Terram',
+        description: 'Orders, cutting, packing and fulfilment.',
+        start_url: '/',
+        scope: '/',
+        display: 'standalone',
+        background_color: '#f6f3ee',
+        theme_color: s.brand.primary,
+        icons: custom
+          ? [
+              { src: `/brand/icon-192.png?v=${v}`, sizes: '192x192', type: 'image/png' },
+              { src: `/brand/icon-512.png?v=${v}`, sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+            ]
+          : [
+              { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+              { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+              { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+            ],
+        shortcuts: [
+          { name: 'Paste orders', url: '/import' },
+          { name: 'Cutting', url: '/cutting' },
+          { name: 'Packing', url: '/packing' },
+        ],
+      },
+      200,
+      { 'Content-Type': 'application/manifest+json' },
+    );
+  });
+  // Home-screen icon for iPhones follows the brand too
+  app.get('/apple-touch-icon.png', (c) => {
+    const b = getSettings().brand;
+    if (b.icon192) return brandAsset('icon192')(c);
+    return c.redirect('/icon-192.png');
+  });
 
   const staticDir = opts.staticDir;
   if (staticDir && fs.existsSync(staticDir)) {

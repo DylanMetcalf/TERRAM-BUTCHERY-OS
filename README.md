@@ -42,6 +42,17 @@ Copy `.env.example` to `.env`. Everything is optional except where noted.
 
 Business rules (collection/delivery days, lead time, whether online orders need review, the assistant model and effort, etc.) are in **Settings** in the app. Every change is recorded in the audit log.
 
+## Brand kit and prices
+
+- **Settings → Branding:** upload a logo (PNG/JPG/WebP/SVG) and choose the brand colour. The app derives readable light and dark shades from it, and generates the Home Screen icon and the web-app manifest. Uploaded SVGs are served with a script-blocking security policy.
+- **Products → Update prices:** paste a price list in any common format. Each line is matched with the same dictionary used for orders, shown as old → new, and applied only when confirmed (audited).
+
+## Message formats
+
+- `Name:` blocks, WhatsApp exports and pasted chats (names at the top).
+- **Group-chat posts with the customer's name at the bottom** (optionally with a phone number). The name in the message wins over whoever posted it, and posts by team members are never treated as the customer.
+- Direct messages without a name: choose the customer under **From** on the Paste orders screen.
+
 ## Signing in
 
 - **Family code:** an admin sets one shared code (Settings → Team). On a new device you type the code and tap your name, and that device stays signed in for about six months. Only people an admin has allowed appear in the list. Guessing is rate-limited, and **Sign out other devices** revokes everything if a phone is lost.
@@ -142,7 +153,7 @@ scripts/       QA helpers: screenshots, overflow check, browser end-to-end run
 
 ```bash
 npm run typecheck
-npm test               # 82 tests, including the 50-order acceptance test
+npm test               # 90 tests, including the 50-order acceptance test
 ```
 
 The **50-order acceptance test** (`tests/acceptance-50.test.ts`) pastes a realistic chat with 50 orders, typos, varied wording, WhatsApp-export lines, amendments, additions, a vague "make those 2", a contradiction, unknown products, a double paste, a customer question, chatter and one of Terram's own replies. It then checks every order against ground truth, resolves the exceptions as staff would, and drives all orders through cutting, packing and fulfilment to completion.

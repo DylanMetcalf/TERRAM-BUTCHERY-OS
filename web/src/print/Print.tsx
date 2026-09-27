@@ -3,6 +3,7 @@ import { useEffect, type ReactNode } from 'react';
 import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { api, qs } from '../lib/api';
 import { useMe } from '../lib/auth';
+import { useBrand } from '../lib/brand';
 import { dateTime, friendlyDate, longDate, qtyBeforeName, todayYmd } from '../lib/format';
 import { STATUS_LABEL, SOURCE_LABEL } from '../../../shared/workflow';
 import type { OrderItem, OrderSummary } from '../lib/types';
@@ -25,6 +26,7 @@ export default function PrintView() {
 
 function Page({ title, subtitle, children, ready }: { title: string; subtitle?: string; children: ReactNode; ready: boolean }) {
   const me = useMe();
+  const { data: brand } = useBrand();
   useEffect(() => {
     document.title = `${title} — ${me.business.name}`;
     if (ready) {
@@ -44,10 +46,13 @@ function Page({ title, subtitle, children, ready }: { title: string; subtitle?: 
       </div>
       <div className="mx-auto max-w-[780px] px-6 py-6 print:max-w-none print:p-0">
         <header className="mb-5 flex items-end justify-between border-b-2 border-black pb-2">
-          <div>
+          <div className="flex items-end gap-3">
+            {brand?.hasLogo && <img src={`/brand/logo?v=${brand.version}`} alt="" className="h-12 w-auto max-w-[120px] object-contain" />}
+            <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.2em]">{me.business.name} · Butchery</div>
             <h1 className="font-display text-[26px] font-bold leading-tight">{title}</h1>
             {subtitle && <div className="text-[13px]">{subtitle}</div>}
+            </div>
           </div>
           <div className="text-right text-[11px]">Printed {dateTime(new Date().toISOString())}<br />by {me.user?.name}</div>
         </header>

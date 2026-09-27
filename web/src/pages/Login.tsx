@@ -4,13 +4,17 @@ import { useState } from 'react';
 import { Logo } from '../components/order-bits';
 import { Avatar, Button, Field, Input } from '../components/ui';
 import { api, ApiError } from '../lib/api';
+import { useBrand } from '../lib/brand';
 
 export function LoginPage({ setup, family }: { setup: boolean; family: boolean }) {
+  const { data: brand } = useBrand();
+  const parts = (brand?.tagline || 'Grown with Purpose. Shared with Passion.').split(/(?<=\.)\s+/);
+  const tagline = { first: parts[0], second: parts.slice(1).join(' ') };
   const [mode, setMode] = useState<'family' | 'email'>(family && !setup ? 'family' : 'email');
   return (
     <div className="grid min-h-dvh lg:grid-cols-[1.1fr_1fr]">
-      <div className="relative hidden overflow-hidden bg-[#2a1411] lg:block">
-        <div className="absolute inset-0 bg-[radial-gradient(120%_80%_at_20%_10%,#7b2d26_0%,#3a1814_55%,#1f0f0c_100%)]" />
+      <div className="relative hidden overflow-hidden bg-[#1f1a17] lg:block">
+        <div className="absolute inset-0" style={{ background: 'radial-gradient(120% 80% at 20% 10%, var(--brand) 0%, color-mix(in srgb, var(--brand) 45%, #0d0b0a) 55%, color-mix(in srgb, var(--brand) 18%, #0d0b0a) 100%)' }} />
         <svg className="absolute inset-x-0 bottom-0 w-full opacity-[0.16]" viewBox="0 0 800 400" preserveAspectRatio="none" aria-hidden>
           {Array.from({ length: 14 }).map((_, i) => (
             <path key={i} d={`M-20 ${150 + i * 20} C 200 ${110 + i * 22}, 600 ${110 + i * 22}, 820 ${150 + i * 20}`} stroke="#f6e7d8" strokeWidth="1.4" fill="none" />
@@ -20,13 +24,17 @@ export function LoginPage({ setup, family }: { setup: boolean; family: boolean }
           <Logo tone="light" />
           <div>
             <p className="font-display text-5xl font-medium leading-[1.05] tracking-tight">
-              Grown with Purpose.
-              <br />
-              <span className="text-[#f0c9b8]">Shared with Passion.</span>
+              {tagline.first}
+              {tagline.second && (
+                <>
+                  <br />
+                  <span className="text-white/75">{tagline.second}</span>
+                </>
+              )}
             </p>
             <p className="mt-5 max-w-md text-[16px] leading-relaxed text-white/70">Every order enters once, is understood correctly, gets cut, packed and handed over — in one calm place.</p>
           </div>
-          <p className="text-[13px] text-white/50">Terram Farm · Butchery OS</p>
+          <p className="text-[13px] text-white/50">{brand?.name ?? 'Terram Farm'} · Butchery OS</p>
         </div>
       </div>
       <div className="flex items-center justify-center px-5 py-12">

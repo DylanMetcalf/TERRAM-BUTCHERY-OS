@@ -30,6 +30,11 @@ r.get('/info', (c) => {
   });
 });
 
+r.get('/brand', (c) => {
+  const s = getSettings();
+  return c.json({ name: s.business.name, tagline: s.business.tagline, primary: s.brand.primary, showName: s.brand.showName, hasLogo: !!s.brand.logo, version: s.brand.version });
+});
+
 r.get('/catalogue', (c) => {
   const show = getSettings().customerForm.showPrices;
   const products = listProducts()

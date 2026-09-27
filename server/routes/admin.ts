@@ -63,6 +63,16 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
   }).partial(),
   printing: z.object({ showPrices: z.boolean(), paper: z.enum(['A4', 'Letter']) }).partial(),
   customerForm: z.object({ enabled: z.boolean(), intro: z.string().max(600), confirmationMessage: z.string().max(600), showPrices: z.boolean() }).partial(),
+  brand: z
+    .object({
+      logo: z.string().max(1_000_000).regex(/^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/, 'Upload a PNG, JPG, WebP or SVG image.').nullable(),
+      icon192: z.string().max(200_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/).nullable(),
+      icon512: z.string().max(700_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/).nullable(),
+      primary: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Choose a colour.'),
+      showName: z.boolean(),
+    })
+    .partial()
+    .transform((b) => ({ ...b, version: Date.now() })),
 };
 
 r.get('/settings', requirePerm('settings.read'), (c) =>

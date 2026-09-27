@@ -36,8 +36,10 @@ The code is on the branch `claude/terram-farm-butchery-os-n3ng2e`. Either merge 
 
 1. Open the Render address in Safari or Chrome and sign in with the email and password from step 3.
 2. **Settings → Business**: check the name, phone, address and time zone (Africa/Johannesburg).
+   **Settings → Branding**: upload your logo (a PNG with a transparent background is best, e.g. the one on your order form) and pick your brand colour; the swatches under "From your logo" are taken from the logo. Click **Save brand**. The whole app, printouts, the customer order form and the Home Screen icon change on every device.
 3. **Settings → Orders & fulfilment**: tick your collection days and delivery days and set collection hours.
-4. **Products**: go through the list and fix names, prices and options so they match what Terram actually sells. Add the everyday words customers use (e.g. "wors", "chops"). Untick anything you don't sell.
+4. **Products → Update prices**: paste your price list (from your order form, a spreadsheet or a PDF), one product per line in any format, e.g. `Beef Mince R149.99/kg`. You'll see old → new for every product. Tick and confirm. Lines that don't match a product are listed so you can add them.
+   Then go through **Products** to fix names and options, add the everyday words customers use (e.g. "wors", "chops"), and untick anything you don't sell.
 5. **Settings → Team**:
    - **Set a family code**, e.g. a short phrase like *red barn mince*. Write it down; it isn't shown again.
    - **Add person** for Mom, Dad and anyone else. Give them a name and role (Manager for your parents, Staff for helpers) and leave "Can sign in with the family code" on. No email is needed.
@@ -55,7 +57,9 @@ Each device stays signed in for about six months. If a phone is lost: **Settings
 
 ## 6. Everyday use (show the family)
 
-- **An order comes in on WhatsApp:** press and hold the message → **Copy** → Terram → **+** → **Paste orders** → **Read messages** → check → **Confirm**. If the message has no name in it, choose the customer under **From**.
+- **An order comes in on WhatsApp:** press and hold the message → **Copy** → Terram → **+** → **Paste orders** → **Read messages** → check → **Confirm**.
+  - *A customer messages you directly* ("please can I have…", no name): choose the customer under **From** before tapping Read messages.
+  - *Your group chat* (the order with the customer's name at the bottom): copy one or many posts and paste them. The app takes the name from the bottom of each post, not from whoever posted it. A phone number next to the name is saved too.
 - **Phone call / walk-in:** **+** → **Type an order**.
 - **Needs attention** (red badge): questions the system won't guess, such as unknown products, "which steak?" or possible duplicates. One tap each.
 - **Cutting**: what to cut, added up by product, with "who needs what" underneath. Tap **Done** per line. **Print sheet** for the block.

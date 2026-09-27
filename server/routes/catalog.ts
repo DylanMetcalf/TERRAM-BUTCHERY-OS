@@ -5,6 +5,7 @@ import { formatQty } from '../../shared/quantity.js';
 import { createCustomer, requireCustomer, updateCustomer } from '../domain/customers.js';
 import { addAlias, createProduct, listProducts, requireProduct, updateProduct } from '../domain/products.js';
 import { getOrderSummary } from '../domain/orders.js';
+import { applyPrices, previewPrices } from '../domain/prices.js';
 import { actorOf, requirePerm, type Env } from '../http/context.js';
 import { body, CustomerSchema } from '../http/schemas.js';
 
@@ -108,6 +109,16 @@ products.get('/', requirePerm('products.read'), (c) => {
     (db().prepare("SELECT product_id, COUNT(*) n FROM order_items i JOIN orders o ON o.id = i.order_id WHERE i.status = 'active' AND o.created_at >= ? GROUP BY product_id").all(new Date(Date.now() - 90 * 86400_000).toISOString()) as any[]).map((r) => [r.product_id, r.n]),
   );
   return c.json({ products: listProducts().map((p) => ({ ...p, orders_90d: usage.get(p.id) ?? 0 })) });
+});
+
+products.post('/prices/preview', requirePerm('products.write'), async (c) => {
+  const { text } = await body(c, z.object({ text: z.string().min(1, 'Paste your price list').max(100_000) }));
+  return c.json({ lines: previewPrices(text) });
+});
+
+products.post('/prices/apply', requirePerm('products.write'), async (c) => {
+  const { changes } = await body(c, z.object({ changes: z.array(z.object({ product_id: z.string().max(64), price_cents: z.number().int().positive().max(10_000_000), price_unit: z.enum(['kg', 'each']) })).max(500) }));
+  return c.json({ updated: applyPrices(changes, actorOf(c)) });
 });
 
 products.get('/:id', requirePerm('products.read'), (c) => c.json({ product: requireProduct(c.req.param('id')) }));

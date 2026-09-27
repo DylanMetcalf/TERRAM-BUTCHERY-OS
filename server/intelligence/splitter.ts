@@ -1,6 +1,7 @@
 import { normalise, normalisePhone, titleCase } from '../../shared/text.js';
 import { isValidYmd } from '../lib/time.js';
-import { isChatter } from './parser.js';
+import { looksLikeName } from './parser.js';
+export { looksLikeName };
 import { extractQuantity } from './quantity.js';
 import type { Dictionary } from './matcher.js';
 
@@ -22,13 +23,7 @@ export interface SplitMessage {
 const EXPORT_RE = /^\[?(\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]\.?\s?m\.?)?)\]?\s*(?:[-–]\s*)?(?:([^:]{1,60}?):\s?)?(.*)$/i;
 const HEADER_RE = /^(?:from\s*:\s*)?([\p{L}][\p{L}'’.\-]*(?:\s+[\p{L}][\p{L}'’.\-]*){0,3}|\+?\d[\d\s()-]{7,}\d)\s*(?:\((\+?[\d\s()-]{8,})\))?\s*(?::|\s[-–]\s)\s*(.*)$/u;
 const SEPARATOR_RE = /^(?:[-=_*~#]{3,}|order\s*#?\s*\d+\s*:?|new order\s*:?|next order\s*:?)$/i;
-const NOT_NAMES = new Set([
-  'note', 'notes', 'address', 'delivery', 'deliver', 'collection', 'collect', 'order', 'phone', 'cell', 'tel', 'mobile', 'email',
-  'date', 'time', 'total', 'pickup', 'pick up', 'ps', 'nb', 'instruction', 'instructions', 'special instruction', 're', 'subject',
-  'to', 'fulfilment', 'customer', 'name', 'item', 'items', 'qty', 'quantity', 'price', 'extra', 'also', 'plus', 'and', 'please', 'pls',
-  'hi', 'hello', 'hey', 'morning', 'thanks', 'update', 'change', 'actually', 'correction', 'amendment', 'when', 'where', 'what',
-  'sorry', 'ok', 'okay', 'dear', 'attention', 'attn', 'from', 'for', 'message', 'reply', 'answer', 'yes', 'no', 'reminder',
-]);
+
 const SYSTEM_LINE_RE = /(?:messages and calls are end-to-end encrypted|created group|added you|changed the subject|<media omitted>|this message was deleted|missed voice call|joined using this group)/i;
 
 function exportDate(d: string, fallback: string): string {
@@ -50,21 +45,6 @@ function exportTime(t: string): string {
   if (m[4]?.toLowerCase() === 'p' && h < 12) h += 12;
   if (m[4]?.toLowerCase() === 'a' && h === 12) h = 0;
   return `${String(h).padStart(2, '0')}:${m[2]}:${m[3] ?? '00'}`;
-}
-
-export function looksLikeName(candidate: string, dict: Dictionary): boolean {
-  const c = candidate.trim();
-  if (!c || c.length > 40) return false;
-  if (/\d/.test(c)) return false;
-  const n = normalise(c);
-  if (!n || NOT_NAMES.has(n) || NOT_NAMES.has(n.split(' ')[0])) return false;
-  if (isChatter(c)) return false;
-  const words = n.split(' ');
-  if (words.length > 4) return false;
-  // Not a product name or alias
-  if (dict.products.some((p) => p.aliasStrings.some((a) => a === n || (words.length === 1 && a.split(' ').includes(n))))) return false;
-  if (dict.products.some((p) => p.preps.some((o) => o.keywords.some((k) => k.join(' ') === n)))) return false;
-  return true;
 }
 
 export function splitMessages(input: string, refDate: string, dict: Dictionary, businessNames: string[]): SplitMessage[] {

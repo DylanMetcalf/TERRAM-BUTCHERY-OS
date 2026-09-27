@@ -24,6 +24,8 @@ export interface BusinessSettings {
   };
   printing: { showPrices: boolean; paper: 'A4' | 'Letter' };
   customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean };
+  /** Brand kit: logo (data URL), generated square app icons, and the main brand colour. */
+  brand: { logo: string | null; icon192: string | null; icon512: string | null; primary: string; showName: boolean; version: number };
 }
 
 export const DEFAULT_SETTINGS: BusinessSettings = {
@@ -58,12 +60,13 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     confirmationMessage: 'Thank you — your order has been received. We will be in touch to confirm it shortly.',
     showPrices: true,
   },
+  brand: { logo: null, icon192: null, icon512: null, primary: '#7b2d26', showName: true, version: 0 },
 };
 
 let cache: BusinessSettings | null = null;
 
 function deepMerge<T>(base: T, over: any): T {
-  if (Array.isArray(base) || typeof base !== 'object' || base === null) return (over ?? base) as T;
+  if (Array.isArray(base) || typeof base !== 'object' || base === null) return (over === undefined ? base : over) as T;
   const out: any = { ...base };
   for (const k of Object.keys(base as any)) {
     if (over && k in over) out[k] = deepMerge((base as any)[k], over[k]);

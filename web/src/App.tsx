@@ -5,6 +5,7 @@ import { Shell } from './components/Shell';
 import { Spinner } from './components/ui';
 import { MeProvider, useMeQuery } from './lib/auth';
 import { startRealtime } from './lib/realtime';
+import { BrandStyles } from './lib/brand';
 import { LoginPage } from './pages/Login';
 
 /** After a new version is deployed, old code chunks disappear. Reload once to pick up the new build. */
@@ -55,6 +56,15 @@ function FullSpinner() {
 }
 
 export function App() {
+  return (
+    <>
+      <BrandStyles />
+      <Routed />
+    </>
+  );
+}
+
+function Routed() {
   const loc = useLocation();
   if (loc.pathname === '/order' || loc.pathname.startsWith('/order/')) {
     return (

@@ -103,7 +103,7 @@ export default function Orders() {
       ) : (
         <>
           <Card className={`overflow-hidden transition-opacity ${isPlaceholderData ? 'opacity-60' : ''}`}>
-            <div className="hidden items-center gap-4 border-b border-line bg-surface-2 px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.06em] text-ink-3 sm:flex">
+            <div className="hidden items-center gap-4 border-b border-line bg-surface-2 px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.06em] text-ink-3 xl:flex">
               <span className="flex-1">Customer & items</span>
               <span className="w-48">When</span>
               <span className="hidden w-4 md:block" />

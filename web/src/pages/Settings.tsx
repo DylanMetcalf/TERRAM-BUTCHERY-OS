@@ -7,6 +7,7 @@ import { api, ApiError } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
 import { dateTime, timeAgo } from '../lib/format';
 import { ROLES, ROLE_DESCRIPTION, ROLE_LABEL, type Role } from '../../../shared/permissions';
+import { BrandKit } from '../components/BrandKit';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -15,6 +16,7 @@ export default function Settings() {
   const [params, setParams] = useSearchParams();
   const tabs = [
     { value: 'business', label: 'Business' },
+    { value: 'brand', label: 'Branding' },
     { value: 'orders', label: 'Orders & fulfilment' },
     { value: 'form', label: 'Customer form' },
     { value: 'assistant', label: 'Assistant' },
@@ -41,6 +43,7 @@ export default function Settings() {
           {error ? <ErrorState error={error} retry={refetch} /> : isLoading || !data ? <LoadingBlock /> : (
             <>
               {tab === 'business' && <Business s={data.settings} />}
+              {tab === 'brand' && <BrandKit initial={{ logo: data.settings.brand.logo, icon192: data.settings.brand.icon192, icon512: data.settings.brand.icon512, primary: data.settings.brand.primary, showName: data.settings.brand.showName }} />}
               {tab === 'orders' && <OrdersSettings s={data.settings} />}
               {tab === 'form' && <FormSettings s={data.settings} />}
               {tab === 'assistant' && <Assistant s={data.settings} env={data.environment} />}

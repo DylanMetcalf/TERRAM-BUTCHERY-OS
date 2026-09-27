@@ -2,6 +2,7 @@ import { Clock, Globe, Mail, MessageCircle, Phone, Store, Truck, Upload, Package
 import { STATUS_LABEL, SOURCE_LABEL, stageIndex, type OrderStatus, type OrderSource } from '../../../shared/workflow';
 import { Badge, cx, type Tone } from './ui';
 import { friendlyDate } from '../lib/format';
+import { useBrand } from '../lib/brand';
 
 export const STATUS_TONE: Record<OrderStatus, Tone> = {
   review: 'ochre',
@@ -70,17 +71,27 @@ export function FulfilmentLabel({ type, date, time, today, className }: { type: 
 }
 
 export function Logo({ className, withWord = true, tone = 'default' }: { className?: string; withWord?: boolean; tone?: 'default' | 'light' }) {
+  const { data: brand } = useBrand();
+  const name = brand?.name ?? 'Terram';
+  const word = name.replace(/\s*farm$/i, '') || name;
+  const showWord = withWord && (brand?.hasLogo ? brand.showName : true);
   return (
     <span className={cx('inline-flex items-center gap-2.5', className)}>
-      <svg viewBox="0 0 40 40" className="size-9 shrink-0" aria-hidden>
-        <rect width="40" height="40" rx="11" fill="var(--brand)" />
-        <circle cx="27.5" cy="13" r="4" fill="var(--brand-ink)" opacity="0.92" />
-        <path d="M6 21.5h28" stroke="var(--brand-ink)" strokeWidth="2" strokeLinecap="round" />
-        <path d="M17 21.5 8 33M19.3 21.5 16 33M20.7 21.5 24 33M23 21.5 32 33" stroke="var(--brand-ink)" strokeWidth="2" strokeLinecap="round" fill="none" opacity="0.92" />
-      </svg>
-      {withWord && (
+      {brand?.hasLogo ? (
+        <span className={cx('inline-flex shrink-0', tone === 'light' && 'rounded-xl bg-white/95 px-2.5 py-1.5 shadow-card')}>
+          <img src={`/brand/logo?v=${brand.version}`} alt={`${name} logo`} className={cx('h-9 w-auto max-w-[140px] object-contain', !showWord && withWord && 'h-10 max-w-[180px]')} />
+        </span>
+      ) : (
+        <svg viewBox="0 0 40 40" className="size-9 shrink-0" aria-hidden>
+          <rect width="40" height="40" rx="11" fill="var(--brand)" />
+          <circle cx="27.5" cy="13" r="4" fill="var(--brand-ink)" opacity="0.92" />
+          <path d="M6 21.5h28" stroke="var(--brand-ink)" strokeWidth="2" strokeLinecap="round" />
+          <path d="M17 21.5 8 33M19.3 21.5 16 33M20.7 21.5 24 33M23 21.5 32 33" stroke="var(--brand-ink)" strokeWidth="2" strokeLinecap="round" fill="none" opacity="0.92" />
+        </svg>
+      )}
+      {showWord && (
         <span className="leading-none">
-          <span className={cx('block font-display text-[19px] font-semibold tracking-tight', tone === 'light' ? 'text-white' : 'text-ink')}>Terram</span>
+          <span className={cx('block font-display text-[19px] font-semibold tracking-tight', tone === 'light' ? 'text-white' : 'text-ink')}>{word}</span>
           <span className={cx('mt-0.5 block text-[10.5px] font-medium uppercase tracking-[0.16em]', tone === 'light' ? 'text-white/70' : 'text-ink-3')}>Butchery</span>
         </span>
       )}
