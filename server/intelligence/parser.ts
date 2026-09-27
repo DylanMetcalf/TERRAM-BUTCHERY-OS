@@ -93,12 +93,16 @@ function splitSentences(line: string): string[] {
 const QTY_START = /^(?:\d|a\s|an\s|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|half|a\s+dozen|dozen|couple)/i;
 
 /** Split "2kg mince, 4 rumps and 2 ribeyes" only where the next chunk starts with a quantity. */
-function splitItems(sentence: string): string[] {
-  const parts = sentence.split(/\s*(?:,|\band\b|&|\+|\bplus\b|\/|\bwith\b)\s*/i);
+function splitItems(sentence: string, dict: Dictionary): string[] {
+  // A comma between digits is a decimal ("1,5kg"), never a separator
+  const parts = sentence.split(/\s*(?:(?<!\d),|,(?!\d)|\band\b|&|\+|\bplus\b|\/|\bwith\b)\s*/i);
   const out: string[] = [];
+  const namesProduct = (t: string) => !!matchProduct(extractQuantity(t).rest, dict).product;
   for (const p of parts) {
     if (!p) continue;
-    if (out.length && !QTY_START.test(p.trim())) out[out.length - 1] += ', ' + p;
+    // Also split "Sirloin x4, Ribeye x2" — both sides name a product and carry a quantity
+    const separateItem = QTY_START.test(p.trim()) || (out.length > 0 && extractQuantity(p).qty && namesProduct(p) && namesProduct(out[out.length - 1]));
+    if (out.length && !separateItem) out[out.length - 1] += ', ' + p;
     else out.push(p);
   }
   return out.map((s) => s.trim()).filter(Boolean);
@@ -262,7 +266,7 @@ function handleSentence(sentence: string, refDate: string, dict: Dictionary, res
     .trim();
   if (!s) return;
 
-  for (const chunk of splitItems(s)) {
+  for (const chunk of splitItems(s, dict)) {
     const q = extractQuantity(chunk);
     const phrase = q.rest
       .replace(/^(?:of|x)\s+/i, '')

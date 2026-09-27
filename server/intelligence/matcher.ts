@@ -126,6 +126,24 @@ export function matchProduct(phrase: string, dict: Dictionary): MatchResult {
     }
     chosen = best.p;
     for (let i = best.start; i < best.start + best.len; i++) used[i] = true;
+    // Leftover words that are a typo of a longer name for the same product ("rump steeks")
+    for (const a of chosen.aliases) {
+      if (a.length <= best.len) continue;
+      const extra: number[] = [];
+      const ok = a.every((w) => {
+        const exact = tokens.findIndex((t, i) => used[i] && t === w);
+        if (exact >= 0) return true;
+        const idx = tokens.findIndex((t, i) => !used[i] && !extra.includes(i) && fuzzyWordEqual(t, w));
+        if (idx < 0) return false;
+        extra.push(idx);
+        return true;
+      });
+      if (ok && extra.length) {
+        for (const i of extra) used[i] = true;
+        if (extra.some((i) => !a.includes(tokens[i]))) status = 'fuzzy';
+        break;
+      }
+    }
   } else {
     // 2. Fuzzy: every word of an alias appears (allowing small typos)
     type Fz = { p: DictProduct; covered: number[]; score: number };
@@ -173,6 +191,13 @@ export function matchProduct(phrase: string, dict: Dictionary): MatchResult {
       preparation[o.group] = o.name;
       prepMatched.push(k.join(' '));
     }
+  }
+
+  // A preparation word can be part of the alias itself ("back bacon", "whole chicken")
+  for (const { o, k } of kwList) {
+    if (preparation[o.group]) continue;
+    const at = findSeq(tokens, k, none);
+    if (at >= 0) preparation[o.group] = o.name;
   }
 
   // 4. Leftovers — species conflicts and other products named in the same phrase

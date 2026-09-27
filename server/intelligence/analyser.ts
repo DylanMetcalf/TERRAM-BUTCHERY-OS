@@ -181,7 +181,10 @@ export function analyse(messages: InterpretedMessage[], dict: Dictionary, today:
 
     // Outbound (Terram's own replies) are context only
     if (s.direction === 'out') {
-      const c = lastInbound;
+      // Replies go with the customer they name ("Sure David"), otherwise the last person who wrote
+      const words = new Set(normalise(s.text).split(' '));
+      const named = [...convs.values()].find((cv) => cv.customer.name && words.has(normalise(cv.customer.name).split(' ')[0]));
+      const c = named ?? lastInbound;
       if (c?.current) c.current.messages.push(dmsg(im));
       continue;
     }
