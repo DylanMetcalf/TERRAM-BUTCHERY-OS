@@ -14,10 +14,15 @@ export interface SessionUser {
 
 const sha = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 
-export function createSession(userId: string, userAgent: string | null): { token: string; expires: Date } {
+/** Family devices stay signed in for months — they live in the butchery and in pockets. */
+export const FAMILY_SESSION_DAYS = 180;
+
+export function createSession(userId: string, userAgent: string | null, opts: { days?: number; via?: 'password' | 'family' } = {}): { token: string; expires: Date } {
   const token = crypto.randomBytes(32).toString('base64url');
-  const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
-  db().prepare('INSERT INTO sessions (id, user_id, created_at, expires_at, user_agent) VALUES (?,?,?,?,?)').run(sha(token), userId, now(), expires.toISOString(), userAgent?.slice(0, 300) ?? null);
+  const expires = new Date(Date.now() + (opts.days ?? SESSION_DAYS) * 86400_000);
+  db()
+    .prepare('INSERT INTO sessions (id, user_id, created_at, expires_at, user_agent, via) VALUES (?,?,?,?,?,?)')
+    .run(sha(token), userId, now(), expires.toISOString(), userAgent?.slice(0, 300) ?? null, opts.via ?? 'password');
   return { token, expires };
 }
 
@@ -47,4 +52,16 @@ export function destroyUserSessions(userId: string) {
 
 export function purgeExpiredSessions() {
   db().prepare('DELETE FROM sessions WHERE expires_at < ?').run(now());
+}
+
+/** Signs out every device except the one making the request. */
+export function destroyAllSessionsExcept(token: string | undefined) {
+  if (token) db().prepare('DELETE FROM sessions WHERE id != ?').run(sha(token));
+  else db().prepare('DELETE FROM sessions').run();
+}
+
+export function listSessions() {
+  return db()
+    .prepare('SELECT s.created_at, s.expires_at, s.user_agent, s.via, u.name FROM sessions s JOIN users u ON u.id = s.user_id ORDER BY s.created_at DESC LIMIT 100')
+    .all();
 }

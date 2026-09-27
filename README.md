@@ -8,6 +8,8 @@ One system for the butchery: every order enters once, is understood correctly, i
 > **AI is the interpreter. The system is the source of truth.**
 > Messages are read by a deterministic rules engine first. Claude is only asked about messages the rules can't fully understand. Whatever it proposes is re-checked against the product dictionary, quantity rules and the order state machine before anything is saved. When something is unclear the system doesn't guess: it asks a person in **Needs attention**.
 
+**Going live?** Follow [LAUNCH.md](LAUNCH.md): deploy to Render, set a family code, and put it on every phone and computer.
+
 ---
 
 ## Quick start (local)
@@ -40,7 +42,14 @@ Copy `.env.example` to `.env`. Everything is optional except where noted.
 
 Business rules (collection/delivery days, lead time, whether online orders need review, the assistant model and effort, etc.) are in **Settings** in the app. Every change is recorded in the audit log.
 
+## Signing in
+
+- **Family code:** an admin sets one shared code (Settings → Team). On a new device you type the code and tap your name, and that device stays signed in for about six months. Only people an admin has allowed appear in the list. Guessing is rate-limited, and **Sign out other devices** revokes everything if a phone is lost.
+- **Email and password:** for admins, or anyone without the family code.
+
 ## Deploying
+
+A Render Blueprint (`render.yaml`) is included; [LAUNCH.md](LAUNCH.md) walks through it. The container fixes data-volume permissions at startup and then runs as the unprivileged `node` user. The server makes a nightly backup itself (kept on the data disk, newest 14), so no cron job is needed.
 
 The app is one Node process plus one SQLite file, which suits a small business: no database server to run, and a backup is a single file.
 
@@ -133,7 +142,7 @@ scripts/       QA helpers: screenshots, overflow check, browser end-to-end run
 
 ```bash
 npm run typecheck
-npm test               # 77 tests, including the 50-order acceptance test
+npm test               # 82 tests, including the 50-order acceptance test
 ```
 
 The **50-order acceptance test** (`tests/acceptance-50.test.ts`) pastes a realistic chat with 50 orders, typos, varied wording, WhatsApp-export lines, amendments, additions, a vague "make those 2", a contradiction, unknown products, a double paste, a customer question, chatter and one of Terram's own replies. It then checks every order against ground truth, resolves the exceptions as staff would, and drives all orders through cutting, packing and fulfilment to completion.

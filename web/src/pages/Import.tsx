@@ -49,7 +49,7 @@ interface Batch {
   error: string | null;
 }
 
-const PLACEHOLDER = `Paste WhatsApp messages here — one order or a hundred.
+const PLACEHOLDER = `Paste orders here — from WhatsApp, SMS or email. One order or a hundred.
 
 John:
 2kg mince
@@ -75,9 +75,11 @@ function Paste() {
   });
   const [refDate, setRefDate] = useState(todayYmd());
   const [error, setError] = useState<string | null>(null);
+  const [from, setFrom] = useState<{ id?: string; name: string; phone?: string } | null>(null);
+  const [pickFrom, setPickFrom] = useState(false);
   const { data: history } = useQuery({ queryKey: ['imports'], queryFn: () => api.get<{ batches: any[] }>('/api/imports') });
   const analyse = useMutation({
-    mutationFn: () => api.post<{ batch: Batch }>('/api/imports', { text, reference_date: refDate }, { idempotencyKey: newKey() }),
+    mutationFn: () => api.post<{ batch: Batch }>('/api/imports', { text, reference_date: refDate, customer: from ? { id: from.id, name: from.id ? undefined : from.name, phone: from.phone } : null }, { idempotencyKey: newKey() }),
     onSuccess: (r) => {
       try {
         sessionStorage.removeItem('terram:import-text');
@@ -91,7 +93,7 @@ function Paste() {
   const lines = text.split('\n').filter((l) => l.trim()).length;
   return (
     <div className="animate-rise">
-      <PageHeader title="Paste WhatsApp messages" subtitle="We’ll separate the orders, match the products and show you what we understood before anything is saved." />
+      <PageHeader title="Paste orders" subtitle="We’ll separate the orders, match the products and show you what we understood before anything is saved." />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
         <div>
           <Card className="overflow-hidden">
@@ -110,6 +112,19 @@ function Paste() {
               aria-label="Messages to import"
               autoFocus
             />
+            <div className="flex flex-wrap items-center gap-2 border-t border-line bg-surface-2 px-4 py-2.5 text-[13.5px]">
+              <span className="text-ink-2">From:</span>
+              {from ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft py-1 pl-3 pr-1.5 font-medium text-brand-soft-ink">
+                  {from.name}
+                  <button onClick={() => setFrom(null)} className="rounded-full p-0.5 hover:bg-white/50" aria-label="Clear customer"><XCircle className="size-4" /></button>
+                </span>
+              ) : (
+                <button onClick={() => setPickFrom(true)} className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-line-strong px-3 py-1 font-medium text-ink-2 hover:border-brand hover:text-brand">
+                  <UserRound className="size-3.5" /> Names are in the messages — or choose a customer
+                </button>
+              )}
+            </div>
             <div className="flex flex-col gap-3 border-t border-line bg-surface-2 px-4 py-3 sm:flex-row sm:items-center">
               <div className="flex items-center gap-2 text-[13px] text-ink-2">
                 <span>Messages sent</span>
@@ -143,13 +158,20 @@ function Paste() {
             </p>
           )}
           {error && <p className="mt-3 rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger-soft-ink">{error}</p>}
+          <Sheet open={pickFrom} onClose={() => setPickFrom(false)} title="Who are these orders from?" subtitle="Use this when you copied a message without the sender’s name.">
+            <CustomerPicker
+              onPick={(c) => { setFrom({ id: c.id, name: c.name }); setPickFrom(false); }}
+              onCreate={(name) => { if (name.trim()) { setFrom({ name: name.trim() }); setPickFrom(false); } }}
+            />
+          </Sheet>
         </div>
         <aside className="space-y-4">
           <Card className="p-5">
             <h3 className="font-semibold">Tips</h3>
             <ul className="mt-2 space-y-2 text-[14px] text-ink-2">
-              <li>Start each order with the customer’s name, e.g. <b>John:</b></li>
-              <li>A WhatsApp “Export chat” file works too — paste its text.</li>
+              <li>Start each order with the customer’s name, e.g. <b>John:</b> — or choose the customer under “From”.</li>
+              <li>On iPhone: in WhatsApp, press and hold a message → <b>Copy</b> (or tap More… to select several), then tap <b>Paste</b> here.</li>
+              <li>A WhatsApp “Export chat” works too — paste its text.</li>
               <li>Changes like <i>“actually make the mince 3kg”</i> update the order instead of creating a new one.</li>
               <li>Nothing is saved until you confirm.</li>
             </ul>

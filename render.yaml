@@ -1,0 +1,27 @@
+# Render Blueprint — one web service with a persistent disk for the database.
+# In Render: New → Blueprint → pick this repository. You'll be asked for the values marked sync:false.
+services:
+  - type: web
+    name: terram-butchery
+    runtime: docker
+    plan: starter            # needs a paid plan: free services have no persistent disk
+    region: frankfurt        # closest Render region to South Africa
+    healthCheckPath: /api/health
+    autoDeploy: true
+    disk:
+      name: terram-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /data/terram.db
+      - key: INITIAL_ADMIN_NAME
+        sync: false          # your name, e.g. Dylan
+      - key: INITIAL_ADMIN_EMAIL
+        sync: false          # your email — used to sign in with a password
+      - key: INITIAL_ADMIN_PASSWORD
+        sync: false          # at least 8 characters
+      - key: ANTHROPIC_API_KEY
+        sync: false          # optional: enables the assistant for messy messages

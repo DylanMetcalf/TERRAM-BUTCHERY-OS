@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { ClipboardList, Plus, Search, X } from 'lucide-react';
+import { ClipboardList, Plus, Printer, Search, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { OrderRow } from '../components/OrderRow';
@@ -68,7 +68,8 @@ export default function Orders() {
         actions={
           can('orders.write') && (
             <>
-              <Link to="/import"><Button>Paste WhatsApp</Button></Link>
+              <Link to={`/print/dockets${qs({ date: from && from === to ? from : view === 'today' ? todayYmd() : undefined })}`} target="_blank"><Button icon={<Printer className="size-4" />}>Print dockets</Button></Link>
+              <Link to="/import"><Button>Paste orders</Button></Link>
               <Link to="/orders/new"><Button variant="primary" icon={<Plus className="size-4" />}>New order</Button></Link>
             </>
           )

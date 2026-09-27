@@ -14,6 +14,7 @@ import {
   Scissors,
   Search,
   Settings,
+  Smartphone,
   Sparkles,
   Truck,
   Users,
@@ -171,6 +172,9 @@ export function Shell({ children }: { children: ReactNode }) {
               <div className="truncate text-[14px] font-medium">{me.user!.name}</div>
               <div className="text-[12px] text-ink-3">{ROLE_LABEL[me.user!.role]}</div>
             </div>
+            <Link to="/devices" className="rounded-lg p-2 text-ink-3 hover:bg-surface hover:text-ink" aria-label="Add a device" title="Add a device">
+              <Smartphone className="size-4" />
+            </Link>
             <button onClick={signOut} className="rounded-lg p-2 text-ink-3 hover:bg-surface hover:text-ink" aria-label="Sign out" title="Sign out">
               <LogOut className="size-4" />
             </button>
@@ -234,7 +238,10 @@ export function Shell({ children }: { children: ReactNode }) {
             </Link>
           ))}
         </div>
-        <div className="mt-6 flex items-center justify-between rounded-2xl bg-sunken px-4 py-3">
+        <Link to="/devices" className="mt-4 flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3 text-[14.5px] font-medium">
+          <Smartphone className="size-5 text-brand" /> Add Terram to another phone or computer
+        </Link>
+        <div className="mt-4 flex items-center justify-between rounded-2xl bg-sunken px-4 py-3">
           <div className="flex items-center gap-3">
             <Avatar name={me.user!.name} />
             <div>
@@ -250,7 +257,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <Sheet open={addOpen} onClose={() => setAddOpen(false)} title="Add an order" subtitle="Every order goes into the same place, however it arrives.">
         <div className="space-y-2.5">
-          <AddChoice icon={<MessageSquarePlus className="size-6" />} title="Paste a WhatsApp message" body="Paste one message or a whole chat. We’ll read it and show you what we understood." onClick={() => navigate('/import')} />
+          <AddChoice icon={<MessageSquarePlus className="size-6" />} title="Paste orders" body="From WhatsApp, SMS or email — one message or a whole chat. We’ll read it and show you what we understood before anything is saved." onClick={() => navigate('/import')} />
           <AddChoice icon={<PenLine className="size-6" />} title="Type an order" body="Phone call or walk-in — pick the customer and products." onClick={() => navigate('/orders/new')} />
         </div>
       </Sheet>

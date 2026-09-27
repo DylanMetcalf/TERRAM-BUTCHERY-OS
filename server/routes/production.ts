@@ -3,6 +3,8 @@ import { addDays, localDate } from '../lib/time.js';
 import { businessTz } from '../services/settings.js';
 import { cuttingSheet, fulfilmentBoard, packingQueue } from '../domain/production.js';
 import { dashboard } from '../domain/dashboard.js';
+import { db } from '../db/db.js';
+import { getItems, getOrderSummary } from '../domain/orders.js';
 import { requirePerm, type Env } from '../http/context.js';
 import { ymdParam } from '../http/schemas.js';
 
@@ -29,6 +31,18 @@ r.get('/cutting', requirePerm('orders.read'), (c) => {
   }
   const includeUndated = c.req.query('undated') !== '0';
   return c.json({ from, to, range, today, ...cuttingSheet({ from, to, includeUndated }) });
+});
+
+/** Order dockets: every order in production for a day, with its lines. */
+r.get('/dockets', requirePerm('orders.read'), (c) => {
+  const date = ymdParam(c.req.query('date'));
+  const ids = db()
+    .prepare(
+      `SELECT id FROM orders WHERE status IN ('confirmed','cutting','cut','packing','packed','ready','out_for_delivery')
+       AND (? IS NULL OR requested_date = ?) ORDER BY CASE WHEN requested_date IS NULL THEN 1 ELSE 0 END, requested_date, fulfilment_type, order_number`,
+    )
+    .all(date, date) as { id: string }[];
+  return c.json({ date, orders: ids.map((r) => ({ ...getOrderSummary(r.id)!, items: getItems(r.id) })) });
 });
 
 r.get('/packing', requirePerm('orders.read'), (c) => c.json(packingQueue()));

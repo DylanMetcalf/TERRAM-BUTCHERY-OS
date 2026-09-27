@@ -363,4 +363,12 @@ ALTER TABLE orders ADD COLUMN is_sample INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE import_batches ADD COLUMN is_sample INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    id: 3,
+    name: 'family-sign-in',
+    sql: `
+ALTER TABLE users ADD COLUMN family_login INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN via TEXT NOT NULL DEFAULT 'password';
+`,
+  },
 ];

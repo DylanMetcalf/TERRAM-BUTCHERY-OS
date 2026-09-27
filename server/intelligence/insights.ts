@@ -6,6 +6,7 @@ import { businessTz, getSettings } from '../services/settings.js';
 import { listProducts } from '../domain/products.js';
 import { aiAvailable } from './ai.js';
 import { listSuggestions } from './learning.js';
+import { listBackups } from '../services/jobs.js';
 
 /**
  * TERRAM OPERATIONS INTELLIGENCE — the read-only oversight layer.
@@ -168,6 +169,11 @@ export function systemHealth() {
       { key: 'assistant', label: 'Message assistant', ok: true, detail: aiAvailable() ? `Enabled (${getSettings().ai.model})` : process.env.ANTHROPIC_API_KEY ? 'Turned off in settings' : 'Not configured — rules engine only' },
       { key: 'whatsapp', label: 'WhatsApp integration', ok: true, detail: process.env.WHATSAPP_VERIFY_TOKEN ? 'Webhook configured' : 'Not connected (use WhatsApp import)' },
       { key: 'errors', label: 'Errors (24h)', ok: errors24 === 0, detail: errors24 ? `${errors24} error(s)` : 'None' },
+      (() => {
+        const b = listBackups()[0];
+        const ageH = b ? (Date.now() - Date.parse(b.created_at)) / 3600_000 : Infinity;
+        return { key: 'backup', label: 'Nightly backup', ok: ageH < 36, detail: b ? `Last backup ${Math.round(ageH)}h ago · ${listBackups().length} kept on the server` : 'No backup yet — the first runs after 2am' };
+      })(),
     ],
     database_size_bytes: pageCount * pageSize,
     events,

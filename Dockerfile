@@ -12,9 +12,9 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
-RUN mkdir -p /data && chown node:node /data
+COPY docker-entrypoint.sh ./
+RUN mkdir -p /data && chown node:node /data && chmod +x docker-entrypoint.sh
 VOLUME ["/data"]
 EXPOSE 8080
-USER node
 HEALTHCHECK --interval=30s --timeout=5s CMD node -e "fetch('http://localhost:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "dist/server/server/index.js"]
+CMD ["./docker-entrypoint.sh"]

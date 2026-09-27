@@ -187,48 +187,133 @@ function Team() {
   const me = useMe();
   const qc = useQueryClient();
   const toast = useToast();
+  const { ask, node } = useConfirm();
   const { data } = useQuery({ queryKey: ['users'], queryFn: () => api.get<{ users: any[] }>('/api/admin/users') });
+  const { data: fam } = useQuery({ queryKey: ['family-code'], queryFn: () => api.get<{ set: boolean; people: number }>('/api/admin/family-code') });
+  const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: () => api.get<{ sessions: any[] }>('/api/admin/sessions') });
   const [editing, setEditing] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', email: '', role: 'staff' as Role, password: '', active: true });
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [code, setCode] = useState('');
+  const [form, setForm] = useState({ name: '', email: '', role: 'staff' as Role, password: '', active: true, family_login: true });
   useEffect(() => {
-    if (editing) setForm({ name: editing.name ?? '', email: editing.email ?? '', role: editing.role ?? 'staff', password: '', active: editing.active !== 0 });
+    if (editing) setForm({ name: editing.name ?? '', email: editing.email ?? '', role: editing.role ?? 'staff', password: '', active: editing.active !== 0, family_login: editing.id ? !!editing.family_login : true });
   }, [editing]);
+  const err = (e: unknown) => toast({ tone: 'error', title: e instanceof ApiError ? e.message : 'Could not save.' });
   const save = useMutation({
-    mutationFn: () => (editing?.id ? api.patch(`/api/admin/users/${editing.id}`, { name: form.name, role: form.role, active: form.active, password: form.password || undefined }) : api.post('/api/admin/users', form)),
+    mutationFn: () =>
+      editing?.id
+        ? api.patch(`/api/admin/users/${editing.id}`, { name: form.name, role: form.role, active: form.active, family_login: form.family_login, password: form.password || undefined })
+        : api.post('/api/admin/users', { name: form.name, email: form.email || null, role: form.role, password: form.password || null, family_login: form.family_login }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] });
+      qc.invalidateQueries({ queryKey: ['family-code'] });
       toast({ tone: 'success', title: 'Saved' });
       setEditing(null);
     },
-    onError: (e) => toast({ tone: 'error', title: e instanceof ApiError ? e.message : 'Could not save.' }),
+    onError: err,
   });
+  const setFamily = useMutation({
+    mutationFn: () => api.put('/api/admin/family-code', { code }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['family-code'] });
+      toast({ tone: 'success', title: 'Family code saved', body: 'Share it with the family in person or by message.' });
+      setCodeOpen(false);
+      setCode('');
+    },
+    onError: err,
+  });
+  const signOutOthers = useMutation({
+    mutationFn: () => api.post('/api/admin/sessions/sign-out-others'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sessions'] });
+      toast({ tone: 'success', title: 'Every other device has been signed out' });
+    },
+    onError: err,
+  });
+  const device = (ua: string | null) => {
+    const u = ua ?? '';
+    const os = /iPhone/.test(u) ? 'iPhone' : /iPad/.test(u) ? 'iPad' : /Android/.test(u) ? 'Android' : /Windows/.test(u) ? 'Windows' : /Mac OS X/.test(u) ? 'Mac' : 'Device';
+    const br = /Edg\//.test(u) ? 'Edge' : /Chrome\//.test(u) ? 'Chrome' : /Safari\//.test(u) ? 'Safari' : /Firefox\//.test(u) ? 'Firefox' : '';
+    return br ? `${os} · ${br}` : os;
+  };
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="font-display text-xl font-semibold">Team</h2>
-        <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing({})}>Add person</Button>
-      </div>
-      <Card className="divide-y divide-line">
-        {data?.users.map((u) => (
-          <button key={u.id} onClick={() => setEditing(u)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2">
-            <div className="min-w-0 flex-1">
-              <div className="font-medium">{u.name} {u.id === me.user!.id && <span className="text-ink-3">(you)</span>}</div>
-              <div className="text-[13px] text-ink-3">{u.email} · {u.last_login_at ? `last seen ${timeAgo(u.last_login_at)}` : 'never signed in'}</div>
+    <div className="space-y-6">
+      {node}
+      <Card className="p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-brand-soft text-brand"><KeyRound className="size-5" /></span>
+          <div className="flex-1">
+            <h2 className="font-display text-xl font-semibold">Family code</h2>
+            <p className="mt-1 text-[14.5px] text-ink-2">
+              One code for everyone. On a new phone or laptop, open Terram, type the code, tap your name — and that device stays signed in for months.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {fam?.set ? <Badge tone="field" dot>On · {fam.people} {fam.people === 1 ? 'person' : 'people'} can use it</Badge> : <Badge tone="ochre" dot>Not set yet</Badge>}
             </div>
-            <Badge tone={u.role === 'admin' ? 'brand' : u.role === 'manager' ? 'slate' : 'neutral'}>{ROLE_LABEL[u.role as Role]}</Badge>
-            {!u.active && <Badge tone="danger">Disabled</Badge>}
-          </button>
-        ))}
+          </div>
+          <div className="flex gap-2">
+            <Button variant={fam?.set ? 'secondary' : 'primary'} onClick={() => setCodeOpen(true)}>{fam?.set ? 'Change code' : 'Set a family code'}</Button>
+            {fam?.set && <Button variant="ghost" onClick={async () => { if (await ask({ title: 'Turn off the family code?', body: 'Devices already signed in stay signed in. New devices will need email and password.', confirm: 'Turn off' })) api.del('/api/admin/family-code').then(() => qc.invalidateQueries({ queryKey: ['family-code'] })); }}>Turn off</Button>}
+          </div>
+        </div>
       </Card>
+
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-display text-xl font-semibold">People</h2>
+          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing({})}>Add person</Button>
+        </div>
+        <Card className="divide-y divide-line">
+          {data?.users.map((u) => (
+            <button key={u.id} onClick={() => setEditing(u)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">{u.name} {u.id === me.user!.id && <span className="text-ink-3">(you)</span>}</div>
+                <div className="text-[13px] text-ink-3">{[u.email || null, u.family_login ? 'uses the family code' : null, u.last_login_at ? `last seen ${timeAgo(u.last_login_at)}` : 'not signed in yet'].filter(Boolean).join(' · ')}</div>
+              </div>
+              <Badge tone={u.role === 'admin' ? 'brand' : u.role === 'manager' ? 'slate' : 'neutral'}>{ROLE_LABEL[u.role as Role]}</Badge>
+              {!u.active && <Badge tone="danger">Disabled</Badge>}
+            </button>
+          ))}
+        </Card>
+      </div>
+
+      <Card className="p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-semibold">Signed-in devices · {sessions?.sessions.length ?? 0}</h2>
+            <p className="text-[13.5px] text-ink-2">Lost a phone? Sign out every device except this one, then sign back in on the others.</p>
+          </div>
+          <Button variant="danger" loading={signOutOthers.isPending} onClick={async () => { if (await ask({ title: 'Sign out every other device?', body: 'Everyone will need the family code (or their password) again.', confirm: 'Sign out others', tone: 'danger' })) signOutOthers.mutate(); }}>Sign out other devices</Button>
+        </div>
+        <ul className="mt-4 divide-y divide-line text-[13.5px]">
+          {sessions?.sessions.slice(0, 12).map((s, i) => (
+            <li key={i} className="flex items-center justify-between gap-3 py-2">
+              <span><b>{s.name}</b> · {device(s.user_agent)}{s.via === 'family' ? ' · family code' : ''}</span>
+              <span className="text-ink-3">since {timeAgo(s.created_at)}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+
       <Card className="p-4">
         <SectionTitle>What each role can do</SectionTitle>
         <ul className="space-y-1.5 text-[14px]">{ROLES.map((r) => <li key={r}><b>{ROLE_LABEL[r]}</b> — {ROLE_DESCRIPTION[r]}</li>)}</ul>
         <p className="mt-3 flex items-center gap-1.5 text-[12.5px] text-ink-3"><ShieldCheck className="size-3.5" /> Permissions are checked on the server for every action.</p>
       </Card>
-      <Sheet open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? editing.name : 'Add a person'} footer={<Button variant="primary" size="lg" full loading={save.isPending} onClick={() => save.mutate()}>Save</Button>}>
+
+      <Sheet open={codeOpen} onClose={() => setCodeOpen(false)} title={fam?.set ? 'Change the family code' : 'Set a family code'} footer={<Button variant="primary" size="lg" full disabled={code.trim().length < 6} loading={setFamily.isPending} onClick={() => setFamily.mutate()}>Save code</Button>}>
         <div className="space-y-4">
-          <Field label="Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-          {!editing?.id && <Field label="Email"><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>}
+          <Field label="Family code" hint="At least 6 characters. A short phrase is easy to type and hard to guess — e.g. “red barn mince”. Capitals and spacing don’t matter.">
+            <Input big value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} />
+          </Field>
+          <Callout tone="slate">The code isn’t shown again after saving, so write it down. Changing it doesn’t sign anyone out.</Callout>
+        </div>
+      </Sheet>
+
+      <Sheet open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? editing.name : 'Add a person'} footer={<Button variant="primary" size="lg" full loading={save.isPending} disabled={!form.name.trim()} onClick={() => save.mutate()}>Save</Button>}>
+        <div className="space-y-4">
+          <Field label="Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Mom" /></Field>
+          <Switch checked={form.family_login} onChange={(x) => setForm({ ...form, family_login: x })} label="Can sign in with the family code" description="Their name appears after the code is typed on a new device." />
           <Field label="Role">
             <div className="space-y-2">
               {ROLES.map((r) => (
@@ -239,7 +324,8 @@ function Team() {
               ))}
             </div>
           </Field>
-          <Field label={editing?.id ? 'New password' : 'Password'} optional={!!editing?.id} hint="At least 8 characters. Changing it signs the person out everywhere."><Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" /></Field>
+          {!editing?.id && <Field label="Email" optional hint="Only needed for signing in with a password."><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>}
+          <Field label={editing?.id ? 'New password' : 'Password'} optional hint={form.family_login ? 'Optional when they use the family code.' : 'At least 8 characters.'}><Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" /></Field>
           {editing?.id && <Switch checked={form.active} onChange={(x) => setForm({ ...form, active: x })} label="Can sign in" />}
         </div>
       </Sheet>
@@ -272,11 +358,38 @@ function DataBackup() {
           <a href="/api/admin/backup"><Button variant="primary" icon={<Database className="size-4" />}>Download full backup</Button></a>
         </div>
       </Panel>
+      <ServerBackups />
       <Card className="p-5 text-[14px] text-ink-2">
         <h3 className="font-semibold text-ink">Backups</h3>
         <p className="mt-1">The backup file is a complete copy of the database, taken safely while the system is running. To restore, stop the server and replace the database file with the backup (see the README). Automated nightly backups can be scheduled on the server with <code className="rounded bg-sunken px-1">npm run backup</code>.</p>
       </Card>
     </div>
+  );
+}
+
+function ServerBackups() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data } = useQuery({ queryKey: ['backups'], queryFn: () => api.get<{ backups: { file: string; bytes: number; created_at: string }[] }>('/api/admin/backups') });
+  const run = useMutation({
+    mutationFn: () => api.post('/api/admin/backups'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['backups'] });
+      toast({ tone: 'success', title: 'Backup saved on the server' });
+    },
+    onError: (e) => toast({ tone: 'error', title: e instanceof ApiError ? e.message : 'Backup failed.' }),
+  });
+  const latest = data?.backups[0];
+  return (
+    <Card className="p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="font-semibold">Automatic nightly backups</h3>
+          <p className="text-[14px] text-ink-2">{latest ? `Last one ${timeAgo(latest.created_at)} · ${data!.backups.length} kept on the server (newest 14).` : 'The first one runs after 2am tonight.'} Download a copy to your own computer every week too.</p>
+        </div>
+        <Button loading={run.isPending} onClick={() => run.mutate()}>Back up now</Button>
+      </div>
+    </Card>
   );
 }
 

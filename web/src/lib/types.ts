@@ -7,6 +7,7 @@ export type { OrderStatus, OrderSource, FulfilmentType, PaymentStatus, Qty, Quan
 export interface Me {
   user: { id: string; name: string; email: string; role: Role; permissions: Permission[] } | null;
   needs_setup: boolean;
+  family_login: boolean;
   business: { name: string; tagline: string; timezone: string; currency: string };
 }
 

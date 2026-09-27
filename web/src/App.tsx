@@ -43,6 +43,7 @@ const Intelligence = lazy(() => import('./pages/Intelligence'));
 const Reports = lazy(() => import('./pages/Reports'));
 const Settings = lazy(() => import('./pages/Settings'));
 const PrintView = lazy(() => import('./print/Print'));
+const Devices = lazy(() => import('./pages/Devices'));
 const PublicOrder = lazy(() => import('./pages/PublicOrder'));
 
 function FullSpinner() {
@@ -87,7 +88,7 @@ function InternalApp() {
         </button>
       </div>
     );
-  if (!me.user) return <LoginPage setup={me.needs_setup} />;
+  if (!me.user) return <LoginPage setup={me.needs_setup} family={me.family_login} />;
 
   return (
     <MeProvider me={me}>
@@ -115,6 +116,7 @@ function InternalApp() {
                   <Route path="/intelligence" element={<Intelligence />} />
                   <Route path="/reports" element={<Reports />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/devices" element={<Devices />} />
                   <Route path="/login" element={<Navigate to="/" replace />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>

@@ -8,6 +8,7 @@ import { purgeExpiredSessions } from './auth/sessions.js';
 import { purgeIdempotencyKeys } from './http/security.js';
 import { recordSystemEvent } from './services/health.js';
 import { buildApp } from './app.js';
+import { startJobs } from './services/jobs.js';
 
 // Minimal .env loader (no dependency)
 const envFile = path.resolve('.env');
@@ -36,6 +37,8 @@ setInterval(() => {
     recordSystemEvent('error', 'server', 'Housekeeping failed', String(e));
   }
 }, 3600_000).unref();
+
+startJobs();
 
 serve({ fetch: app.fetch, port, hostname: process.env.HOST ?? '0.0.0.0' }, (info) => {
   console.log(`[terram] Butchery OS running on http://localhost:${info.port} (db: ${dbPath})`);

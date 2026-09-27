@@ -50,7 +50,7 @@ export default function Today() {
         </div>
         {can('orders.write') && (
           <div className="mt-3 hidden gap-2 sm:mt-0 sm:flex">
-            <Link to="/import"><Button icon={<Inbox className="size-4" />}>Paste WhatsApp</Button></Link>
+            <Link to="/import"><Button icon={<Inbox className="size-4" />}>Paste orders</Button></Link>
             <Link to="/orders/new"><Button variant="primary">New order</Button></Link>
           </div>
         )}

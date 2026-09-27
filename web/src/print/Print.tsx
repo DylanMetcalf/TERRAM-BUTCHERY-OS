@@ -16,6 +16,7 @@ export default function PrintView() {
     <Routes>
       <Route path="cutting" element={<CuttingPrint />} />
       <Route path="packing" element={<PackingPrint />} />
+      <Route path="dockets" element={<DocketsPrint />} />
       <Route path="ready" element={<ReadyPrint />} />
       <Route path="order/:id" element={<OrderPrint />} />
     </Routes>
@@ -131,6 +132,20 @@ function PackingPrint() {
     <Page title="Packing slips" subtitle={data ? `${data.ready_to_pack.length} orders ready to pack` : ''} ready={!!data}>
       {data && !data.ready_to_pack.length && <p>Nothing to pack.</p>}
       {data?.ready_to_pack.map((o: any) => <PackSlip key={o.id} o={o} items={o.items} notes={o.notes} />)}
+    </Page>
+  );
+}
+
+function DocketsPrint() {
+  const loc = useLocation();
+  const date = new URLSearchParams(loc.search).get('date');
+  const { data } = useQuery({ queryKey: ['dockets', date], queryFn: () => api.get<any>(`/api/production/dockets${qs({ date })}`) });
+  return (
+    <Page title="Order dockets" subtitle={data ? `${date ? longDate(date) : 'All open orders'} · ${data.orders.length} orders` : ''} ready={!!data}>
+      {data && !data.orders.length && <p>No confirmed orders for this day.</p>}
+      <div className="grid grid-cols-2 gap-x-4 print:grid-cols-2">
+        {data?.orders.map((o: any) => <PackSlip key={o.id} o={o} items={o.items} notes={o.notes} />)}
+      </div>
     </Page>
   );
 }

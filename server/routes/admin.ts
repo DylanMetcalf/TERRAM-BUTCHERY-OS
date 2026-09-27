@@ -11,6 +11,10 @@ import { publish } from '../services/realtime.js';
 import { getSettings, updateSettings, type BusinessSettings } from '../services/settings.js';
 import { exportDataset, report } from '../domain/reports.js';
 import { createUser, listUsers, updateUser } from '../domain/users.js';
+import { familyCodeSet, familyPeople, setFamilyCode } from '../auth/family.js';
+import { destroyAllSessionsExcept, listSessions, SESSION_COOKIE } from '../auth/sessions.js';
+import { getCookie } from 'hono/cookie';
+import { listBackups, runBackup } from '../services/jobs.js';
 import { loadSampleData, removeSampleData, sampleDataStatus } from '../seed/sample.js';
 import { actorOf, requirePerm, type Env } from '../http/context.js';
 import { body, ymdParam } from '../http/schemas.js';
@@ -80,13 +84,33 @@ r.put('/settings/:section', requirePerm('settings.write'), async (c) => {
 // ── Users ──────────────────────────────────────────────────
 r.get('/users', requirePerm('users.manage'), (c) => c.json({ users: listUsers() }));
 r.post('/users', requirePerm('users.manage'), async (c) => {
-  const input = await body(c, z.object({ name: z.string().max(120), email: z.string().max(200), role: z.enum(ROLES), password: z.string().max(200) }));
+  const input = await body(c, z.object({ name: z.string().max(120), email: z.string().max(200).optional().nullable(), role: z.enum(ROLES), password: z.string().max(200).optional().nullable(), family_login: z.boolean().optional() }));
   return c.json({ user: createUser(input, actorOf(c)) });
 });
 r.patch('/users/:id', requirePerm('users.manage'), async (c) => {
-  const input = await body(c, z.object({ name: z.string().max(120).optional(), role: z.enum(ROLES).optional(), active: z.boolean().optional(), password: z.string().max(200).optional() }));
+  const input = await body(c, z.object({ name: z.string().max(120).optional(), role: z.enum(ROLES).optional(), active: z.boolean().optional(), password: z.string().max(200).optional(), family_login: z.boolean().optional() }));
   if (c.req.param('id') === c.get('user')!.id && (input.active === false || (input.role && input.role !== 'admin'))) throw badRequest('You cannot remove your own admin access.');
   return c.json({ user: updateUser(c.req.param('id'), input, actorOf(c)) });
+});
+
+// ── Family code & devices ──────────────────────────────────
+r.get('/family-code', requirePerm('users.manage'), (c) => c.json({ set: familyCodeSet(), people: familyPeople().length }));
+r.put('/family-code', requirePerm('users.manage'), async (c) => {
+  const { code } = await body(c, z.object({ code: z.string().trim().min(6, 'Use at least 6 characters — a short phrase works well, e.g. “terram mince 2026”.').max(100) }));
+  setFamilyCode(code, c.get('user')!.id);
+  audit(actorOf(c), 'auth.family_code_changed', 'settings', 'family_code', 'Family code changed');
+  return c.json({ set: true });
+});
+r.delete('/family-code', requirePerm('users.manage'), (c) => {
+  setFamilyCode(null, c.get('user')!.id);
+  audit(actorOf(c), 'auth.family_code_removed', 'settings', 'family_code', 'Family code turned off');
+  return c.json({ set: false });
+});
+r.get('/sessions', requirePerm('users.manage'), (c) => c.json({ sessions: listSessions() }));
+r.post('/sessions/sign-out-others', requirePerm('users.manage'), (c) => {
+  destroyAllSessionsExcept(getCookie(c, SESSION_COOKIE));
+  audit(actorOf(c), 'auth.signed_out_all', 'settings', null, 'Signed out every other device');
+  return c.json({ ok: true });
 });
 
 // ── Reports & exports ──────────────────────────────────────
@@ -131,6 +155,13 @@ r.get('/backup', requirePerm('data.export'), async (c) => {
   fs.unlinkSync(file);
   audit(actorOf(c), 'data.backup', 'export', 'sqlite', 'Downloaded database backup');
   return c.body(buf, 200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="terram-${now().slice(0, 10)}.db"` });
+});
+
+r.get('/backups', requirePerm('data.export'), (c) => c.json({ backups: listBackups() }));
+r.post('/backups', requirePerm('data.export'), async (c) => {
+  const file = await runBackup('manual');
+  audit(actorOf(c), 'data.backup', 'export', 'server', 'Made a backup on the server');
+  return c.json({ file: path.basename(file), backups: listBackups() });
 });
 
 r.get('/audit', requirePerm('settings.read'), (c) => {
