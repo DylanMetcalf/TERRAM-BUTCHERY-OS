@@ -142,6 +142,25 @@ export default function OrderDetail() {
     return sum == null || p == null ? null : sum + p;
   }, 0);
 
+  const doDelete = async () => {
+    setMoreOpen(false);
+    const ok = await ask({
+      title: `Delete order #${o.order_number} for ${o.customer_name}?`,
+      body: 'It will be removed completely: items, history and questions. This can’t be undone. (To keep a record instead, use Cancel.)',
+      confirm: 'Delete for good',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await api.del(`/api/orders/${o.id}`);
+      qc.invalidateQueries();
+      toast({ tone: 'success', title: `Order #${o.order_number} deleted` });
+      navigate('/orders', { replace: true });
+    } catch (e) {
+      onErr(e);
+    }
+  };
+
   const doMove = async (to: OrderStatus) => {
     setMoreOpen(false);
     if (to === 'cancelled') {
@@ -179,23 +198,31 @@ export default function OrderDetail() {
         </div>
         <div className="flex items-center gap-2">
           <Link to={`/print/order/${o.id}`} target="_blank"><Button icon={<Printer className="size-4" />}>Print</Button></Link>
-          {secondary.length > 0 && (canWrite || canProduce) && (
+          {(secondary.length > 0 && (canWrite || canProduce)) || can('orders.cancel') ? (
             <div className="relative">
               <Button icon={<MoreHorizontal className="size-4" />} onClick={() => setMoreOpen((v) => !v)} aria-expanded={moreOpen}>More</Button>
               {moreOpen && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setMoreOpen(false)} />
-                  <div className="absolute right-0 z-20 mt-2 w-56 animate-rise overflow-hidden rounded-2xl border border-line bg-surface p-1.5 shadow-float">
-                    {secondary.map((t) => (
+                  <div className="absolute left-0 z-20 mt-2 w-[min(15rem,calc(100vw-2.5rem))] animate-rise overflow-hidden rounded-2xl border border-line bg-surface p-1.5 shadow-float sm:left-auto sm:right-0">
+                    {(canWrite || canProduce) && secondary.map((t) => (
                       <button key={t} onClick={() => doMove(t)} className={cx('flex w-full items-center rounded-xl px-3 py-2.5 text-left text-[14px] font-medium hover:bg-sunken', t === 'cancelled' ? 'text-danger' : 'text-ink')}>
                         {SECONDARY_LABEL[t] ?? STATUS_LABEL[t]}
                       </button>
                     ))}
+                    {can('orders.cancel') && (
+                      <>
+                      {(canWrite || canProduce) && secondary.length > 0 && <div className="mx-2 my-1 h-px bg-line" />}
+                      <button onClick={doDelete} className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-danger hover:bg-danger-soft">
+                        <Trash2 className="size-4" /> Delete order…
+                      </button>
+                      </>
+                    )}
                   </div>
                 </>
               )}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -317,7 +344,7 @@ export default function OrderDetail() {
         <aside className="space-y-6">
           <section>
             <SectionTitle action={canWrite && !['completed', 'cancelled'].includes(o.status) && <Button size="sm" variant="ghost" icon={<Pencil className="size-3.5" />} onClick={() => setFulfilOpen(true)}>Edit</Button>}>
-              {o.fulfilment_type === 'delivery' ? 'Delivery' : 'Collection'}
+              {o.fulfilment_type === 'delivery' ? 'Delivery' : o.fulfilment_type === 'collection' ? 'Collection' : 'Collection or delivery'}
             </SectionTitle>
             <Card className="px-4 py-1.5">
               <dl className="divide-y divide-line">
@@ -325,6 +352,7 @@ export default function OrderDetail() {
                 <KeyValue label="Date">{o.requested_date ? longDate(o.requested_date) : <span className="text-ochre">Not set</span>}</KeyValue>
                 {o.time_window && <KeyValue label="Time">{o.time_window}</KeyValue>}
                 {o.fulfilment_type === 'delivery' && <KeyValue label="Address">{o.delivery_address ?? <span className="text-danger">Missing</span>}</KeyValue>}
+                {!o.fulfilment_type && o.delivery_address && <KeyValue label="Customer’s address">{o.delivery_address}</KeyValue>}
                 {o.fulfilment_type === 'delivery' && (
                   <KeyValue label="Delivery fee">
                     {o.delivery_km == null ? <span className="text-ink-3">Add the distance (Edit)</span> : <>{o.delivery_fee_cents ? formatMoney(o.delivery_fee_cents) : 'Free'} <span className="text-ink-3">· {o.delivery_km} km</span></>}
@@ -411,7 +439,7 @@ export default function OrderDetail() {
                   {messages.map((m) => (
                     <div key={m.id} className={cx('rounded-2xl px-3.5 py-2.5 text-[14px]', m.direction === 'out' ? 'ml-6 bg-field-soft text-field-soft-ink' : 'mr-6 bg-sunken text-ink')}>
                       <div className="mb-0.5 text-[11.5px] font-semibold opacity-70">{m.direction === 'out' ? 'Terram' : m.sender_name ?? 'Customer'} · {m.channel} · {dateTime(m.sent_at ?? m.received_at)}</div>
-                      <div className="whitespace-pre-line">{m.channel === 'form' ? m.body.split('\n\n{')[0] : m.body}</div>
+                      <div className="whitespace-pre-line [overflow-wrap:anywhere]">{m.channel === 'form' ? m.body.split('\n\n{')[0] : m.body}</div>
                     </div>
                   ))}
                 </div>
@@ -457,6 +485,20 @@ function AccountingRef({ value, onSave }: { value: string | null; onSave: (v: st
   );
 }
 
+/** The message behind a change, kept short: the first lines, with “Show more” for the rest. */
+function MessageBubble({ text, sender }: { text: string; sender?: string | null }) {
+  const [open, setOpen] = useState(false);
+  // Online-form submissions carry a raw technical copy after a blank line; people don't need it here
+  const clean = text.split(/\n\s*\n\{/)[0].trim();
+  const long = clean.length > 140 || clean.split('\n').length > 3;
+  return (
+    <div className="mt-1 max-w-full rounded-xl bg-sunken px-3 py-1.5 text-[13px] text-ink-2">
+      <p className={cx('whitespace-pre-line break-words [overflow-wrap:anywhere]', !open && long && 'line-clamp-3')}>“{clean}”{sender ? ` — ${sender}` : ''}</p>
+      {long && <button type="button" onClick={() => setOpen((v) => !v)} className="mt-0.5 text-[12.5px] font-semibold text-brand">{open ? 'Show less' : 'Show more'}</button>}
+    </div>
+  );
+}
+
 function EventItem({ e }: { e: OrderEvent }) {
   const icon =
     e.type === 'created' ? <CircleDot className="size-3" /> : e.type.startsWith('item') || e.type === 'amendment_applied' ? <Pencil className="size-3" /> : e.type === 'status_changed' ? <Check className="size-3" /> : e.type === 'note' ? <MessageCircle className="size-3" /> : <CircleDot className="size-3" />;
@@ -467,14 +509,14 @@ function EventItem({ e }: { e: OrderEvent }) {
         {icon}
       </span>
       <div className="min-w-0 flex-1 pb-0.5">
-        <p className={cx('text-[14px] leading-snug', amended ? 'font-semibold text-ink' : 'text-ink')}>{e.summary}</p>
+        <p className={cx('break-words text-[14px] leading-snug', amended ? 'font-semibold text-ink' : 'text-ink')}>{e.summary}</p>
         {e.data?.before && e.data?.after && e.data.before.qty_label !== e.data.after.qty_label && (
           <p className="mt-1 inline-flex items-center gap-2 rounded-lg bg-sunken px-2 py-1 text-[13px]">
             <span className="text-ink-3 line-through">{e.data.before.qty_label}</span> → <span className="font-semibold">{e.data.after.qty_label}</span>
           </p>
         )}
         {e.data?.warning && <p className="mt-1 text-[12.5px] font-medium text-ochre">{e.data.warning}</p>}
-        {e.message_body && <p className="mt-1 rounded-xl bg-sunken px-3 py-1.5 text-[13px] text-ink-2">“{e.message_body}”{e.message_sender ? ` — ${e.message_sender}` : ''}</p>}
+        {e.message_body && <MessageBubble text={e.message_body} sender={e.message_sender} />}
         <p className="mt-0.5 text-[12px] text-ink-3">
           {e.actor_name ?? (e.actor_kind === 'customer' ? 'Customer' : 'Terram OS')} · {dateTime(e.created_at)}
         </p>

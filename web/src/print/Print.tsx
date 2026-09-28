@@ -49,8 +49,8 @@ function Page({ title, subtitle, children, ready }: { title: string; subtitle?: 
           <div className="flex items-end gap-3">
             {brand?.hasLogo && <img src={`/brand/logo?v=${brand.version}`} alt="" className="h-12 w-auto max-w-[120px] object-contain" />}
             <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.2em]">{me.business.name} · Butchery</div>
-            <h1 className="font-display text-[26px] font-bold leading-tight">{title}</h1>
+            <div className="text-[11px] font-semibold tracking-[0.04em]">{me.business.name} · Butchery</div>
+            <h1 className="font-display text-[20px] font-bold leading-tight">{title}</h1>
             {subtitle && <div className="text-[13px]">{subtitle}</div>}
             </div>
           </div>
@@ -72,27 +72,52 @@ function CuttingPrint() {
   return (
     <Page title={title} subtitle={data?.from ? `${friendlyDate(data.from, today)} – ${friendlyDate(data.to, today)} · ${data.order_count} orders` : data ? `${data.order_count} orders` : ''} ready={!!data}>
       {data && !data.lines.length && <p className="text-[16px]">Nothing to cut.</p>}
-      {cats.map((cat) => (
-        <section key={cat} className="avoid mb-5">
-          <h2 className="mb-1 border-b border-black text-[15px] font-bold uppercase tracking-wide">{cat}</h2>
-          <table className="w-full border-collapse text-[14px]">
-            <tbody>
+      {cats.length > 0 && (
+        <table className="w-full border-collapse text-[12px]">
+          <thead>
+            <tr className="border-b-2 border-black text-left text-[10.5px] font-semibold">
+              <th className="w-6 py-1" />
+              <th className="py-1 pr-2">Product</th>
+              <th className="w-[92px] py-1 pr-2 text-right">To cut</th>
+              <th className="py-1 pr-2">For</th>
+              <th className="w-[30%] py-1">Notes</th>
+            </tr>
+          </thead>
+          {cats.map((cat) => (
+            <tbody key={cat} className="avoid">
+              <tr>
+                <td colSpan={5} className="pb-0.5 pt-3 text-[12.5px] font-bold">{cat}</td>
+              </tr>
               {data.lines.filter((l: any) => l.category === cat).map((l: any) => (
-                <tr key={l.key} className="avoid border-b border-neutral-400 align-top">
-                  <td className="w-7 py-2 pr-2"><span className="inline-block size-5 border-2 border-black" /></td>
-                  <td className="py-2 pr-3">
-                    <div className="text-[16px] font-bold">{l.product_name}{l.preparation_label ? <span className="font-bold"> — {l.preparation_label.toUpperCase()}</span> : ''}</div>
-                    <div className="mt-0.5 text-[12px] leading-snug">
-                      {l.orders.map((o: any) => `${o.customer_name} ${o.qty_label}${o.special_instructions ? ` [${o.special_instructions}]` : ''}`).join(' · ')}
-                    </div>
+                <tr key={l.key} className="avoid border-t border-neutral-400 align-top">
+                  <td className="py-1.5 pr-1.5"><span className="mt-0.5 inline-block size-3.5 border-[1.5px] border-black" /></td>
+                  <td className="py-1.5 pr-2">
+                    <div className="text-[13px] font-bold leading-tight">{l.product_name}</div>
+                    {l.preparation_label && <div className="text-[11.5px] font-semibold">{l.preparation_label}</div>}
                   </td>
-                  <td className="whitespace-nowrap py-2 text-right text-[20px] font-bold">{l.total_label}<div className="text-[11px] font-normal">{l.estimate_label}</div></td>
+                  <td className="whitespace-nowrap py-1.5 pr-2 text-right">
+                    <div className="text-[14px] font-bold leading-tight">{l.total_label}</div>
+                    {l.estimate_label && <div className="text-[10px]">{l.estimate_label}</div>}
+                  </td>
+                  <td className="py-1.5 pr-2 text-[11px] leading-snug">
+                    {l.orders.map((o: any) => (
+                      <div key={o.item_id}>{o.customer_name} {o.qty_label}{o.special_instructions ? <b> — {o.special_instructions}</b> : null}</div>
+                    ))}
+                  </td>
+                  <td className="py-1.5"><div className="mt-3.5 border-b border-dotted border-neutral-500" /></td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          ))}
+        </table>
+      )}
+      {data && (
+        <section className="avoid mt-6">
+          <h2 className="text-[12.5px] font-bold">Notes</h2>
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-7 border-b border-neutral-400" />)}
+          <div className="mt-4 flex justify-between text-[11px]"><span>Cut by: ____________________</span><span>Checked: ____________</span></div>
         </section>
-      ))}
+      )}
     </Page>
   );
 }

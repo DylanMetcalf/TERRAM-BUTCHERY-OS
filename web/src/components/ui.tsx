@@ -249,11 +249,11 @@ export function BigCheck({ checked, onChange, label, disabled, size = 'lg' }: { 
       onClick={() => onChange(!checked)}
       className={cx(
         'inline-flex shrink-0 items-center justify-center rounded-xl border-2 transition-all duration-150 active:scale-90',
-        size === 'lg' ? 'size-11' : 'size-8 rounded-lg',
+        size === 'lg' ? 'size-10' : 'size-8 rounded-lg',
         checked ? 'border-field bg-field text-white' : 'border-line-strong bg-surface hover:border-ink-3',
       )}
     >
-      {checked && <Check className={cx('animate-pop', size === 'lg' ? 'size-6' : 'size-4')} strokeWidth={3} />}
+      {checked && <Check className={cx('animate-pop', size === 'lg' ? 'size-5' : 'size-4')} strokeWidth={3} />}
     </button>
   );
 }

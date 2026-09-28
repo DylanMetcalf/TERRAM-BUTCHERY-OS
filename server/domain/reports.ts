@@ -2,20 +2,38 @@ import { db } from '../db/db.js';
 import { formatQty, formatWeight, pluralise } from '../../shared/quantity.js';
 import { isValidYmd } from '../lib/time.js';
 import { badRequest } from '../lib/errors.js';
+import { businessTz } from '../services/settings.js';
 
 /** Operational reports — no vanity analytics. */
+/** SQLite date modifier that turns a stored UTC timestamp into the business's local date (e.g. '+120 minutes'). */
+function localShift(): string {
+  const tz = businessTz();
+  const now = new Date();
+  const local = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+  const utc = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
+  const mins = Math.round((local.getTime() - utc.getTime()) / 60000);
+  return `${mins >= 0 ? '+' : ''}${mins} minutes`;
+}
+
 export function report(from: string, to: string) {
   const range = [from, to];
+  const shift = localShift();
+  // Orders are counted on the day they're wanted; completions on the day they were completed
   const byDay = db()
     .prepare(
-      `SELECT requested_date AS date, COUNT(*) orders, SUM(status = 'completed') completed, SUM(status = 'cancelled') cancelled
-       FROM orders WHERE requested_date BETWEEN ? AND ? GROUP BY requested_date ORDER BY requested_date`,
+      `SELECT date, SUM(orders) orders, SUM(completed) completed, SUM(cancelled) cancelled FROM (
+         SELECT requested_date AS date, 1 orders, 0 completed, (status = 'cancelled') cancelled FROM orders WHERE requested_date BETWEEN ? AND ?
+         UNION ALL
+         SELECT date(completed_at, ?) AS date, 0, 1, 0 FROM orders WHERE status = 'completed' AND completed_at IS NOT NULL AND date(completed_at, ?) BETWEEN ? AND ?
+       ) GROUP BY date ORDER BY date`,
     )
-    .all(...range);
+    .all(from, to, shift, shift, from, to);
   const received = db()
     .prepare(`SELECT substr(created_at,1,10) AS date, COUNT(*) n FROM orders WHERE substr(created_at,1,10) BETWEEN ? AND ? GROUP BY 1 ORDER BY 1`)
     .all(...range);
-  const byStatus = db().prepare(`SELECT status, COUNT(*) n FROM orders WHERE requested_date BETWEEN ? AND ? OR (requested_date IS NULL AND substr(created_at,1,10) BETWEEN ? AND ?) GROUP BY status`).all(from, to, from, to);
+  const byStatus = db()
+    .prepare(`SELECT status, COUNT(*) n FROM orders WHERE requested_date BETWEEN ? AND ? OR date(created_at, ?) BETWEEN ? AND ? OR (completed_at IS NOT NULL AND date(completed_at, ?) BETWEEN ? AND ?) GROUP BY status`)
+    .all(from, to, shift, from, to, shift, from, to);
   const bySource = db().prepare(`SELECT source, COUNT(*) n FROM orders WHERE substr(created_at,1,10) BETWEEN ? AND ? GROUP BY source ORDER BY n DESC`).all(...range);
   const products = (
     db()

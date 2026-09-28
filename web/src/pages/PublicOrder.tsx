@@ -62,6 +62,7 @@ export default function PublicOrder() {
   const [s, setS] = useState<State>(initial);
   const [adding, setAdding] = useState<{ p: CatProduct; line?: Line } | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
+  const [laterOpen, setLaterOpen] = useState(false);
   const [q, setQ] = useState('');
   const [cat_, setCat] = useState('All');
   const [done, setDone] = useState<{ number: number | null; message: string } | null>(null);
@@ -153,7 +154,8 @@ export default function PublicOrder() {
   const terms: string[] = (info.form.terms ?? '').split('\n').map((t: string) => t.trim()).filter(Boolean);
   const detailsOk = s.name.trim().length >= 2 && s.phone.replace(/\D/g, '').length >= 9;
   const needsAddress = !chooses || s.fulfilment === 'delivery';
-  const whenOk = !!s.date && (!needsAddress || s.address.trim().length > 5);
+  const dateOk = !!s.date && s.date >= info.earliest_date && s.date <= addDays(info.today, 90) && allowedDays.includes(new Date(s.date + 'T00:00:00Z').getUTCDay());
+  const whenOk = dateOk && (!needsAddress || s.address.trim().length > 5);
   const steps = ['Choose', 'Your details', chooses ? 'Collection or delivery' : 'Date & address', 'Check & send'];
 
   return (
@@ -275,6 +277,31 @@ export default function PublicOrder() {
               ))}
             </div>
             {!dates.length && <p className="text-[14px] text-ink-3">No days are available right now — please contact us.</p>}
+            {/* Further ahead (an event, a function): any date up to three months out */}
+            <div className="mt-3">
+              {!laterOpen && !(s.date && !dates.includes(s.date)) ? (
+                <button type="button" onClick={() => setLaterOpen(true)} className="inline-flex items-center gap-1.5 text-[14.5px] font-semibold text-brand underline-offset-2 hover:underline">
+                  <CalendarClock className="size-4" /> Pick a later date
+                </button>
+              ) : (
+                <div className="rounded-xl border border-line bg-surface p-3">
+                  <label htmlFor="later-date" className="text-[14px] font-medium">A later date (up to 3 months ahead)</label>
+                  <Input
+                    id="later-date"
+                    type="date"
+                    className="mt-2 w-48"
+                    min={info.earliest_date}
+                    max={addDays(info.today, 90)}
+                    value={s.date && !dates.includes(s.date) ? s.date : ''}
+                    onChange={(e) => set({ date: e.target.value })}
+                  />
+                  {s.date && !dates.includes(s.date) && !allowedDays.includes(new Date(s.date + 'T00:00:00Z').getUTCDay()) && (
+                    <p className="mt-2 text-[13px] font-medium text-danger">We’re not {s.fulfilment === 'delivery' && chooses ? 'delivering' : 'open'} on that day of the week. Please choose another day.</p>
+                  )}
+                  {s.date && !dates.includes(s.date) && allowedDays.includes(new Date(s.date + 'T00:00:00Z').getUTCDay()) && <p className="mt-2 text-[13px] text-ink-2">{longDate(s.date)}</p>}
+                </div>
+              )}
+            </div>
           </Field>
           {needsAddress && <Field label={chooses ? 'Delivery address' : 'Your address'} hint={chooses ? undefined : 'Street address and suburb, e.g. 12 Kerk Street, Pretoria East.'} className="mt-5"><Textarea rows={3} value={s.address} onChange={(e) => set({ address: e.target.value })} autoComplete="street-address" /></Field>}
           <Field label="Anything we should know?" optional className="mt-5"><Textarea rows={2} value={s.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="e.g. it’s for a braai for 10 people" /></Field>
