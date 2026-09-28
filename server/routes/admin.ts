@@ -20,7 +20,7 @@ import { actorOf, requirePerm, type Env } from '../http/context.js';
 import { body, ymdParam } from '../http/schemas.js';
 import { localDate, addDays } from '../lib/time.js';
 import { businessTz } from '../services/settings.js';
-import { emailConfigured, emailFrom, sendEmail } from '../services/email.js';
+import { emailConfigured, emailFrom, emailSetup, explainEmailError, sendEmail } from '../services/email.js';
 import { rateLimit } from '../http/security.js';
 
 const r = new Hono<Env>();
@@ -78,7 +78,7 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
 };
 
 r.get('/settings', requirePerm('settings.read'), (c) =>
-  c.json({ settings: getSettings(), environment: { ai_key: !!process.env.ANTHROPIC_API_KEY, whatsapp: !!process.env.WHATSAPP_VERIFY_TOKEN, whatsapp_secret: !!process.env.WHATSAPP_APP_SECRET, email_inbound: !!process.env.EMAIL_INBOUND_TOKEN, email_outbound: emailConfigured(), email_from: emailConfigured() ? emailFrom() : null } }),
+  c.json({ settings: getSettings(), environment: { ai_key: !!process.env.ANTHROPIC_API_KEY, whatsapp: !!process.env.WHATSAPP_VERIFY_TOKEN, whatsapp_secret: !!process.env.WHATSAPP_APP_SECRET, email_inbound: !!process.env.EMAIL_INBOUND_TOKEN, email_outbound: emailConfigured(), email_from: emailConfigured() ? emailFrom() : null, email_server: emailConfigured() ? `${emailSetup().host}:${emailSetup().port} as ${emailSetup().user}` : null } }),
 );
 
 r.put('/settings/:section', requirePerm('settings.write'), async (c) => {
@@ -100,7 +100,7 @@ r.post('/test-email', requirePerm('settings.write'), rateLimit('test-email', 5, 
   try {
     await sendEmail({ to, subject: 'Terram test email', text: 'This is a test from Terram Butchery OS. New online orders will be emailed to this address.', html: '<p>This is a test from Terram Butchery OS. New online orders will be emailed to this address.</p>' });
   } catch (e: any) {
-    throw badRequest(`The email server said: ${String(e?.message ?? e).slice(0, 200)}`);
+    throw badRequest(explainEmailError(e));
   }
   audit(actorOf(c), 'settings.test_email', 'settings', 'customerForm', `Sent a test email to ${to.join(', ')}`);
   return c.json({ ok: true, to });

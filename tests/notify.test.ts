@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Client, freshDb, productId, signedIn } from './helpers';
 import { buildApp } from '../server/app';
-import { outbox } from '../server/services/email';
+import { emailSetup, explainEmailError, outbox } from '../server/services/email';
 import { createCustomer } from '../server/domain/customers';
 import { addDays, localDate, weekdayOf } from '../server/lib/time';
 import { STAFF } from './helpers';
@@ -82,5 +82,21 @@ describe('adding a customer who may already exist', () => {
     const r = await new Client(buildApp()).get('/api/public/info');
     expect(JSON.stringify(r.body)).not.toMatch(/meacreo|imagine\.co\.za|notifyEmails/);
     expect(r.body.form.terms).toBeTruthy();
+  });
+
+  it('explains email server problems in plain words, and forgives stray spaces or quotes', () => {
+    process.env.SMTP_HOST = '  cp71.domains.co.za ';
+    process.env.SMTP_PORT = '"465"';
+    process.env.SMTP_USER = 'orders@terramfarm.co.za ';
+    try {
+      expect(emailSetup()).toEqual({ host: 'cp71.domains.co.za', port: 465, user: 'orders@terramfarm.co.za', secure: true });
+      expect(explainEmailError({ code: 'EAUTH', response: '535 Incorrect authentication data' })).toMatch(/turned down the login for orders@terramfarm\.co\.za.*current password/);
+      expect(explainEmailError({ code: 'ESOCKET', message: 'Hostname/IP does not match certificate\'s altnames' })).toMatch(/certificate doesn't match "cp71\.domains\.co\.za"/);
+      expect(explainEmailError({ code: 'ETIMEDOUT', message: 'Connection timeout' })).toMatch(/Couldn't connect to cp71\.domains\.co\.za on port 465/);
+    } finally {
+      delete process.env.SMTP_HOST;
+      delete process.env.SMTP_PORT;
+      delete process.env.SMTP_USER;
+    }
   });
 });

@@ -211,7 +211,7 @@ function FormSettings({ s, env }: { s: any; env: any }) {
         action={env?.email_outbound && <Button size="sm" loading={test.isPending} onClick={() => test.mutate()}>Send test email</Button>}
       >
         {env?.email_outbound
-          ? <>Email is set up. Orders are sent from <b>{env.email_from}</b>. Save first, then send a test.</>
+          ? <>Email is set up. Orders are sent from <b>{env.email_from}</b> (server {env.email_server}). Save first, then send a test.</>
           : <>Email isn’t switched on yet. Add your mailbox’s SMTP details on the server (Render → Environment: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS). Orders still arrive in the app either way.</>}
       </Callout>
     </Panel>
