@@ -371,4 +371,13 @@ ALTER TABLE users ADD COLUMN family_login INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE sessions ADD COLUMN via TEXT NOT NULL DEFAULT 'password';
 `,
   },
+  {
+    id: 4,
+    name: 'product-minimum-order',
+    sql: `
+ALTER TABLE products ADD COLUMN min_count INTEGER;
+UPDATE products SET min_count = 30 WHERE slug = 'eggs';
+ALTER TABLE orders ADD COLUMN special_request TEXT;
+`,
+  },
 ];

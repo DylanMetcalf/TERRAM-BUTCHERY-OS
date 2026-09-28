@@ -29,6 +29,8 @@ export interface Product {
   allows_portions: boolean;
   piece_noun: string;
   typical_piece_g: number | null;
+  /** Smallest number of pieces sold (e.g. eggs: 30, a tray). */
+  min_count: number | null;
   price_cents: number | null;
   price_unit: 'kg' | 'each' | null;
   packaging: string | null;
@@ -57,6 +59,7 @@ function rowToProduct(r: any, aliases: any[], preps: any[]): Product {
     allows_portions: !!r.allows_portions,
     piece_noun: r.piece_noun,
     typical_piece_g: r.typical_piece_g,
+    min_count: r.min_count ?? null,
     price_cents: r.price_cents,
     price_unit: r.price_unit,
     packaging: r.packaging,
@@ -171,6 +174,7 @@ export interface ProductInput {
   allows_portions?: boolean;
   piece_noun?: string;
   typical_piece_g?: number | null;
+  min_count?: number | null;
   price_cents?: number | null;
   price_unit?: 'kg' | 'each' | null;
   packaging?: string | null;
@@ -253,6 +257,7 @@ export function updateProduct(productId: string, input: Partial<ProductInput>, a
       ['allows_portions', 'allows_portions', (v) => (v ? 1 : 0)],
       ['piece_noun', 'piece_noun', (v) => v || 'piece'],
       ['typical_piece_g', 'typical_piece_g', (v) => v ?? null],
+      ['min_count', 'min_count', (v) => v ?? null],
       ['price_cents', 'price_cents', (v) => v ?? null],
       ['price_unit', 'price_unit', (v) => v ?? null],
       ['packaging', 'packaging', (v) => v ?? null],
@@ -362,13 +367,13 @@ function insertCatalogue(catalogue: SeedProduct[], sortFrom: number) {
   tx(() => {
     const ts = now();
     const insP = db().prepare(
-      `INSERT INTO products (id, slug, canonical_name, customer_name, category, description, quantity_type, allows_portions, piece_noun, typical_piece_g, price_cents, price_unit, active, customer_visible, internal_notes, sort_order, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)`,
+      `INSERT INTO products (id, slug, canonical_name, customer_name, category, description, quantity_type, allows_portions, piece_noun, typical_piece_g, price_cents, price_unit, active, customer_visible, internal_notes, min_count, sort_order, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)`,
     );
     const insA = db().prepare('INSERT OR IGNORE INTO product_aliases (id, product_id, alias, source, created_at) VALUES (?,?,?,?,?)');
     catalogue.forEach((s, i) => {
       const pid = id('pr_');
-      insP.run(pid, s.slug, s.name, s.customer_name ?? s.name, s.category, s.description ?? null, s.quantity_type, s.allows_portions ? 1 : 0, s.piece_noun ?? 'piece', s.typical_piece_g ?? null, s.price_cents ?? null, s.price_unit ?? null, s.customer_visible === false ? 0 : 1, s.internal_notes ?? null, sortFrom + i, ts, ts);
+      insP.run(pid, s.slug, s.name, s.customer_name ?? s.name, s.category, s.description ?? null, s.quantity_type, s.allows_portions ? 1 : 0, s.piece_noun ?? 'piece', s.typical_piece_g ?? null, s.price_cents ?? null, s.price_unit ?? null, s.customer_visible === false ? 0 : 1, s.internal_notes ?? null, s.min_count ?? null, sortFrom + i, ts, ts);
       const aliases = new Set([s.name, s.customer_name ?? s.name, ...s.aliases].map(normalise).filter(Boolean));
       for (const a of aliases) insA.run(id('pa_'), pid, a, 'seed', ts);
       const preps = Object.entries(s.preps ?? {}).flatMap(([group, opts]) => opts.map(([name, keywords, isDefault]) => ({ group_name: group, name, keywords, is_default: !!isDefault })));

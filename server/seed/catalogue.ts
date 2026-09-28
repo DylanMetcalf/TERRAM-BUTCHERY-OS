@@ -27,6 +27,7 @@ export interface SeedProduct {
   preps?: Record<string, Prep[]>;
   customer_visible?: boolean;
   internal_notes?: string;
+  min_count?: number;
 }
 
 const THICKNESS: Prep[] = [
@@ -255,8 +256,8 @@ export const CATALOGUE: SeedProduct[] = [
   // ── Eggs ────────────────────────────────────────────────
   {
     // Retail price per egg. "A tray" is read as 30 eggs, "a dozen" as 12.
-    slug: 'eggs', name: 'Eggs', category: 'Eggs', quantity_type: 'count', piece_noun: 'egg',
-    price_cents: 250, price_unit: 'each', description: 'R2.50 per egg. A tray is 30 eggs.',
+    slug: 'eggs', name: 'Eggs', category: 'Eggs', quantity_type: 'count', piece_noun: 'egg', min_count: 30,
+    price_cents: 250, price_unit: 'each', description: 'R2.50 per egg. Minimum order is a tray of 30.',
     internal_notes: 'Retail R2.50/egg. Wholesale (R2/egg) is handled outside the app.',
     aliases: ['eggs', 'egg', 'farm eggs', 'free range eggs', 'tray of eggs', 'egg tray', 'trays of eggs'],
   },

@@ -16,6 +16,7 @@ export type ExceptionType =
   | 'ambiguous_customer'
   | 'unclear_date'
   | 'customer_question'
+  | 'special_request'
   | 'contradiction'
   | 'unmatched_message'
   | 'amendment_no_order'

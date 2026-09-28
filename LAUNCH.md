@@ -38,7 +38,7 @@ The code is on the branch `claude/terram-farm-butchery-os-n3ng2e`. Either merge 
 2. **Settings → Business**: check the name, phone (+27 79 889 5569 is filled in), email, address and time zone (Africa/Johannesburg).
    Your **brand kit is already built in**: the Terram Farm logo, Terram green (#446041), charcoal and white, and a bold heading font close to Garet. The Home Screen icon is the white logo on charcoal, like your price lists. You only need **Settings → Branding** if you want to change them.
 3. **Settings → Orders & fulfilment**: tick your collection days and delivery days and set collection hours.
-4. **Products** already holds your Beef and Lamb price lists (June 2026) plus eggs (R2.50 each; "a tray" is read as 30 eggs): 42 products at your prices, grouped like the printed lists. When prices change, use **Products → Update prices**: paste the new list in any format (e.g. `Rump R195`). You'll see old → new for every product; tick and confirm.
+4. **Products** already holds your Beef and Lamb price lists (June 2026) plus eggs (R2.50 each, minimum a tray of 30; "a tray" is read as 30 eggs): 42 products at your prices, grouped like the printed lists. When prices change, use **Products → Update prices**: paste the new list in any format (e.g. `Rump R195`). You'll see old → new for every product; tick and confirm.
    Words that could mean two products ("mince", "biltong", "chops", "ribs", "shoulder") are left for a person to choose, so the app never guesses. After the family picks the same answer a couple of times, Intelligence suggests making it automatic. You can also add words yourself on a product ("Also called").
 5. **Settings → Team**:
    - **Set a family code**, e.g. a short phrase like *red barn mince*. Write it down; it isn't shown again.
@@ -66,6 +66,10 @@ Each device stays signed in for about six months. If a phone is lost: **Settings
 - **Packing**: tick each item, then **Packed**. Print packing slips or order dockets if you like paper.
 - **Fulfilment**: **Tell customer** (opens WhatsApp with a ready message), then **Collected** or **Delivered**.
 - Customers can also order themselves from `your-address/order` (Settings → Customer form has the link).
+
+### Special requests
+
+The order form has its own **Special requests** section at the end of the product list, for things that aren't on the price list, special cuts or bigger orders. A request shows up in **Needs attention** as "Special request on order #…". Agree the details and price with the customer, add the items to the order, then tap **Agreed with customer**. An order with only a special request waits in "Needs clarification" until then.
 
 ### Replacing the old order form
 

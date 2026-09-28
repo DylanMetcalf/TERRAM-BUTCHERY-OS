@@ -360,6 +360,13 @@ export default function OrderDetail() {
             </Card>
           </section>
 
+          {o.special_request && (
+            <section>
+              <SectionTitle>Special request</SectionTitle>
+              <Card className="whitespace-pre-line border-ochre/40 bg-ochre-soft p-4 text-[14.5px] text-ochre-soft-ink">{o.special_request}</Card>
+            </section>
+          )}
+
           {o.notes && (
             <section>
               <SectionTitle>Order notes</SectionTitle>

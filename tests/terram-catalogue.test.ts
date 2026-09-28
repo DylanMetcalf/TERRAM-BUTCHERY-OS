@@ -3,7 +3,10 @@ import { freshDb, STAFF } from './helpers';
 import { analyseImport, getBatch } from '../server/intelligence/imports';
 import { listProducts, upgradeCatalogue } from '../server/domain/products';
 import { createOrder } from '../server/domain/orders';
-import { productId } from './helpers';
+import { Client, productId } from './helpers';
+import { buildApp } from '../server/app';
+import { db } from '../server/db/db';
+import { addDays, localDate, weekdayOf } from '../server/lib/time';
 import { CATALOGUE } from '../server/seed/catalogue';
 
 beforeEach(() => freshDb('terram'));
@@ -124,5 +127,47 @@ bones 2kg`),
 
   it('eggs are sold per egg: trays are 30, dozens are 12', async () => {
     expect(await read('Sarah:\na tray of eggs\n2 dozen eggs\n\nJohn:\n45 eggs\n\nMary:\n3 trays eggs')).toEqual(['30 eggs Eggs', '24 eggs Eggs', '45 eggs Eggs', '90 eggs Eggs']);
+  });
+
+  it('pasted egg orders below a tray are flagged', async () => {
+    const b = getBatch(await analyseImport({ text: 'Sarah:\n12 eggs', useAi: false }, STAFF));
+    expect((b.drafts[0].data as any).issues.map((i: any) => i.message)).toContain('Eggs: the minimum order is 30 eggs. This asks for 12 eggs.');
+  });
+});
+
+describe('customer order form', () => {
+  const day = () => {
+    const today = localDate(new Date(), 'Africa/Johannesburg');
+    for (let i = 2; i < 10; i++) if ([2, 3, 4, 5, 6].includes(weekdayOf(addDays(today, i)))) return addDays(today, i);
+    throw new Error('no day');
+  };
+  const order = (ref: string, extra: any) => ({ customer: { name: 'Naledi Zulu', phone: '071 555 3380' }, items: [], fulfilment_type: 'collection', requested_date: day(), client_ref: ref, ...extra });
+  const eggs = (count: number) => ({ product_id: productId('eggs'), qty: { kind: 'count', count, weight_g: null } });
+
+  it('needs at least a tray of eggs', async () => {
+    const c = new Client(buildApp());
+    const few = await c.post('/api/public/orders', order('ref-eggs-0001', { items: [eggs(12)] }));
+    expect(few.status).toBe(400);
+    expect(few.body.error).toMatch(/minimum order is 30/);
+    expect((await c.post('/api/public/orders', order('ref-eggs-0002', { items: [eggs(30)] }))).status).toBe(200);
+  });
+
+  it('takes a special request on its own and sends it to Needs attention', async () => {
+    const c = new Client(buildApp());
+    expect((await c.post('/api/public/orders', order('ref-spec-0000', {}))).status).toBe(400); // nothing at all
+    const r = await c.post('/api/public/orders', order('ref-spec-0001', { special_request: 'A whole lamb cut for a potjie and braai' }));
+    expect(r.status).toBe(200);
+    const o = db().prepare('SELECT status, special_request FROM orders').get() as any;
+    expect(o).toEqual({ status: 'needs_clarification', special_request: 'A whole lamb cut for a potjie and braai' });
+    const e = db().prepare("SELECT type, severity, title FROM exceptions WHERE type = 'special_request'").get() as any;
+    expect(e.title).toMatch(/Special request on order #\d+/);
+    expect(e.severity).toBe('blocking');
+  });
+
+  it('keeps normal items and flags the special request alongside them', async () => {
+    const c = new Client(buildApp());
+    await c.post('/api/public/orders', order('ref-spec-0002', { items: [eggs(60)], special_request: 'Could you add 2kg dog bones?' }));
+    expect((db().prepare('SELECT status FROM orders').get() as any).status).toBe('review');
+    expect((db().prepare("SELECT severity FROM exceptions WHERE type = 'special_request'").get() as any).severity).toBe('warning');
   });
 });

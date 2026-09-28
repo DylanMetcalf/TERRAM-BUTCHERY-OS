@@ -20,6 +20,7 @@ const TYPE_LABEL: Record<string, string> = {
   ambiguous_customer: 'Which customer?',
   unclear_date: 'Unclear date',
   customer_question: 'Customer question',
+  special_request: 'Special request',
   contradiction: 'Conflicting amounts',
   unmatched_message: 'Unclear message',
   amendment_no_order: 'Change without an order',

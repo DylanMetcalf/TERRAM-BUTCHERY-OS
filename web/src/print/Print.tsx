@@ -120,6 +120,7 @@ function PackSlip({ o, items, notes }: { o: OrderSummary; items: OrderItem[]; no
           ))}
         </tbody>
       </table>
+      {(o as any).special_request && <div className="mt-1.5 border border-black px-1.5 py-1 text-[12.5px]"><b>Special request:</b> {(o as any).special_request}</div>}
       {(notes || o.delivery_address) && (
         <div className="mt-1.5 border-t border-black pt-1 text-[12.5px]">
           {o.fulfilment_type === 'delivery' && o.delivery_address && <div><b>Address:</b> {o.delivery_address}{o.contact_phone ? ` · ${o.contact_phone}` : ''}</div>}

@@ -18,12 +18,13 @@ interface CatProduct {
   allows_portions: boolean;
   piece_noun: string;
   typical_piece_g: number | null;
+  min_count: number | null;
   price_cents: number | null;
   price_unit: 'kg' | 'each' | null;
   options: { group: string; options: { name: string; is_default: boolean }[] }[];
 }
 interface Line { key: string; product_id: string; qty: Qty; preparation: Record<string, string>; special_instructions: string }
-interface State { step: 0 | 1 | 2 | 3; lines: Line[]; name: string; phone: string; email: string; fulfilment: 'collection' | 'delivery'; date: string; address: string; notes: string; client_ref: string; accepted?: boolean }
+interface State { step: 0 | 1 | 2 | 3; lines: Line[]; name: string; phone: string; email: string; fulfilment: 'collection' | 'delivery'; date: string; address: string; notes: string; client_ref: string; accepted?: boolean; special?: string }
 
 const KEY = 'terram:customer-order';
 /** "Beef – Steaks" → chip "Beef", section "Steaks" (matches the printed price lists). */
@@ -79,6 +80,7 @@ export default function PublicOrder() {
         requested_date: s.date,
         delivery_address: s.fulfilment === 'delivery' ? s.address : null,
         notes: s.notes || null,
+        special_request: s.special?.trim() || null,
         client_ref: s.client_ref,
       }),
     onSuccess: (r) => {
@@ -165,6 +167,13 @@ export default function PublicOrder() {
               </div>
             </section>
           ))}
+          {cat_ === 'All' && (
+            <section className="mt-9">
+              <h2 className="mb-1 font-display text-[19px] font-bold uppercase tracking-[0.02em]">Special requests</h2>
+              <p className="mb-3 max-w-xl text-[14.5px] text-ink-2">Something that isn’t on the list, a special cut or a bigger order? Describe it here. We’ll confirm availability and price with you before anything is prepared.</p>
+              <Textarea rows={4} value={s.special ?? ''} onChange={(e) => set({ special: e.target.value })} maxLength={1500} placeholder="e.g. a whole lamb cut for a potjie and braai, or 5kg of dog bones" aria-label="Special requests" />
+            </section>
+          )}
         </div>
       )}
 
@@ -210,7 +219,7 @@ export default function PublicOrder() {
       {s.step === 3 && (
         <div className="mx-auto max-w-lg animate-rise pb-28">
           <h1 className="font-display text-[28px] font-semibold">Check your order</h1>
-          <Card className="mt-5 divide-y divide-line">
+          <Card className={cx('mt-5 divide-y divide-line', !s.lines.length && 'hidden')}>
             {s.lines.map((l) => {
               const p = byId.get(l.product_id);
               const prep = Object.values(l.preparation).filter((v) => !p?.options.some((g) => g.options.some((o) => o.name === v && o.is_default)));
@@ -223,6 +232,13 @@ export default function PublicOrder() {
             })}
             {total != null && total > 0 && <div className="flex justify-between px-4 py-3 text-[14px]"><span className="text-ink-2">Estimated total</span><span className="font-semibold">{formatMoney(total, info.currency)}</span></div>}
           </Card>
+          {s.special?.trim() && (
+            <Card className="mt-3 p-4 text-[14.5px]">
+              <div className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-3">Special request</div>
+              <p className="mt-1 whitespace-pre-line">{s.special.trim()}</p>
+              <p className="mt-2 text-[13px] text-ink-3">We’ll confirm availability and price with you.</p>
+            </Card>
+          )}
           <Card className="mt-3 space-y-1 p-4 text-[14.5px]">
             <div><b>{s.name}</b> · {s.phone}</div>
             <div>{s.fulfilment === 'delivery' ? `Delivery to ${s.address}` : 'Collection'} · {s.date && longDate(s.date)}</div>
@@ -249,13 +265,13 @@ export default function PublicOrder() {
           {s.step > 0 && <Button size="lg" variant="ghost" icon={<ArrowLeft className="size-4" />} onClick={() => set({ step: (s.step - 1) as State['step'] })}>Back</Button>}
           {s.step === 0 && (
             <div className="min-w-0 flex-1 text-[14px]">
-              <div className="font-semibold">{s.lines.length ? `${s.lines.length} item${s.lines.length === 1 ? '' : 's'}` : 'Nothing chosen yet'}</div>
+              <div className="font-semibold">{s.lines.length ? `${s.lines.length} item${s.lines.length === 1 ? '' : 's'}${s.special?.trim() ? ' + special request' : ''}` : s.special?.trim() ? 'Special request' : 'Nothing chosen yet'}</div>
               {total != null && total > 0 && <div className="text-ink-3">≈ {formatMoney(total, info.currency)}</div>}
             </div>
           )}
           <div className={cx('flex', s.step > 0 && 'flex-1 justify-end')}>
             {s.step < 3 ? (
-              <Button variant="primary" size="lg" disabled={(s.step === 0 && !s.lines.length) || (s.step === 1 && !detailsOk) || (s.step === 2 && !whenOk)} onClick={() => set({ step: (s.step + 1) as State['step'] })}>Continue</Button>
+              <Button variant="primary" size="lg" disabled={(s.step === 0 && !s.lines.length && !s.special?.trim()) || (s.step === 1 && !detailsOk) || (s.step === 2 && !whenOk)} onClick={() => set({ step: (s.step + 1) as State['step'] })}>Continue</Button>
             ) : (
               <Button variant="primary" size="lg" disabled={!online || (terms.length > 0 && !s.accepted)} loading={submit.isPending} onClick={() => { setError(null); submit.mutate(); }}>Send order</Button>
             )}
@@ -283,7 +299,7 @@ function AddSheet({ p, existing, onAdd, onRemove, onClose, currency }: { p: CatP
   const [note, setNote] = useState('');
   const price = qty ? estimateLinePrice(qty, p.price_cents, p.price_unit) : null;
   return (
-    <Sheet open onClose={onClose} title={p.name} subtitle={p.description ?? undefined} footer={<Button variant="primary" size="lg" full disabled={!qty} onClick={() => qty && onAdd({ key: newKey(), product_id: p.id, qty, preparation: prep, special_instructions: note.trim() })} icon={<ShoppingBag className="size-4" />}>Add to order{price != null ? ` · ≈ ${formatMoney(price, currency)}` : ''}</Button>}>
+    <Sheet open onClose={onClose} title={p.name} subtitle={p.description ?? undefined} footer={<Button variant="primary" size="lg" full disabled={!qty || (!!p.min_count && qty.kind === 'count' && (qty.count ?? 0) < p.min_count)} onClick={() => qty && onAdd({ key: newKey(), product_id: p.id, qty, preparation: prep, special_instructions: note.trim() })} icon={<ShoppingBag className="size-4" />}>Add to order{price != null ? ` · ≈ ${formatMoney(price, currency)}` : ''}</Button>}>
       <div className="space-y-6">
         {existing.length > 0 && (
           <div className="space-y-2">
@@ -296,7 +312,8 @@ function AddSheet({ p, existing, onAdd, onRemove, onClose, currency }: { p: CatP
           </div>
         )}
         <Field label="How much?">
-          <QuantityInput value={qty} onChange={setQty} quantityType={p.quantity_type} allowsPortions={p.allows_portions} pieceNoun={p.piece_noun} />
+          <QuantityInput value={qty} onChange={setQty} quantityType={p.quantity_type} allowsPortions={p.allows_portions} pieceNoun={p.piece_noun} minCount={p.min_count ?? undefined} />
+          {p.min_count && <p className="mt-2 text-[13px] text-ink-3">Minimum order: {p.min_count} {p.piece_noun}s.</p>}
           {p.typical_piece_g && p.quantity_type !== 'weight' && <p className="mt-2 text-[13px] text-ink-3">One {p.piece_noun} is about {p.typical_piece_g >= 1000 ? `${p.typical_piece_g / 1000}kg` : `${p.typical_piece_g}g`}.</p>}
         </Field>
         {p.options.map((g) => (
@@ -308,7 +325,7 @@ function AddSheet({ p, existing, onAdd, onRemove, onClose, currency }: { p: CatP
             </div>
           </Field>
         ))}
-        <Field label="Special requests" optional><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. extra thick" /></Field>
+        <Field label="Notes for this item" optional><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder={p.quantity_type === 'count' && !p.options.length ? 'Anything we should know' : 'e.g. extra thick, 2 per pack'} /></Field>
       </div>
     </Sheet>
   );

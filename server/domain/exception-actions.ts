@@ -45,6 +45,8 @@ export function actionsFor(e: ExceptionRow): ActionDef[] {
       return [{ key: 'set_date', label: 'Set date', tone: 'primary', needs: 'date' }, ask, dismiss];
     case 'customer_question':
       return [{ key: 'mark_answered', label: 'Mark answered', tone: 'primary' }, dismiss];
+    case 'special_request':
+      return [{ key: 'mark_handled', label: 'Agreed with customer', tone: 'primary' }, ask, dismiss];
     case 'unmatched_message':
     case 'amendment_no_order':
       return [{ key: 'mark_handled', label: 'Handled', tone: 'primary' }, dismiss];

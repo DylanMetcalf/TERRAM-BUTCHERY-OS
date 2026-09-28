@@ -95,6 +95,8 @@ export interface OrderSummary {
   delivery_notes: string | null;
   contact_phone: string | null;
   notes: string | null;
+  /** Free-text request from the order form's Special requests section (not on the price list). */
+  special_request: string | null;
   payment_status: PaymentStatus;
   accounting_ref: string | null;
   customer_notified_at: string | null;

@@ -11,7 +11,7 @@ import { SOURCE_LABEL } from '../../../shared/workflow';
 
 const EX_LABEL: Record<string, string> = {
   unknown_product: 'Unknown product', missing_quantity: 'Missing quantity', possible_amendment: 'Possible amendment', ambiguous_reference: 'Unclear reference',
-  possible_duplicate: 'Possible duplicate', cancellation_request: 'Cancellation', ambiguous_customer: 'Unclear customer', customer_question: 'Customer question',
+  possible_duplicate: 'Possible duplicate', cancellation_request: 'Cancellation', ambiguous_customer: 'Unclear customer', customer_question: 'Customer question', special_request: 'Special request',
   contradiction: 'Conflicting amounts', unmatched_message: 'Unclear message', amendment_no_order: 'Change without order', ai_failure: 'Could not read', import_failure: 'Import problem',
 };
 

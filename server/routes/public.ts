@@ -48,6 +48,7 @@ r.get('/catalogue', (c) => {
       allows_portions: p.allows_portions,
       piece_noun: p.piece_noun,
       typical_piece_g: p.typical_piece_g,
+      min_count: p.min_count,
       price_cents: show ? p.price_cents : null,
       price_unit: show ? p.price_unit : null,
       options: prepGroups(p, { customerOnly: true }).map((g) => ({ group: g.group, options: g.options.map((o) => ({ name: o.name, is_default: o.is_default })) })),
@@ -77,9 +78,12 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
     if (!s.fulfilment.deliveryDays.includes(wd)) throw badRequest('We do not deliver on that day.');
     if (!input.delivery_address?.trim()) throw badRequest('Please enter your delivery address.');
   } else if (!s.fulfilment.collectionDays.includes(wd)) throw badRequest('We are not open for collections on that day.');
+  const special = input.special_request?.trim() || null;
+  if (!input.items.length && !special) throw badRequest('Please choose at least one product, or describe what you need under Special requests.');
   for (const it of input.items) {
     const p = requireProduct(it.product_id);
     if (!p.active || !p.customer_visible) throw badRequest('One of the products is no longer available. Please refresh the page.');
+    if (p.min_count && it.qty.kind === 'count' && (it.qty.count ?? 0) < p.min_count) throw badRequest(`${p.customer_name}: the minimum order is ${p.min_count}.`);
     for (const [g, v] of Object.entries(it.preparation ?? {})) {
       const opt = p.preparations.find((o) => o.group_name === g && o.name === v);
       if (!opt || !opt.customer_visible || !opt.active) throw badRequest(`That option is not available for ${p.customer_name}.`);
@@ -94,13 +98,14 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   const summary = input.items.map((i) => `${formatQty(i.qty as any)} ${requireProduct(i.product_id).customer_name}${Object.values(i.preparation ?? {}).length ? ` (${Object.values(i.preparation ?? {}).join(', ')})` : ''}${i.special_instructions ? ` — ${i.special_instructions}` : ''}`).join('\n');
   db()
     .prepare("INSERT INTO messages (id, channel, external_id, direction, sender_name, sender_phone, body, received_at, classification, status, created_at) VALUES (?, 'form', ?, 'in', ?, ?, ?, ?, 'new_order', 'processed', ?)")
-    .run(messageId, input.client_ref, input.customer.name, phone, `${summary}\n${input.fulfilment_type === 'delivery' ? 'Delivery' : 'Collection'} ${input.requested_date}${input.notes ? `\nNote: ${input.notes}` : ''}\n\n${JSON.stringify(input)}`, now(), now());
+    .run(messageId, input.client_ref, input.customer.name, phone, `${summary}${special ? `\nSpecial request: ${special}` : ''}\n${input.fulfilment_type === 'delivery' ? 'Delivery' : 'Collection'} ${input.requested_date}${input.notes ? `\nNote: ${input.notes}` : ''}\n\n${JSON.stringify(input)}`, now(), now());
   const order = createOrder(
     {
       customer,
       source: 'form',
       items: input.items.map((i) => ({ product_id: i.product_id, qty: i.qty as any, preparation: i.preparation ?? {}, special_instructions: i.special_instructions ?? null, source_text: 'Order form' })),
-      status: s.orders.formOrdersRequireReview ? 'review' : 'confirmed',
+      // A special request alone has nothing to cut yet: it waits until it's agreed with the customer
+      status: !input.items.length ? 'needs_clarification' : s.orders.formOrdersRequireReview || special ? 'review' : 'confirmed',
       fulfilment_type: input.fulfilment_type,
       requested_date: input.requested_date,
       delivery_address: input.fulfilment_type === 'delivery' ? input.delivery_address : null,
@@ -113,6 +118,18 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
     CUSTOMER,
   );
   db().prepare('UPDATE messages SET customer_id = ? WHERE id = ?').run(order.customer_id, messageId);
+  if (special) {
+    db().prepare('UPDATE orders SET special_request = ? WHERE id = ?').run(special, order.id);
+    raiseException({
+      type: 'special_request',
+      severity: input.items.length ? 'warning' : 'blocking',
+      title: `Special request on order #${order.order_number}`,
+      detail: `${input.customer.name} asked: “${special}”. Confirm availability and price with them, then add it to the order.`,
+      order_id: order.id,
+      message_id: messageId,
+      payload: { text: special },
+    });
+  }
   if (match.status !== 'matched' && match.status !== 'new') {
     raiseException({
       type: 'ambiguous_customer',

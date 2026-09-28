@@ -25,6 +25,7 @@ export interface OrderSummary {
   time_window: string | null;
   delivery_address: string | null;
   delivery_notes: string | null;
+  special_request: string | null;
   contact_phone: string | null;
   notes: string | null;
   payment_status: PaymentStatus;
@@ -84,6 +85,7 @@ export interface Product {
   allows_portions: boolean;
   piece_noun: string;
   typical_piece_g: number | null;
+  min_count: number | null;
   price_cents: number | null;
   price_unit: 'kg' | 'each' | null;
   packaging: string | null;
