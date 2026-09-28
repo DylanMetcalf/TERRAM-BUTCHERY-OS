@@ -9,6 +9,7 @@ import { purgeIdempotencyKeys } from './http/security.js';
 import { recordSystemEvent } from './services/health.js';
 import { buildApp } from './app.js';
 import { startJobs } from './services/jobs.js';
+import { refreshDefaultWording } from './services/settings.js';
 
 // Minimal .env loader (no dependency)
 const envFile = path.resolve('.env');
@@ -23,6 +24,7 @@ const dbPath = process.env.DATABASE_PATH ?? './data/terram.db';
 openDatabase(dbPath);
 seedCatalogue();
 upgradeCatalogue();
+refreshDefaultWording();
 const admin = ensureInitialAdmin();
 if (admin) console.log(`[terram] Created initial admin ${admin.email}`);
 

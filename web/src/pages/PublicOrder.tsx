@@ -221,7 +221,8 @@ export default function PublicOrder() {
           <div className="mt-6 space-y-4">
             <Field label="Name" htmlFor="n"><Input id="n" big autoComplete="name" value={s.name} onChange={(e) => set({ name: e.target.value })} /></Field>
             <Field label="Mobile number" htmlFor="p" hint="We’ll use WhatsApp or SMS for updates."><Input id="p" big type="tel" inputMode="tel" autoComplete="tel" value={s.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
-            <Field label="Email" htmlFor="e" optional><Input id="e" big type="email" autoComplete="email" value={s.email} onChange={(e) => set({ email: e.target.value })} /></Field>
+            <Field label="Email" htmlFor="e" optional hint="We’ll email you a copy of your order."><Input id="e" big type="email" autoComplete="email" value={s.email} onChange={(e) => set({ email: e.target.value })} /></Field>
+            <p className="text-[13px] text-ink-3">We only use your details for your orders and to contact you about them. We never share them.</p>
           </div>
         </div>
       )}

@@ -25,7 +25,7 @@ r.get('/info', (c) => {
     business: { name: s.business.name, tagline: s.business.tagline, phone: s.business.phone, email: s.business.email, address: s.business.address },
     // Only what the order form needs — never the internal email recipients
     form: { enabled: s.customerForm.enabled, intro: s.customerForm.intro, confirmationMessage: s.customerForm.confirmationMessage, showPrices: s.customerForm.showPrices, terms: s.customerForm.terms },
-    fulfilment: { collectionDays: s.fulfilment.collectionDays, deliveryDays: s.fulfilment.deliveryDays, deliveryEnabled: s.fulfilment.deliveryEnabled, collectionHours: s.fulfilment.collectionHours, collectionPlace: s.fulfilment.collectionPlace, collectionAddress: s.fulfilment.collectionAddress, deliveryNotes: s.fulfilment.deliveryNotes },
+    fulfilment: { collectionDays: s.fulfilment.collectionDays, deliveryDays: s.fulfilment.deliveryDays, deliveryEnabled: s.fulfilment.deliveryEnabled, collectionHours: s.fulfilment.collectionHours, collectionPlace: s.fulfilment.collectionPlace, collectionAddress: s.fulfilment.collectionAddress, deliveryNotes: s.fulfilment.deliveryNotes, freeDeliveryKm: s.fulfilment.freeDeliveryKm, deliveryRatePerKmCents: s.fulfilment.deliveryRatePerKmCents },
     earliest_date: addDays(today, s.orders.leadTimeDays),
     today,
     currency: s.business.currency,
@@ -153,7 +153,7 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
 function emailNewOrder(c: any, orderId: string, special: string | null, notes: string | null, customerEmail: string | null) {
   const s = getSettings();
   const to = s.customerForm.notifyEmails;
-  if (!to.length) return;
+  if (!to.length && !(customerEmail && s.customerForm.emailCustomer)) return;
   const o = requireOrder(orderId);
   const items = getItems(orderId);
   const proto = c.req.header('x-forwarded-proto') ?? new URL(c.req.url).protocol.replace(':', '');
@@ -190,6 +190,38 @@ ${special ? `<p style="margin:0 0 12px;padding:10px 12px;background:#f8edd8;bord
 <p><a href="${escapeHtml(link)}" style="display:inline-block;background:#446041;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none">Open order in Terram</a></p>
 </div>`;
   sendEmailInBackground({ to, subject: `New order #${o.order_number} — ${o.customer_name}${special ? ' (special request)' : ''}`, text, html, replyTo: customerEmail }, `online order #${o.order_number}`);
+
+  // The customer's own copy: what they asked for, and that we'll confirm it (no staff link)
+  if (customerEmail && s.customerForm.emailCustomer) {
+    const b = s.business;
+    const ctext = [
+      `Hi ${o.customer_name.split(' ')[0]},`,
+      '',
+      `Thank you for your order with ${b.name}. We've received it (reference #${o.order_number}) and will be in touch to confirm it.`,
+      '',
+      ...(lines.length ? ['Your order:', ...lines.map((l) => `- ${l.text}`)] : []),
+      ...(total != null ? ['', `Estimated total: ${formatMoney(total, b.currency)} (final price depends on the packed weight)`] : []),
+      ...(special ? ['', `Special request: ${special}`] : []),
+      '',
+      when,
+      ...(o.fulfilment_type === 'delivery' && o.delivery_address ? [`Delivery to: ${o.delivery_address}`] : []),
+      '',
+      `Questions? Reply to this email${b.phone ? ` or call/WhatsApp ${b.phone}` : ''}.`,
+      '',
+      b.name,
+    ].join('\n');
+    const chtml = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#262626;max-width:560px">
+<p>Hi ${escapeHtml(o.customer_name.split(' ')[0])},</p>
+<p>Thank you for your order with ${escapeHtml(b.name)}. We've received it (reference <b>#${o.order_number}</b>) and will be in touch to confirm it.</p>
+${lines.length ? `<ul style="padding-left:18px">${lines.map((l) => `<li style="margin:3px 0">${escapeHtml(l.text)}</li>`).join('')}</ul>` : ''}
+${total != null ? `<p>Estimated total: <b>${formatMoney(total, b.currency)}</b> <span style="color:#777">(final price depends on the packed weight)</span></p>` : ''}
+${special ? `<p style="padding:10px 12px;background:#f8edd8;border-radius:8px"><b>Special request:</b> ${escapeHtml(special)}</p>` : ''}
+<p>${escapeHtml(when)}${o.fulfilment_type === 'delivery' && o.delivery_address ? `<br>Delivery to: ${escapeHtml(o.delivery_address)}` : ''}</p>
+<p style="color:#555">Questions? Reply to this email${b.phone ? ` or call/WhatsApp ${escapeHtml(b.phone)}` : ''}.</p>
+<p style="color:#446041;font-weight:bold">${escapeHtml(b.name)}</p>
+</div>`;
+    sendEmailInBackground({ to: [customerEmail], subject: `Your ${b.name} order #${o.order_number}`, text: ctext, html: chtml, replyTo: b.email || null }, `order confirmation to the customer #${o.order_number}`);
+  }
 }
 
 export default r;

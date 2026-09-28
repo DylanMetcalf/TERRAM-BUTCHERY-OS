@@ -23,6 +23,7 @@ import { ExceptionCard } from '../components/ExceptionCard';
 import { ItemEditor, type ItemDraft } from '../components/ItemEditor';
 import { FulfilmentLabel, SourceIcon, StageTrack, StatusPill } from '../components/order-bits';
 import { Badge, Button, Card, cx, ErrorState, Field, Input, KeyValue, LoadingBlock, SectionTitle, Segmented, Sheet, Textarea, useConfirm, useToast } from '../components/ui';
+import { deliveryFeeCents } from '../../../shared/delivery';
 import { api, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { dateTime, estimateLinePrice, formatMoney, friendlyDate, longDate, timeAgo, todayYmd, waLink } from '../lib/format';
@@ -279,6 +280,12 @@ export default function OrderDetail() {
                   <span className="font-semibold tabular">{formatMoney(total)}</span>
                 </div>
               )}
+              {total != null && total > 0 && o.fulfilment_type === 'delivery' && !!o.delivery_fee_cents && (
+                <div className="flex items-center justify-between border-t border-line bg-surface-2 px-5 py-3 text-[14px]">
+                  <span className="text-ink-3">With delivery ({formatMoney(o.delivery_fee_cents)})</span>
+                  <span className="font-semibold tabular">{formatMoney(total + o.delivery_fee_cents)}</span>
+                </div>
+              )}
             </Card>
           </section>
 
@@ -318,6 +325,11 @@ export default function OrderDetail() {
                 <KeyValue label="Date">{o.requested_date ? longDate(o.requested_date) : <span className="text-ochre">Not set</span>}</KeyValue>
                 {o.time_window && <KeyValue label="Time">{o.time_window}</KeyValue>}
                 {o.fulfilment_type === 'delivery' && <KeyValue label="Address">{o.delivery_address ?? <span className="text-danger">Missing</span>}</KeyValue>}
+                {o.fulfilment_type === 'delivery' && (
+                  <KeyValue label="Delivery fee">
+                    {o.delivery_km == null ? <span className="text-ink-3">Add the distance (Edit)</span> : <>{o.delivery_fee_cents ? formatMoney(o.delivery_fee_cents) : 'Free'} <span className="text-ink-3">· {o.delivery_km} km</span></>}
+                  </KeyValue>
+                )}
                 {o.delivery_notes && <KeyValue label="Notes">{o.delivery_notes}</KeyValue>}
               </dl>
               {['ready', 'out_for_delivery'].includes(o.status) && canProduce && (
@@ -477,12 +489,18 @@ function FulfilmentSheet({ open, onClose, order, onSave, saving }: { open: boole
   const [time, setTime] = useState(order.time_window ?? '');
   const [address, setAddress] = useState(order.delivery_address ?? '');
   const [notes, setNotes] = useState(order.delivery_notes ?? '');
+  const [km, setKm] = useState(order.delivery_km != null ? String(order.delivery_km) : '');
+  const { data: settings } = useQuery({ queryKey: ['public-info'], queryFn: () => api.get<any>('/api/public/info') });
+  const freeKm: number = settings?.fulfilment?.freeDeliveryKm ?? 60;
+  const rate: number = settings?.fulfilment?.deliveryRatePerKmCents ?? 0;
+  const kmNum = km.trim() === '' ? null : Number(km.replace(',', '.'));
+  const fee = deliveryFeeCents(kmNum, freeKm, rate);
   return (
     <Sheet
       open={open}
       onClose={onClose}
       title="Collection or delivery"
-      footer={<Button variant="primary" size="lg" full loading={saving} onClick={() => onSave({ fulfilment_type: type, requested_date: date || null, time_window: time || null, delivery_address: type === 'delivery' ? address || null : order.delivery_address, delivery_notes: notes || null })}>Save</Button>}
+      footer={<Button variant="primary" size="lg" full loading={saving} onClick={() => onSave({ fulfilment_type: type, requested_date: date || null, time_window: time || null, delivery_address: type === 'delivery' ? address || null : order.delivery_address, delivery_notes: notes || null, ...(type === 'delivery' && (kmNum == null || Number.isFinite(kmNum)) ? { delivery_km: kmNum } : {}) })}>Save</Button>}
     >
       <div className="space-y-5">
         <Segmented full size="lg" value={type} onChange={setType} options={[{ value: 'collection', label: 'Collection' }, { value: 'delivery', label: 'Delivery' }]} />
@@ -495,6 +513,10 @@ function FulfilmentSheet({ open, onClose, order, onSave, saving }: { open: boole
           <>
             <Field label="Delivery address"><Textarea rows={2} value={address} onChange={(e) => setAddress(e.target.value)} /></Field>
             <Field label="Delivery notes" optional><Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Gate code, call on arrival…" /></Field>
+            <Field label="Distance from the shop (km)" optional hint={rate > 0 ? `Free within ${freeKm} km, then R${(rate / 100).toFixed(2)} per km.` : 'Set the fee per km in Settings → Orders & fulfilment.'}>
+              <Input inputMode="decimal" value={km} onChange={(e) => setKm(e.target.value)} placeholder="e.g. 72" className="w-40" />
+            </Field>
+            {fee != null && <p className="-mt-2 text-[14px]">Delivery fee: <b>{fee ? formatMoney(fee) : 'Free'}</b>{fee ? <span className="text-ink-3"> ({(kmNum! - freeKm).toFixed(1).replace(/\.0$/, '')} km × R{(rate / 100).toFixed(2)})</span> : null}</p>}
           </>
         )}
         {type === 'collection' && <Field label="Notes" optional><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>}

@@ -51,6 +51,7 @@ export const OrderPatchSchema = z.object({
   time_window: optStr(100),
   delivery_address: optStr(300),
   delivery_notes: optStr(500),
+  delivery_km: z.number().min(0).max(2000).nullable().optional(),
   contact_phone: optStr(40),
   notes: optStr(2000),
   payment_status: z.enum(['unpaid', 'pending', 'paid']).optional(),

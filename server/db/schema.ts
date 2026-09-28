@@ -380,4 +380,12 @@ UPDATE products SET pack_size = 30 WHERE slug = 'eggs';
 ALTER TABLE orders ADD COLUMN special_request TEXT;
 `,
   },
+  {
+    id: 5,
+    name: 'delivery-distance-fee',
+    sql: `
+ALTER TABLE orders ADD COLUMN delivery_km REAL;
+ALTER TABLE orders ADD COLUMN delivery_fee_cents INTEGER;
+`,
+  },
 ];

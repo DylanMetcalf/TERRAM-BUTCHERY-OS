@@ -25,6 +25,8 @@ export interface OrderSummary {
   time_window: string | null;
   delivery_address: string | null;
   delivery_notes: string | null;
+  delivery_km: number | null;
+  delivery_fee_cents: number | null;
   special_request: string | null;
   contact_phone: string | null;
   notes: string | null;

@@ -36,8 +36,8 @@ describe('email for new online orders', () => {
     await c.post('/api/public/orders', order('ref-mail-0001', { special_request: '2kg venison steaks' }));
     await c.post('/api/public/orders', order('ref-mail-0001', { special_request: '2kg venison steaks' })); // double tap
     await flush();
-    expect(outbox).toHaveLength(1);
-    const m = outbox[0];
+    expect(outbox).toHaveLength(2); // the family's alert + the customer's copy, once each
+    const m = outbox.find((x) => x.subject.startsWith('New order'))!;
     expect(m.to).toEqual(['dylan@meacreo.co.za', 'Sharonm@imagine.co.za']);
     expect(m.subject).toMatch(/^New order #\d+ — Naledi Zulu \(special request\)$/);
     expect(m.text).toContain('4 steaks Rump');
@@ -46,6 +46,12 @@ describe('email for new online orders', () => {
     expect(m.text).toMatch(/Open it in Terram: http:\/\/localhost\/orders\/or_/);
     expect(m.replyTo).toBe('naledi@example.com');
     expect(m.html).not.toContain('<script');
+    const copy = outbox.find((x) => x.subject.startsWith('Your '))!;
+    expect(copy.to).toEqual(['naledi@example.com']);
+    expect(copy.subject).toMatch(/^Your Terram Farm order #\d+$/);
+    expect(copy.text).toContain('4 steaks Rump');
+    expect(copy.text).not.toMatch(/\/orders\//); // no staff link for customers
+    expect(copy.replyTo).toBe('orders@terramfarm.co.za');
   });
 
   it('can be switched off by clearing the addresses', async () => {
@@ -53,7 +59,11 @@ describe('email for new online orders', () => {
     expect((await admin.req('PUT', '/api/admin/settings/customerForm', { notifyEmails: [] })).status).toBe(200);
     await new Client(buildApp()).post('/api/public/orders', order('ref-mail-0002'));
     await flush();
-    expect(outbox).toHaveLength(0);
+    expect(outbox.map((m) => m.to)).toEqual([['naledi@example.com']]); // only the customer's copy
+    expect((await admin.req('PUT', '/api/admin/settings/customerForm', { emailCustomer: false })).status).toBe(200);
+    await new Client(buildApp()).post('/api/public/orders', order('ref-mail-0003'));
+    await flush();
+    expect(outbox).toHaveLength(1);
     expect((await admin.req('PUT', '/api/admin/settings/customerForm', { notifyEmails: ['not-an-email'] })).status).toBe(400);
   });
 

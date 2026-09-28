@@ -26,7 +26,7 @@ export default function PublicHome() {
   const orderingOpen = info?.form?.enabled !== false;
 
   useEffect(() => {
-    document.title = `${name} · Farm-raised beef & lamb`;
+    document.title = `${name} · Farm-raised Beef & Lamb`;
   }, [name]);
 
   // One card per range (Beef, Lamb, Eggs…) with a few of its products
@@ -53,8 +53,8 @@ export default function PublicHome() {
       {/* Hero */}
       <section className="bg-charcoal text-white">
         <div className="mx-auto max-w-5xl px-5 pb-16 pt-10 sm:px-8 sm:pb-24 sm:pt-16">
-          <p className="text-[14px] font-semibold text-white/65">A Metcalf family farm</p>
-          <h1 className="mt-3 max-w-2xl font-display text-[38px] font-extrabold leading-[1.05] tracking-tight sm:text-[56px]">Farm-raised beef &amp; lamb.</h1>
+          <p className="text-[14px] font-semibold text-white/65">A Metcalf Family Farm</p>
+          <h1 className="mt-3 max-w-2xl font-display text-[38px] font-extrabold leading-[1.05] tracking-tight sm:text-[56px]">Farm-raised Beef &amp; Lamb.</h1>
           <p className="mt-4 max-w-xl text-[17px] leading-relaxed text-white/80">{info?.business.tagline ?? 'Grown with Purpose. Shared with Passion.'} Order online and we’ll prepare it for collection or delivery.</p>
           <div className="mt-8 flex flex-wrap gap-3">
             {orderingOpen && (
