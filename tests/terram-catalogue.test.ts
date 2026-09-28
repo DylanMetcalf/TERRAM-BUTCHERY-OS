@@ -114,4 +114,11 @@ bones 2kg`),
   it('“make the mince 3kg” means the one mince already ordered', async () => {
     expect(await read('Thabo:\n2kg lean mince\n4 rumps\n\nThabo: actually make the mince 3kg')).toEqual(['3kg Lean Mince', '4 steaks Rump']);
   });
+
+  it('phrases the question as a choice', async () => {
+    const b = getBatch(await analyseImport({ text: 'Sarah:\n2kg mince\n1kg biltong sliced', useAi: false }, STAFF));
+    const msgs = (b.drafts[0].data as any).issues.map((i: any) => i.message);
+    expect(msgs).toContain('Which “mince”? Lean Mince or 80:20 Mince.');
+    expect(msgs).toContain('Which “biltong sliced”? A-Grade Biltong or Geel Vet Biltong.');
+  });
 });

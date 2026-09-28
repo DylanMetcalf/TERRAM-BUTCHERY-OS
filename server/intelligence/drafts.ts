@@ -1,3 +1,4 @@
+import { normalise } from '../../shared/text.js';
 import { formatQty, qtyEquals, validateQty, type Qty } from '../../shared/quantity.js';
 import { getProduct, preparationLabel, resolvePreparation } from '../domain/products.js';
 import { findPossibleDuplicates, itemSimilarity } from '../domain/duplicates.js';
@@ -160,6 +161,16 @@ export function refreshItem(item: DraftItem): DraftItem {
   return { ...item, product_name: p.canonical_name, preparation: prep, preparation_label: label, qty_label: item.qty ? formatQty(item.qty, p.piece_noun) : undefined };
 }
 
+/** “mince” when there is Lean Mince and 80:20 Mince: ask which one, rather than “not recognised”. */
+function choiceMessage(item: DraftItem): string | null {
+  const phrase = item.phrase || item.source_text;
+  const words = new Set(normalise(phrase).split(' '));
+  const opts = item.suggestions.filter((o) => normalise(o.name).split(' ').some((w) => w.length > 2 && words.has(w)));
+  if (opts.length < 2 || opts.length > 4) return null;
+  const names = opts.map((o) => o.name);
+  return `Which “${phrase}”? ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}.`;
+}
+
 export function itemIssues(item: DraftItem): DraftIssue[] {
   const issues: DraftIssue[] = [];
   const p = item.product_id ? getProduct(item.product_id) : null;
@@ -167,7 +178,7 @@ export function itemIssues(item: DraftItem): DraftIssue[] {
     issues.push({
       code: 'unknown_product',
       severity: 'blocking',
-      message: item.reference ? `Not sure which product “${item.source_text}” refers to.` : `We don't recognise “${item.phrase || item.source_text}”.`,
+      message: item.reference ? `Not sure which product “${item.source_text}” refers to.` : choiceMessage(item) ?? `We don't recognise “${item.phrase || item.source_text}”.`,
       item_key: item.key,
       options: { suggestions: item.suggestions, ai_suggestion: item.ai_suggestion ?? null },
     });

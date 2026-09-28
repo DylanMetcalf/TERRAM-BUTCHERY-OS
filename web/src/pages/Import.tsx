@@ -483,7 +483,7 @@ function DraftCard({ d, onEdit, busy, committed, canCancel }: { d: StoredDraft; 
                         {it.preparation_label && <span className="ml-2 text-[14px] font-medium text-brand">{it.preparation_label}</span>}
                       </div>
                     ) : (
-                      <div className="text-[15.5px] font-semibold text-brand">“{it.phrase || it.source_text}” <span className="text-[13px] font-medium">— {it.reference ? 'which product?' : 'not recognised'}</span></div>
+                      <div className="text-[15.5px] font-semibold text-brand">“{it.phrase || it.source_text}” <span className="text-[13px] font-medium">— {it.reference ? 'which product?' : it.suggestions?.length > 1 ? 'which one?' : 'not recognised'}</span></div>
                     )}
                     {it.special_instructions && <div className="text-[13px] text-ink-2">Note: {it.special_instructions}</div>}
                     {it.history?.length > 0 && (
