@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import path from 'node:path';
 import fs from 'node:fs';
 import { openDatabase } from './db/db.js';
-import { seedCatalogue } from './domain/products.js';
+import { seedCatalogue, upgradeCatalogue } from './domain/products.js';
 import { ensureInitialAdmin } from './domain/users.js';
 import { purgeExpiredSessions } from './auth/sessions.js';
 import { purgeIdempotencyKeys } from './http/security.js';
@@ -22,6 +22,7 @@ if (fs.existsSync(envFile)) {
 const dbPath = process.env.DATABASE_PATH ?? './data/terram.db';
 openDatabase(dbPath);
 seedCatalogue();
+upgradeCatalogue();
 const admin = ensureInitialAdmin();
 if (admin) console.log(`[terram] Created initial admin ${admin.email}`);
 

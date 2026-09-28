@@ -39,8 +39,10 @@ export function contrast(a: RGB, b: RGB): number {
   return (l1 + 0.05) / (l2 + 0.05);
 }
 const WHITE: RGB = [255, 255, 255];
-const INK: RGB = [29, 27, 24];
-const PAPER: RGB = [246, 243, 238];
+const INK: RGB = [38, 38, 38];
+const PAPER: RGB = [245, 245, 242];
+/** Terram green (brand kit). The stylesheet already carries its hand-tuned tokens. */
+export const DEFAULT_BRAND_COLOUR = '#446041';
 
 /**
  * Turns one brand colour into the full set of tokens the app uses, in light and
@@ -62,7 +64,7 @@ export function brandTokens(hex: string) {
   };
   let darkBase = hexToRgb(hex);
   guard = 0;
-  const darkBg: RGB = [22, 20, 18];
+  const darkBg: RGB = [31, 31, 31];
   while (contrast(darkBase, darkBg) < 4.5 && guard++ < 20) darkBase = mix(darkBase, WHITE, 0.12);
   const dark = {
     '--brand': rgbToHex(darkBase),
@@ -78,7 +80,7 @@ export function brandTokens(hex: string) {
 export function applyBrandColour(hex: string | undefined) {
   const id = 'terram-brand-tokens';
   let el = document.getElementById(id) as HTMLStyleElement | null;
-  if (!hex || hex.toLowerCase() === '#7b2d26') {
+  if (!hex || hex.toLowerCase() === DEFAULT_BRAND_COLOUR) {
     el?.remove();
     return;
   }

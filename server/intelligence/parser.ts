@@ -2,7 +2,7 @@ import type { Qty } from '../../shared/quantity.js';
 import { normalise, normalisePhone } from '../../shared/text.js';
 import { extractDate, extractTimeWindow } from './dates.js';
 import { matchProduct, type Dictionary, type MatchResult } from './matcher.js';
-import { extractQuantity, preprocess } from './quantity.js';
+import { extractQuantity, preprocess, protectRatios } from './quantity.js';
 
 /**
  * Message Classifier + Order Analyst (rules engine).
@@ -125,7 +125,7 @@ const QTY_START = /^(?:\d|a\s|an\s|one|two|three|four|five|six|seven|eight|nine|
 /** Split "2kg mince, 4 rumps and 2 ribeyes" only where the next chunk starts with a quantity. */
 function splitItems(sentence: string, dict: Dictionary): string[] {
   // A comma between digits is a decimal ("1,5kg"), never a separator
-  const parts = sentence.split(/\s*(?:(?<!\d),|,(?!\d)|\band\b|&|\+|\bplus\b|\/|\bwith\b)\s*/i);
+  const parts = protectRatios(sentence).split(/\s*(?:(?<!\d),|,(?!\d)|\band\b|&|\+|\bplus\b|\/|\bwith\b)\s*/i);
   const out: string[] = [];
   const namesProduct = (t: string) => !!matchProduct(extractQuantity(t).rest, dict).product;
   for (const p of parts) {
@@ -258,7 +258,7 @@ function escapeRe(s: string) {
 }
 
 function handleSentence(sentence: string, refDate: string, dict: Dictionary, result: ParsedMessage) {
-  let s = sentence
+  let s = protectRatios(sentence)
     .trim()
     .replace(/^(?:(?:hi|hey|hello|hallo|howzit)(?:\s+there)?[,!.]?\s*)?(?:good\s+)?(?:morning|afternoon|evening)(?:\s+(?:guys|all|team|terram|there))?\s*[,!.]\s*/i, '')
     .trim();

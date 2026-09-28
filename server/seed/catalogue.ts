@@ -1,9 +1,16 @@
 /**
- * Starting product dictionary for Terram Farm's butchery. Administrators
- * manage it from the Products screen after the first run; this seed is only
- * applied to an empty database.
+ * Terram Farm's product dictionary, from the Beef and Lamb price lists
+ * (June 2026) and the online order form. All meat is priced per kg.
+ *
+ * Administrators manage products from the Products screen after the first
+ * run; prices are updated with Products → Update prices.
+ *
+ * Words that could mean more than one product ("mince", "biltong", "chops",
+ * "ribs", "shoulder") are deliberately NOT aliases, so the app asks which one
+ * instead of guessing. The learning loop suggests an alias once staff keep
+ * choosing the same answer.
  */
-type Prep = [name: string, keywords: string[], isDefault?: boolean];
+export type Prep = [name: string, keywords: string[], isDefault?: boolean];
 export interface SeedProduct {
   slug: string;
   name: string;
@@ -31,198 +38,222 @@ const PACKING: Prep[] = [
   ['Vacuum packed', ['vacuum', 'vacuum packed', 'vacuum pack', 'vac pack', 'vac packed', 'sealed']],
   ['Individually packed', ['individually', 'individually packed', 'each separately', 'separately', 'pack separately']],
 ];
-const BONE_STEAK: Prep[] = [
-  ['Boneless', ['boneless', 'bone out', 'off the bone', 'deboned', 'no bone', 'without bone', 'off bone'], true],
-  ['Bone-in', ['bone in', 'bone-in', 'on the bone', 'on bone', 'with bone', 'with the bone', 'bone on']],
+/** Only Rump, Sirloin, T-Bone and Rib-Eye can be dry-aged (order form terms). */
+const AGEING: Prep[] = [
+  ['Normal', [], true],
+  ['Dry-aged', ['dry aged', 'dry age', 'dryaged', 'dry ageing', 'dry aging', 'aged']],
 ];
+const DRY_AGED_NOTE = 'Dry-aged on request: up to 30 days, +25%, confirmed by the farm first.';
+const STEAK = { Thickness: THICKNESS, Packing: PACKING };
+const DRY_AGE_STEAK = { Ageing: AGEING, Thickness: THICKNESS, Packing: PACKING };
+
+const kg = (rand: number) => Math.round(rand * 100);
 
 export const CATALOGUE: SeedProduct[] = [
-  // ── Beef ────────────────────────────────────────────────
+  // ── Beef – Steaks ───────────────────────────────────────
   {
-    slug: 'beef_mince', name: 'Beef Mince', category: 'Beef', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
-    price_cents: 14500, price_unit: 'kg', description: 'Grass-fed beef, minced in-house.',
-    aliases: ['mince', 'beef mince', 'minced beef', 'mincemeat', 'mince meat', 'ground beef', 'minced meat'],
-    preps: { Fat: [['Standard', [], true], ['Lean', ['lean', 'extra lean', 'low fat', 'lean mince']]], Packing: PACKING },
-  },
-  {
-    slug: 'beef_rump', name: 'Rump Steak', category: 'Beef', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 300,
-    price_cents: 26500, price_unit: 'kg', aliases: ['rump', 'rump steak', 'beef rump', 'rumpsteak'],
-    preps: { Thickness: THICKNESS, Packing: PACKING },
-  },
-  {
-    slug: 'beef_sirloin', name: 'Sirloin Steak', category: 'Beef', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 300,
-    price_cents: 25500, price_unit: 'kg', aliases: ['sirloin', 'sirloin steak', 'beef sirloin', 'porterhouse', 'strip loin', 'striploin'],
-    preps: { Thickness: THICKNESS, Packing: PACKING },
-  },
-  {
-    slug: 'beef_ribeye', name: 'Beef Ribeye', customer_name: 'Ribeye Steak', category: 'Beef', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 350,
-    price_cents: 31000, price_unit: 'kg', aliases: ['ribeye', 'rib eye', 'rib-eye', 'ribeye steak', 'rib eye steak', 'beef ribeye', 'scotch fillet'],
-    preps: { Bone: BONE_STEAK, Thickness: THICKNESS, Packing: PACKING },
-  },
-  {
-    slug: 'beef_fillet', name: 'Beef Fillet', category: 'Beef', quantity_type: 'either', allows_portions: true, piece_noun: 'piece', typical_piece_g: 250,
-    price_cents: 42000, price_unit: 'kg', aliases: ['fillet', 'beef fillet', 'filet', 'fillet steak', 'tenderloin', 'beef tenderloin', 'filet mignon'],
+    slug: 'beef_fillet', name: 'Fillet', category: 'Beef – Steaks', quantity_type: 'either', allows_portions: true, piece_noun: 'steak', typical_piece_g: 250,
+    price_cents: kg(280), price_unit: 'kg', aliases: ['fillet', 'beef fillet', 'filet', 'fillet steak', 'tenderloin', 'beef tenderloin', 'filet mignon'],
     preps: {
-      Cut: [['Steaks', ['steak', 'steaks', 'medallion', 'medallions', 'cut into steaks'], true], ['Whole', ['whole', 'whole fillet', 'in one piece', 'uncut']], ['Portions', ['portion', 'portions', 'portioned']]],
+      Cut: [['Steaks', ['steak', 'steaks', 'medallion', 'medallions', 'cut into steaks'], true], ['Whole', ['whole', 'whole fillet', 'in one piece', 'uncut']]],
       Packing: PACKING,
     },
   },
   {
-    slug: 'beef_tbone', name: 'T-Bone Steak', category: 'Beef', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 450,
-    price_cents: 23500, price_unit: 'kg', aliases: ['t bone', 't-bone', 'tbone', 't bone steak', 'tee bone'],
-    preps: { Thickness: THICKNESS, Packing: PACKING },
+    slug: 'beef_fillet_bone', name: 'Fillet on the Bone', category: 'Beef – Steaks', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 400,
+    price_cents: kg(270), price_unit: 'kg', aliases: ['fillet on the bone', 'fillet on bone', 'bone in fillet', 'fillet bone in', 'bone-in fillet'], preps: STEAK,
   },
   {
-    slug: 'beef_brisket', name: 'Beef Brisket', category: 'Beef', quantity_type: 'weight', allows_portions: true, piece_noun: 'piece',
-    price_cents: 15500, price_unit: 'kg', aliases: ['brisket', 'beef brisket'],
-    preps: { Cut: [['Whole', ['whole'], true], ['Halved', ['half', 'halved', 'cut in half']], ['Rolled', ['rolled', 'tied']]], Packing: PACKING },
+    slug: 'beef_rump', name: 'Rump', category: 'Beef – Steaks', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 300,
+    price_cents: kg(185), price_unit: 'kg', description: DRY_AGED_NOTE, aliases: ['rump', 'rump steak', 'beef rump', 'rumpsteak'], preps: DRY_AGE_STEAK,
   },
   {
-    slug: 'beef_short_rib', name: 'Beef Short Rib', category: 'Beef', quantity_type: 'weight', allows_portions: true, piece_noun: 'piece',
-    price_cents: 17500, price_unit: 'kg', aliases: ['short rib', 'short ribs', 'beef short rib', 'beef rib', 'beef ribs', 'jacob ladder', 'jacobs ladder'],
-    preps: { Cut: [['Standard', [], true], ['English cut', ['english cut', 'individual ribs']], ['Flanken', ['flanken', 'across the bone', 'korean style']]], Packing: PACKING },
+    slug: 'beef_sirloin', name: 'Sirloin', category: 'Beef – Steaks', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 300,
+    price_cents: kg(160), price_unit: 'kg', description: DRY_AGED_NOTE, aliases: ['sirloin', 'sirloin steak', 'beef sirloin', 'striploin', 'strip loin'], preps: DRY_AGE_STEAK,
   },
   {
-    slug: 'beef_stewing', name: 'Stewing Beef', category: 'Beef', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
-    price_cents: 15500, price_unit: 'kg', aliases: ['stewing beef', 'stew beef', 'beef stew', 'goulash', 'stew meat', 'beef cubes', 'cubed beef', 'chuck', 'stewing steak', 'potjie meat'],
-    preps: { Cut: [['Cubed', ['cubed', 'cubes', 'diced'], true], ['Strips', ['strips', 'stir fry', 'stirfry', 'sliced']]], Packing: PACKING },
+    slug: 'beef_tbone', name: 'T-Bone', category: 'Beef – Steaks', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 450,
+    price_cents: kg(180), price_unit: 'kg', description: DRY_AGED_NOTE, aliases: ['t bone', 't-bone', 'tbone', 't bone steak', 'tee bone'], preps: DRY_AGE_STEAK,
   },
   {
-    slug: 'beef_topside', name: 'Topside Roast', category: 'Beef', quantity_type: 'weight', piece_noun: 'roast',
-    price_cents: 21000, price_unit: 'kg', aliases: ['topside', 'topside roast', 'beef roast', 'roast beef', 'silverside', 'rolled roast'],
-    preps: { Cut: [['Roast', ['roast', 'whole', 'rolled', 'tied'], true], ['Sliced', ['sliced', 'carpaccio']]], Packing: PACKING },
+    slug: 'beef_ribeye', name: 'Rib-Eye', category: 'Beef – Steaks', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 350,
+    price_cents: kg(240), price_unit: 'kg', description: DRY_AGED_NOTE, aliases: ['ribeye', 'rib eye', 'rib-eye', 'ribeye steak', 'rib eye steak', 'beef ribeye', 'scotch fillet', 'boneless ribeye'], preps: DRY_AGE_STEAK,
   },
   {
-    slug: 'beef_oxtail', name: 'Oxtail', category: 'Beef', quantity_type: 'weight', piece_noun: 'pack',
-    price_cents: 27000, price_unit: 'kg', aliases: ['oxtail', 'ox tail', 'beef tail'],
+    slug: 'beef_ribeye_bone', name: 'Rib-Eye on the Bone', category: 'Beef – Steaks', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 550,
+    price_cents: kg(220), price_unit: 'kg',
+    aliases: ['rib eye on the bone', 'ribeye on the bone', 'ribeye on bone', 'ribeye bone in', 'rib eye bone in', 'bone in ribeye', 'bone in rib eye', 'cowboy steak', 'prime rib'],
+    preps: STEAK,
+  },
+  {
+    slug: 'beef_tomahawk', name: 'Tomahawk', category: 'Beef – Steaks', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 1200,
+    price_cents: kg(220), price_unit: 'kg', aliases: ['tomahawk', 'tomahawk steak', 'tomahawks'], preps: STEAK,
+  },
+  {
+    slug: 'beef_porterhouse', name: 'Porterhouse', category: 'Beef – Steaks', quantity_type: 'either', piece_noun: 'steak', typical_piece_g: 600,
+    price_cents: kg(180), price_unit: 'kg', aliases: ['porterhouse', 'porterhouse steak', 'porter house'], preps: STEAK,
+  },
+  // ── Beef – Cuts ─────────────────────────────────────────
+  {
+    slug: 'beef_chuck_chops', name: 'Chuck Chops', category: 'Beef – Cuts', quantity_type: 'either', allows_portions: true, piece_noun: 'chop', typical_piece_g: 300,
+    price_cents: kg(110), price_unit: 'kg', aliases: ['chuck chops', 'chuck chop', 'chuck', 'beef chuck'], preps: STEAK,
+  },
+  {
+    slug: 'beef_short_rib', name: 'Short Rib', category: 'Beef – Cuts', quantity_type: 'weight', allows_portions: true, piece_noun: 'piece',
+    price_cents: kg(135), price_unit: 'kg', aliases: ['short rib', 'short ribs', 'beef short rib', 'beef rib', 'beef ribs', 'jacob ladder', 'jacobs ladder'],
     preps: { Packing: PACKING },
   },
   {
-    slug: 'beef_shin', name: 'Beef Shin', category: 'Beef', quantity_type: 'weight', piece_noun: 'piece',
-    price_cents: 15000, price_unit: 'kg', aliases: ['shin', 'beef shin', 'shin bone', 'osso buco', 'ossobuco'],
+    slug: 'beef_minute_steak', name: 'Minute Steak', category: 'Beef – Cuts', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(160), price_unit: 'kg', aliases: ['minute steak', 'minute steaks'], preps: { Packing: PACKING },
+  },
+  {
+    slug: 'beef_shin', name: 'Beef Shin', category: 'Beef – Cuts', quantity_type: 'weight', piece_noun: 'piece',
+    price_cents: kg(130), price_unit: 'kg', aliases: ['shin', 'beef shin', 'shin bone', 'osso buco', 'ossobuco'],
     preps: { Cut: [['Sliced', ['sliced', 'osso buco'], true], ['Whole', ['whole']]], Packing: PACKING },
   },
   {
-    slug: 'beef_burger', name: 'Beef Burger Patties', category: 'Beef', quantity_type: 'count', piece_noun: 'patty', typical_piece_g: 150,
-    price_cents: 2800, price_unit: 'each', aliases: ['burger', 'burger patty', 'burger patties', 'patty', 'patties', 'beef burger', 'beef patty', 'burgers'],
-    preps: { Size: [['150g', ['150g', 'regular'], true], ['200g', ['200g', 'large', 'big']]], Packing: PACKING },
+    slug: 'beef_brisket', name: 'Brisket', category: 'Beef – Cuts', quantity_type: 'weight', allows_portions: true, piece_noun: 'piece',
+    price_cents: kg(130), price_unit: 'kg', aliases: ['brisket', 'beef brisket'],
+    preps: { Cut: [['Whole', ['whole'], true], ['Halved', ['half', 'halved', 'cut in half']], ['Rolled', ['rolled', 'tied']]], Packing: PACKING },
   },
-  // ── Sausage ─────────────────────────────────────────────
   {
-    slug: 'boerewors', name: 'Boerewors', category: 'Sausages', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
-    price_cents: 15500, price_unit: 'kg', description: 'Traditional farm recipe, coriander-spiced.',
-    aliases: ['boerewors', 'wors', 'boerie', 'boerwors', 'boere wors', 'farm sausage', 'farm wors', 'traditional wors', 'boerewor'],
+    slug: 'beef_blade_chops', name: 'Blade Chops', category: 'Beef – Cuts', quantity_type: 'either', allows_portions: true, piece_noun: 'chop', typical_piece_g: 300,
+    price_cents: kg(130), price_unit: 'kg', aliases: ['blade chops', 'blade chop', 'blade', 'beef blade'], preps: STEAK,
+  },
+  // ── Beef – Minced ───────────────────────────────────────
+  {
+    slug: 'beef_mince_lean', name: 'Lean Mince', category: 'Beef – Minced', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(125), price_unit: 'kg', aliases: ['lean mince', 'extra lean mince', 'lean beef mince', 'lean minced beef', 'lean ground beef'], preps: { Packing: PACKING },
+  },
+  {
+    slug: 'beef_mince_8020', name: '80:20 Mince', category: 'Beef – Minced', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(110), price_unit: 'kg', aliases: ['80to20 mince', '80 20 mince', '8020 mince', 'eighty twenty mince', 'normal mince', 'regular mince', 'burger mince'], preps: { Packing: PACKING },
+  },
+  {
+    slug: 'wors_normal', name: 'Normal Wors', customer_name: 'Boerewors', category: 'Beef – Minced', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(120), price_unit: 'kg', aliases: ['normal wors', 'wors', 'boerewors', 'boerie', 'boerwors', 'boere wors', 'boerewor', 'traditional wors', 'farm wors', 'regular wors'],
     preps: { Style: [['Coil', ['coil', 'whole coil'], true], ['Links', ['links', 'cut', 'cut in pieces']]], Packing: PACKING },
   },
   {
-    slug: 'pork_sausages', name: 'Pork Sausages', category: 'Sausages', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
-    price_cents: 13500, price_unit: 'kg', aliases: ['pork sausage', 'pork bangers', 'banger', 'bangers', 'breakfast sausage', 'sausage', 'sausages'],
+    slug: 'wors_bbq', name: 'BBQ Wors', category: 'Beef – Minced', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(100), price_unit: 'kg', aliases: ['bbq wors', 'braai wors', 'barbecue wors', 'bbq boerewors', 'braaiwors'],
+    preps: { Style: [['Coil', ['coil', 'whole coil'], true], ['Links', ['links', 'cut', 'cut in pieces']]], Packing: PACKING },
+  },
+  // ── Beef – Stewing ──────────────────────────────────────
+  {
+    slug: 'beef_stewing', name: 'Stewing (Bone-In)', category: 'Beef – Stewing', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(100), price_unit: 'kg', aliases: ['stewing bone in', 'stewing', 'stewing beef', 'stew beef', 'beef stew', 'bone in stew', 'stew meat', 'potjie meat', 'beef stewing'],
     preps: { Packing: PACKING },
   },
-  // ── Lamb ────────────────────────────────────────────────
   {
-    slug: 'lamb_chops', name: 'Lamb Loin Chops', customer_name: 'Lamb Chops', category: 'Lamb', quantity_type: 'either', allows_portions: true, piece_noun: 'chop', typical_piece_g: 120,
-    price_cents: 29500, price_unit: 'kg', aliases: ['lamb chop', 'lamb chops', 'loin chop', 'loin chops', 'lamb loin chop', 'chops lamb', 'mutton chop', 'mutton chops'],
-    preps: { Thickness: THICKNESS, Packing: PACKING },
+    slug: 'beef_bones', name: 'Bones', category: 'Beef – Stewing', quantity_type: 'weight', piece_noun: 'bag',
+    price_cents: kg(25), price_unit: 'kg', aliases: ['bones', 'soup bones', 'beef bones', 'marrow bones', 'dog bones', 'stock bones'],
   },
   {
-    slug: 'lamb_leg', name: 'Leg of Lamb', category: 'Lamb', quantity_type: 'either', piece_noun: 'leg', typical_piece_g: 2500,
-    price_cents: 26500, price_unit: 'kg', aliases: ['leg of lamb', 'lamb leg', 'leg lamb', 'lamb roast', 'leg of mutton', 'mutton leg'],
+    slug: 'beef_goulash', name: 'Goulash', category: 'Beef – Stewing', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(135), price_unit: 'kg', aliases: ['goulash', 'beef goulash', 'goulash meat', 'cubed beef', 'beef cubes', 'boneless stew', 'diced beef'],
+    preps: { Packing: PACKING },
+  },
+  // ── Beef – Biltong ──────────────────────────────────────
+  {
+    slug: 'biltong_a_grade', name: 'A-Grade Biltong', category: 'Beef – Biltong', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(340), price_unit: 'kg', aliases: ['a grade biltong', 'a-grade biltong', 'agrade biltong', 'lean biltong', 'grade a biltong'],
+    preps: { Cut: [['Whole sticks', ['sticks', 'whole', 'uncut'], true], ['Sliced', ['sliced', 'cut', 'chipped']]], Packing: PACKING },
+  },
+  {
+    slug: 'biltong_geel_vet', name: 'Geel Vet Biltong', category: 'Beef – Biltong', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(320), price_unit: 'kg', aliases: ['geel vet biltong', 'geelvet biltong', 'geel vet', 'geelvet', 'yellow fat biltong', 'fatty biltong', 'fat biltong'],
+    preps: { Cut: [['Whole sticks', ['sticks', 'whole', 'uncut'], true], ['Sliced', ['sliced', 'cut', 'chipped']]], Packing: PACKING },
+  },
+  {
+    slug: 'droewors', name: 'Droewors', category: 'Beef – Biltong', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(340), price_unit: 'kg', aliases: ['droewors', 'droe wors', 'droë wors', 'dry wors', 'dried wors', 'dry sausage'], preps: { Packing: PACKING },
+  },
+  // ── Beef – Special ──────────────────────────────────────
+  {
+    slug: 'skilpadjies', name: 'Skilpadjies', category: 'Beef – Special', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(95), price_unit: 'kg', aliases: ['skilpadjies', 'skilpadjie', 'skilpaadjies', 'liver in caul fat'], preps: { Packing: PACKING },
+  },
+  {
+    slug: 'beef_smoked_brisket', name: 'Smoked Brisket (Marinated)', customer_name: 'Smoked Brisket (Marinated)', category: 'Beef – Special', quantity_type: 'weight', allows_portions: true, piece_noun: 'piece',
+    price_cents: kg(450), price_unit: 'kg', aliases: ['smoked brisket', 'marinated brisket', 'smoked marinated brisket', 'marinated smoked brisket'], preps: { Packing: PACKING },
+  },
+  {
+    slug: 'beef_brisket_fat', name: 'Brisket Fat', category: 'Beef – Special', quantity_type: 'weight', piece_noun: 'bag',
+    price_cents: kg(130), price_unit: 'kg', aliases: ['brisket fat', 'brikset fat'],
+  },
+  {
+    slug: 'beef_body_fat', name: 'Body Fat', category: 'Beef – Special', quantity_type: 'weight', piece_noun: 'bag',
+    price_cents: kg(80), price_unit: 'kg', aliases: ['body fat', 'beef fat', 'suet', 'fat', 'tallow fat'],
+  },
+  // ── Lamb – Full ─────────────────────────────────────────
+  {
+    slug: 'lamb_whole', name: 'Whole Lamb', category: 'Lamb – Full', quantity_type: 'count', piece_noun: 'lamb', typical_piece_g: 18000,
+    price_cents: kg(140), price_unit: 'kg', description: 'Priced per kg of carcass weight. Add cutting instructions in the notes.',
+    aliases: ['whole lamb', 'full lamb', 'lamb whole', 'lamb carcass', 'whole lamb carcass'], preps: { Packing: PACKING },
+  },
+  {
+    slug: 'lamb_half', name: 'Half Lamb', category: 'Lamb – Full', quantity_type: 'count', piece_noun: 'half lamb', typical_piece_g: 9000,
+    price_cents: kg(145), price_unit: 'kg', description: 'Priced per kg of carcass weight. Add cutting instructions in the notes.',
+    aliases: ['half lamb', 'half a lamb', 'lamb half', 'half carcass lamb'], preps: { Packing: PACKING },
+  },
+  // ── Lamb – Roast ────────────────────────────────────────
+  {
+    slug: 'lamb_shoulder', name: 'Lamb Shoulder', customer_name: 'Lamb Shoulder (Roast)', category: 'Lamb – Roast', quantity_type: 'either', piece_noun: 'shoulder', typical_piece_g: 2000,
+    price_cents: kg(210), price_unit: 'kg', aliases: ['lamb shoulder', 'shoulder of lamb', 'lamb shoulder roast', 'shoulder roast', 'roast shoulder', 'mutton shoulder'],
+    preps: { Cut: [['Whole', ['whole'], true], ['Deboned & rolled', ['deboned', 'rolled', 'boneless']]], Packing: PACKING },
+  },
+  {
+    slug: 'lamb_leg', name: 'Leg of Lamb', category: 'Lamb – Roast', quantity_type: 'either', piece_noun: 'leg', typical_piece_g: 2500,
+    price_cents: kg(225), price_unit: 'kg', aliases: ['leg of lamb', 'lamb leg', 'leg lamb', 'lamb roast', 'leg of mutton', 'mutton leg', 'leg'],
     preps: {
       Bone: [['Bone-in', ['bone in', 'on the bone', 'with bone', 'bone-in'], true], ['Deboned & rolled', ['deboned', 'boneless', 'rolled', 'bone out', 'deboned and rolled']], ['Butterflied', ['butterfly', 'butterflied', 'butterflyd']]],
       Packing: PACKING,
     },
   },
+  // ── Lamb – Chops ────────────────────────────────────────
   {
-    slug: 'lamb_shoulder', name: 'Lamb Shoulder', category: 'Lamb', quantity_type: 'either', piece_noun: 'shoulder', typical_piece_g: 2000,
-    price_cents: 23500, price_unit: 'kg', aliases: ['lamb shoulder', 'shoulder of lamb', 'mutton shoulder'],
-    preps: { Cut: [['Whole', ['whole'], true], ['Cubed', ['cubed', 'diced', 'potjie', 'stew']], ['Deboned & rolled', ['deboned', 'rolled', 'boneless']]], Packing: PACKING },
+    slug: 'lamb_loin_chops', name: 'Lamb Loin Chops', category: 'Lamb – Chops', quantity_type: 'either', allows_portions: true, piece_noun: 'chop', typical_piece_g: 120,
+    price_cents: kg(265), price_unit: 'kg', aliases: ['lamb loin chops', 'loin chops', 'loin chop', 'lamb chops', 'lamb chop', 'chops lamb', 'mutton chops', 'mutton chop'],
+    preps: STEAK,
   },
   {
-    slug: 'lamb_rack', name: 'Rack of Lamb', category: 'Lamb', quantity_type: 'count', piece_noun: 'rack', typical_piece_g: 700,
-    price_cents: 32000, price_unit: 'kg', aliases: ['rack of lamb', 'lamb rack', 'lamb cutlet', 'lamb cutlets', 'french rack'],
-    preps: { Trim: [['Frenched', ['frenched', 'french trimmed'], true], ['Untrimmed', ['untrimmed', 'not frenched']]], Packing: PACKING },
+    slug: 'lamb_rib_chops', name: 'Lamb Rib Chops', category: 'Lamb – Chops', quantity_type: 'either', allows_portions: true, piece_noun: 'chop', typical_piece_g: 90,
+    price_cents: kg(260), price_unit: 'kg', aliases: ['lamb rib chops', 'rib chops', 'rib chop', 'lamb cutlets', 'lamb cutlet', 'cutlets'], preps: STEAK,
   },
   {
-    slug: 'lamb_shank', name: 'Lamb Shank', category: 'Lamb', quantity_type: 'count', piece_noun: 'shank', typical_piece_g: 450,
-    price_cents: 22500, price_unit: 'kg', aliases: ['lamb shank', 'lamb shanks', 'shank', 'shanks'],
+    slug: 'lamb_shoulder_chops', name: 'Lamb Shoulder Chops', category: 'Lamb – Chops', quantity_type: 'either', allows_portions: true, piece_noun: 'chop', typical_piece_g: 180,
+    price_cents: kg(235), price_unit: 'kg', aliases: ['lamb shoulder chops', 'shoulder chops', 'shoulder chop', 'lamb shoulder chop'], preps: STEAK,
+  },
+  // ── Lamb – Special ──────────────────────────────────────
+  {
+    slug: 'lamb_shanks', name: 'Lamb Shanks', category: 'Lamb – Special', quantity_type: 'either', piece_noun: 'shank', typical_piece_g: 450,
+    price_cents: kg(240), price_unit: 'kg', aliases: ['lamb shank', 'lamb shanks', 'shank', 'shanks', 'mutton shank'], preps: { Packing: PACKING },
+  },
+  {
+    slug: 'lamb_ribs', name: 'Lamb Ribs', category: 'Lamb – Special', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(230), price_unit: 'kg', aliases: ['lamb ribs', 'lamb rib', 'lamb riblets', 'riblets', 'mutton ribs', 'lamb breast'], preps: { Packing: PACKING },
+  },
+  {
+    slug: 'lamb_tails', name: 'Lamb Tails', category: 'Lamb – Special', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(200), price_unit: 'kg', aliases: ['lamb tails', 'lamb tail', 'tails', 'sheep tails', 'sheep tail', 'mutton tails'], preps: { Packing: PACKING },
+  },
+  // ── Lamb – Stewing ──────────────────────────────────────
+  {
+    slug: 'lamb_stew', name: 'Lamb Stew', category: 'Lamb – Stewing', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
+    price_cents: kg(175), price_unit: 'kg', aliases: ['lamb stew', 'lamb stewing', 'stewing lamb', 'mutton stew', 'lamb potjie', 'potjie lamb', 'lamb neck', 'neck slices'],
     preps: { Packing: PACKING },
   },
+  // ── Lamb – Sheep ────────────────────────────────────────
   {
-    slug: 'lamb_neck', name: 'Lamb Neck', category: 'Lamb', quantity_type: 'weight', piece_noun: 'pack',
-    price_cents: 19500, price_unit: 'kg', aliases: ['lamb neck', 'neck of lamb', 'mutton neck', 'neck slices', 'lamb neck slices'],
-    preps: { Packing: PACKING },
+    slug: 'sheep_whole', name: 'Whole Sheep', category: 'Lamb – Sheep', quantity_type: 'count', piece_noun: 'sheep', typical_piece_g: 25000,
+    price_cents: kg(135), price_unit: 'kg', description: 'Priced per kg of carcass weight. Add cutting instructions in the notes.',
+    aliases: ['whole sheep', 'sheep', 'full sheep', 'whole mutton', 'mutton carcass', 'sheep carcass'], preps: { Packing: PACKING },
   },
-  // ── Pork ────────────────────────────────────────────────
+  // ── Eggs ────────────────────────────────────────────────
   {
-    slug: 'pork_chops', name: 'Pork Chops', category: 'Pork', quantity_type: 'either', allows_portions: true, piece_noun: 'chop', typical_piece_g: 220,
-    price_cents: 14500, price_unit: 'kg', aliases: ['pork chop', 'pork chops', 'pork loin chop'],
-    preps: { Bone: [['Bone-in', ['bone in', 'on the bone'], true], ['Boneless', ['boneless', 'deboned', 'off the bone']]], Thickness: THICKNESS, Packing: PACKING },
-  },
-  {
-    slug: 'pork_belly', name: 'Pork Belly', category: 'Pork', quantity_type: 'weight', allows_portions: true, piece_noun: 'piece',
-    price_cents: 15500, price_unit: 'kg', aliases: ['pork belly', 'belly pork', 'belly'],
-    preps: {
-      Skin: [['Skin on, scored', ['skin on', 'scored', 'with skin', 'crackling'], true], ['Skin off', ['skin off', 'no skin', 'skinless', 'without skin']]],
-      Bone: [['Boneless', ['boneless', 'deboned'], true], ['Bone-in', ['bone in', 'on the bone']]],
-      Packing: PACKING,
-    },
-  },
-  {
-    slug: 'pork_loin', name: 'Pork Loin Roast', category: 'Pork', quantity_type: 'weight', piece_noun: 'roast',
-    price_cents: 15500, price_unit: 'kg', aliases: ['pork loin', 'pork roast', 'loin of pork', 'pork loin roast'],
-    preps: { Cut: [['Rolled roast', ['rolled', 'roast', 'tied'], true], ['Bone-in', ['bone in', 'on the bone']]], Packing: PACKING },
-  },
-  {
-    slug: 'pork_ribs', name: 'Pork Spare Ribs', category: 'Pork', quantity_type: 'weight', allows_portions: true, piece_noun: 'rack',
-    price_cents: 17500, price_unit: 'kg', aliases: ['pork rib', 'pork ribs', 'spare rib', 'spare ribs', 'spareribs', 'sticky ribs', 'ribs'],
-    preps: { Style: [['Plain', ['plain', 'unmarinated', 'no sauce'], true], ['Basted', ['basted', 'marinated', 'sticky', 'bbq', 'barbecue']]], Packing: PACKING },
-  },
-  {
-    slug: 'bacon', name: 'Bacon', category: 'Pork', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
-    price_cents: 21000, price_unit: 'kg', aliases: ['bacon', 'streaky bacon', 'back bacon', 'rasher', 'rashers', 'smoked bacon'],
-    preps: { Type: [['Streaky', ['streaky'], true], ['Back', ['back', 'short back', 'middle']]], Packing: PACKING },
-  },
-  {
-    slug: 'gammon', name: 'Gammon', category: 'Pork', quantity_type: 'weight', piece_noun: 'piece',
-    price_cents: 16500, price_unit: 'kg', aliases: ['gammon', 'gammon joint', 'ham', 'christmas ham', 'gammon roast'],
-    preps: { Bone: [['Boneless', ['boneless', 'deboned'], true], ['Bone-in', ['bone in', 'on the bone']]], Packing: PACKING },
-  },
-  // ── Chicken ─────────────────────────────────────────────
-  {
-    slug: 'chicken_whole', name: 'Whole Chicken', category: 'Chicken', quantity_type: 'count', piece_noun: 'chicken', typical_piece_g: 1800,
-    price_cents: 8900, price_unit: 'kg', description: 'Free-range, pasture-raised.',
-    aliases: ['whole chicken', 'chicken', 'whole bird', 'roast chicken', 'full chicken', 'free range chicken'],
-    preps: { Cut: [['Whole', ['whole'], true], ['Portioned', ['portioned', 'cut up', 'braai pack', '8 pieces', 'pieces', 'jointed']], ['Spatchcocked', ['spatchcock', 'spatchcocked', 'flattened', 'butterflied', 'flatty']]], Packing: PACKING },
-  },
-  {
-    slug: 'chicken_breast', name: 'Chicken Breast Fillets', category: 'Chicken', quantity_type: 'either', allows_portions: true, piece_noun: 'fillet', typical_piece_g: 200,
-    price_cents: 12500, price_unit: 'kg', aliases: ['chicken breast', 'chicken breasts', 'chicken breast fillet', 'breast fillet', 'breast fillets', 'chicken breast fillets'],
-    preps: { Skin: [['Skinless', ['skinless', 'skin off', 'no skin'], true], ['Skin on', ['skin on', 'with skin']]], Packing: PACKING },
-  },
-  {
-    slug: 'chicken_thighs', name: 'Chicken Thighs', category: 'Chicken', quantity_type: 'either', allows_portions: true, piece_noun: 'thigh', typical_piece_g: 150,
-    price_cents: 9500, price_unit: 'kg', aliases: ['chicken thigh', 'chicken thighs', 'thigh', 'thighs'],
-    preps: { Bone: [['Bone-in', ['bone in', 'on the bone', 'with bone'], true], ['Boneless', ['boneless', 'deboned', 'thigh fillet', 'fillets']]], Skin: [['Skin on', ['skin on', 'with skin'], true], ['Skinless', ['skinless', 'skin off', 'no skin']]], Packing: PACKING },
-  },
-  {
-    slug: 'chicken_drumsticks', name: 'Chicken Drumsticks', category: 'Chicken', quantity_type: 'either', allows_portions: true, piece_noun: 'drumstick', typical_piece_g: 120,
-    price_cents: 8500, price_unit: 'kg', aliases: ['drumstick', 'drumsticks', 'chicken drumstick', 'chicken drumsticks', 'chicken legs', 'drummies'],
-    preps: { Packing: PACKING },
-  },
-  {
-    slug: 'chicken_wings', name: 'Chicken Wings', category: 'Chicken', quantity_type: 'weight', allows_portions: true, piece_noun: 'pack',
-    price_cents: 8900, price_unit: 'kg', aliases: ['chicken wing', 'chicken wings', 'wings', 'wing'],
-    preps: { Cut: [['Whole', ['whole'], true], ['Split', ['split', 'jointed', 'cut']]], Packing: PACKING },
-  },
-  // ── Other ───────────────────────────────────────────────
-  {
-    slug: 'soup_bones', name: 'Soup Bones', category: 'Other', quantity_type: 'weight', piece_noun: 'bag',
-    price_cents: 4500, price_unit: 'kg', aliases: ['soup bone', 'soup bones', 'bones', 'marrow bones', 'marrow bone', 'dog bones', 'stock bones'],
-    preps: { Packing: PACKING },
-  },
-  {
-    slug: 'beef_fat', name: 'Beef Fat (Suet)', category: 'Other', quantity_type: 'weight', piece_noun: 'bag', customer_visible: false,
-    price_cents: 3000, price_unit: 'kg', aliases: ['beef fat', 'suet', 'fat', 'tallow fat'],
+    slug: 'eggs_tray', name: 'Tray of 30 Eggs', category: 'Eggs', quantity_type: 'count', piece_noun: 'tray',
+    price_cents: kg(60), price_unit: 'each', aliases: ['eggs', 'egg', 'tray of eggs', 'egg tray', 'egg trays', 'tray eggs', 'trays of eggs', 'farm eggs'],
   },
 ];

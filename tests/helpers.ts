@@ -5,14 +5,15 @@ import { createUser } from '../server/domain/users';
 import { buildApp } from '../server/app';
 import type { Actor } from '../server/services/audit';
 import type { Role } from '../shared/permissions';
+import { TEST_CATALOGUE } from './fixtures/test-catalogue';
 
-/** Fresh in-memory database with the seed catalogue. */
-export function freshDb() {
+/** Fresh in-memory database with the generic test dictionary (or Terram's real one). */
+export function freshDb(catalogue: 'test' | 'terram' = 'test') {
   const db = openDatabase(':memory:');
   setDb(db);
   invalidateProducts();
   clearSettingsCache();
-  seedCatalogue();
+  seedCatalogue(catalogue === 'test' ? TEST_CATALOGUE : undefined);
   return db;
 }
 

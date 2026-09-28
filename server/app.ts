@@ -6,7 +6,7 @@ import path from 'node:path';
 import { AppError } from './lib/errors.js';
 import { recordSystemEvent } from './services/health.js';
 import { subscribe } from './services/realtime.js';
-import { getSettings } from './services/settings.js';
+import { DEFAULT_BRAND_COLOUR, getSettings } from './services/settings.js';
 import { loadUser, requireAuth, type Env } from './http/context.js';
 import { csrfGuard, idempotency, securityHeaders } from './http/security.js';
 import auth from './routes/auth.js';
@@ -113,8 +113,8 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
         start_url: '/',
         scope: '/',
         display: 'standalone',
-        background_color: '#f6f3ee',
-        theme_color: s.brand.primary,
+        background_color: '#f5f5f2',
+        theme_color: s.brand.primary.toLowerCase() === DEFAULT_BRAND_COLOUR ? '#303030' : s.brand.primary,
         icons: custom
           ? [
               { src: `/brand/icon-192.png?v=${v}`, sizes: '192x192', type: 'image/png' },

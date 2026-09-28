@@ -1,8 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, ImagePlus, Trash2, Upload } from 'lucide-react';
+import { Check, Trash2, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../lib/api';
 import { applyBrandColour, brandTokens, contrast, hexToRgb, rgbToHex } from '../lib/brand';
+import { Logo } from './order-bits';
+
+const CHARCOAL = '#303030';
 import { useCan } from '../lib/auth';
 import { Badge, Button, Callout, Card, cx, Field, Input, Segmented, Switch, useToast } from './ui';
 
@@ -105,7 +108,7 @@ export function BrandKit({ initial }: { initial: BrandValue }) {
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [v, setV] = useState<BrandValue>(initial);
-  const [iconBg, setIconBg] = useState<'white' | 'brand'>('white');
+  const [iconBg, setIconBg] = useState<'white' | 'charcoal' | 'brand'>('white');
   const [swatches, setSwatches] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const readOnly = !can('settings.write');
@@ -124,7 +127,7 @@ export function BrandKit({ initial }: { initial: BrandValue }) {
       let icon192: string | null = null;
       let icon512: string | null = null;
       if (v.logo) {
-        const bg = iconBg === 'brand' ? brandTokens(v.primary).light['--brand'] : '#ffffff';
+        const bg = iconBg === 'brand' ? brandTokens(v.primary).light['--brand'] : iconBg === 'charcoal' ? CHARCOAL : '#ffffff';
         icon192 = await makeIcon(v.logo, 192, bg);
         icon512 = await makeIcon(v.logo, 512, bg);
       }
@@ -145,7 +148,7 @@ export function BrandKit({ initial }: { initial: BrandValue }) {
       const logo = await normaliseLogo(file);
       const pal = await paletteFrom(logo).catch(() => []);
       setSwatches(pal);
-      setV((s) => ({ ...s, logo, primary: s.primary === '#7b2d26' && pal[0] ? pal[0] : s.primary }));
+      setV((s) => ({ ...s, logo }));
     } catch (e) {
       toast({ tone: 'error', title: e instanceof Error ? e.message : 'Upload failed.' });
     } finally {
@@ -166,14 +169,15 @@ export function BrandKit({ initial }: { initial: BrandValue }) {
         </div>
         <fieldset disabled={readOnly} className="grid gap-6 p-5 md:grid-cols-2">
           <div className="space-y-4">
-            <Field label="Logo" hint="PNG with a transparent background works best. SVG and JPG are fine too.">
+            <Field label="Logo" hint={v.logo ? 'PNG with a transparent background works best. SVG and JPG are fine too.' : 'Your Terram Farm logo is built in. Upload a file only if you want to replace it.'}>
               <div className="flex items-center gap-4">
                 <div className="flex h-24 w-40 items-center justify-center rounded-2xl border border-dashed border-line-strong bg-surface-2 p-3">
-                  {v.logo ? <img src={v.logo} alt="Logo preview" className="max-h-full max-w-full object-contain" /> : <ImagePlus className="size-7 text-ink-3" />}
+                  <img src={v.logo ?? '/brand/terram-logo.png'} alt="Logo preview" className="terram-logo-dark max-h-full max-w-full object-contain" />
+                  {!v.logo && <img src="/brand/terram-logo-white.png" alt="Logo preview" className="terram-logo-light max-h-full max-w-full object-contain" />}
                 </div>
                 <div className="flex flex-col gap-2">
                   <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden" onChange={(e) => upload(e.target.files?.[0])} />
-                  <Button icon={<Upload className="size-4" />} loading={busy} onClick={() => fileRef.current?.click()}>{v.logo ? 'Replace' : 'Upload logo'}</Button>
+                  <Button icon={<Upload className="size-4" />} loading={busy} onClick={() => fileRef.current?.click()}>{v.logo ? 'Replace' : 'Upload a different logo'}</Button>
                   {v.logo && <Button variant="ghost" size="sm" icon={<Trash2 className="size-3.5" />} onClick={() => setV((s) => ({ ...s, logo: null }))}>Remove</Button>}
                 </div>
               </div>
@@ -181,10 +185,10 @@ export function BrandKit({ initial }: { initial: BrandValue }) {
             {v.logo && <Switch checked={v.showName} onChange={(x) => setV((s) => ({ ...s, showName: x }))} label="Show the business name next to the logo" description="Turn off if the name is already part of your logo." />}
             {v.logo && (
               <Field label="App icon background">
-                <Segmented value={iconBg} onChange={setIconBg} options={[{ value: 'white', label: 'White' }, { value: 'brand', label: 'Brand colour' }]} />
+                <Segmented value={iconBg} onChange={setIconBg} options={[{ value: 'white', label: 'White' }, { value: 'charcoal', label: 'Charcoal' }, { value: 'brand', label: 'Brand colour' }]} />
               </Field>
             )}
-            {v.logo && iconBg === 'brand' && swatches.some((sw) => contrast(hexToRgb(sw), hexToRgb(tokens['--brand'])) < 1.6) && (
+            {v.logo && iconBg !== 'white' && swatches.some((sw) => contrast(hexToRgb(sw), hexToRgb(iconBg === 'brand' ? tokens['--brand'] : CHARCOAL)) < 1.6) && (
               <Callout tone="ochre">Parts of your logo are the same colour as this background and will disappear on the icon. White usually works better.</Callout>
             )}
           </div>
@@ -219,8 +223,8 @@ export function BrandKit({ initial }: { initial: BrandValue }) {
         <div className="grid gap-6 p-5 md:grid-cols-[1fr_auto]">
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              {v.logo ? <img src={v.logo} alt="" className="h-10 w-auto max-w-[160px] object-contain" /> : null}
-              {(!v.logo || v.showName) && <span className="font-display text-xl font-semibold">Terram</span>}
+              {v.logo ? <img src={v.logo} alt="" className="h-10 w-auto max-w-[160px] object-contain" /> : <Logo />}
+              {v.logo && v.showName && <span className="font-display text-xl font-semibold">Terram</span>}
             </div>
             <div className="flex flex-wrap gap-2">
               <Button variant="primary">New order</Button>
@@ -228,9 +232,15 @@ export function BrandKit({ initial }: { initial: BrandValue }) {
               <Badge tone="brand" dot>Cutting</Badge>
             </div>
           </div>
+          {!v.logo && (
+            <div className="text-center">
+              <img src="/icon-192.png" alt="" className="mx-auto size-20 rounded-[22px] shadow-float" />
+              <div className="mt-2 text-[12px] text-ink-3">Home Screen icon</div>
+            </div>
+          )}
           {v.logo && (
             <div className="text-center">
-              <div className="mx-auto flex size-20 items-center justify-center overflow-hidden rounded-[22px] shadow-float" style={{ background: iconBg === 'brand' ? tokens['--brand'] : '#fff' }}>
+              <div className="mx-auto flex size-20 items-center justify-center overflow-hidden rounded-[22px] shadow-float" style={{ background: iconBg === 'brand' ? tokens['--brand'] : iconBg === 'charcoal' ? CHARCOAL : '#fff' }}>
                 <img src={v.logo} alt="" className="h-[68%] w-[68%] object-contain" />
               </div>
               <div className="mt-2 text-[12px] text-ink-3">Home Screen icon</div>

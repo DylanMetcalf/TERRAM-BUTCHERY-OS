@@ -35,11 +35,11 @@ The code is on the branch `claude/terram-farm-butchery-os-n3ng2e`. Either merge 
 ## 4. Set it up on your Mac (20 minutes)
 
 1. Open the Render address in Safari or Chrome and sign in with the email and password from step 3.
-2. **Settings → Business**: check the name, phone, address and time zone (Africa/Johannesburg).
-   **Settings → Branding**: upload your logo (a PNG with a transparent background is best, e.g. the one on your order form) and pick your brand colour; the swatches under "From your logo" are taken from the logo. Click **Save brand**. The whole app, printouts, the customer order form and the Home Screen icon change on every device.
+2. **Settings → Business**: check the name, phone (+27 79 889 5569 is filled in), email, address and time zone (Africa/Johannesburg).
+   Your **brand kit is already built in**: the Terram Farm logo, Terram green (#446041), charcoal and white, and a bold heading font close to Garet. The Home Screen icon is the white logo on charcoal, like your price lists. You only need **Settings → Branding** if you want to change them.
 3. **Settings → Orders & fulfilment**: tick your collection days and delivery days and set collection hours.
-4. **Products → Update prices**: paste your price list (from your order form, a spreadsheet or a PDF), one product per line in any format, e.g. `Beef Mince R149.99/kg`. You'll see old → new for every product. Tick and confirm. Lines that don't match a product are listed so you can add them.
-   Then go through **Products** to fix names and options, add the everyday words customers use (e.g. "wors", "chops"), and untick anything you don't sell.
+4. **Products** already holds your Beef and Lamb price lists (June 2026) plus trays of eggs: 43 products at your prices, grouped like the printed lists. When prices change, use **Products → Update prices**: paste the new list in any format (e.g. `Rump R195`). You'll see old → new for every product; tick and confirm.
+   Words that could mean two products ("mince", "biltong", "chops", "ribs", "shoulder") are left for a person to choose, so the app never guesses. After the family picks the same answer a couple of times, Intelligence suggests making it automatic. You can also add words yourself on a product ("Also called").
 5. **Settings → Team**:
    - **Set a family code**, e.g. a short phrase like *red barn mince*. Write it down; it isn't shown again.
    - **Add person** for Mom, Dad and anyone else. Give them a name and role (Manager for your parents, Staff for helpers) and leave "Can sign in with the family code" on. No email is needed.
@@ -66,6 +66,10 @@ Each device stays signed in for about six months. If a phone is lost: **Settings
 - **Packing**: tick each item, then **Packed**. Print packing slips or order dockets if you like paper.
 - **Fulfilment**: **Tell customer** (opens WhatsApp with a ready message), then **Collected** or **Delivered**.
 - Customers can also order themselves from `your-address/order` (Settings → Customer form has the link).
+
+### Replacing the old order form
+
+The old form (dylanmetcalf.github.io/terramfarm-order-form) opens the customer's email app, because a web page on its own can't send email. The app's form at `your-address/order` has the same products, prices, sections and order terms, and **Send order** puts the order straight into Terram as a "To review" order, with no email step. Once the app is live, point customers to the new link. You can also ask Claude to make the old address forward to it automatically, so links you've already shared keep working.
 
 ## 7. Keeping it safe
 

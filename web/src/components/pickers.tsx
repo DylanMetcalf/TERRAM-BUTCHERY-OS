@@ -11,7 +11,6 @@ export function useProducts() {
   return useQuery({ queryKey: ['products'], queryFn: () => api.get<{ products: Product[] }>('/api/products'), staleTime: 60_000 });
 }
 
-const CAT_ORDER = ['Beef', 'Lamb', 'Pork', 'Chicken', 'Sausages', 'Other'];
 
 /** Searchable product list grouped by category. Search understands aliases ("wors", "rib eye"). */
 export function ProductPicker({ onPick, selectedId, includeInactive }: { onPick: (p: Product) => void; selectedId?: string | null; includeInactive?: boolean }) {
@@ -24,7 +23,8 @@ export function ProductPicker({ onPick, selectedId, includeInactive }: { onPick:
     const squashed = n.replace(/ /g, '');
     return products.filter((p) => normalise(p.canonical_name).includes(n) || p.aliases.some((a) => a.alias.includes(n) || a.alias.replace(/ /g, '').includes(squashed)) || normalise(p.category).startsWith(n));
   }, [q, products]);
-  const groups = CAT_ORDER.map((c) => ({ c, items: filtered.filter((p) => p.category === c) })).concat([{ c: 'More', items: filtered.filter((p) => !CAT_ORDER.includes(p.category)) }]).filter((g) => g.items.length);
+  // Sections in price-list order (products arrive sorted)
+  const groups = [...new Set(filtered.map((p) => p.category))].map((c) => ({ c, items: filtered.filter((p) => p.category === c) }));
   return (
     <div>
       <div className="relative mb-3">

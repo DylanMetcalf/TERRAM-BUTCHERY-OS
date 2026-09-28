@@ -161,6 +161,7 @@ function FormSettings({ s }: { s: any }) {
       <Switch checked={v.showPrices} onChange={(x) => setV({ ...v, showPrices: x })} label="Show prices" description="Shown as estimates — final price depends on weight." />
       <Field label="Welcome text"><Textarea rows={3} value={v.intro} onChange={(e) => setV({ ...v, intro: e.target.value })} /></Field>
       <Field label="Message after ordering" hint="Don’t promise the order is confirmed if you still review it."><Textarea rows={2} value={v.confirmationMessage} onChange={(e) => setV({ ...v, confirmationMessage: e.target.value })} /></Field>
+      <Field label="Order terms" hint="One per line. Customers tick to accept these before sending. Leave empty to skip."><Textarea rows={6} value={v.terms} onChange={(e) => setV({ ...v, terms: e.target.value })} /></Field>
     </Panel>
   );
 }

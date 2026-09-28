@@ -14,7 +14,7 @@ export function LoginPage({ setup, family }: { setup: boolean; family: boolean }
   return (
     <div className="grid min-h-dvh lg:grid-cols-[1.1fr_1fr]">
       <div className="relative hidden overflow-hidden bg-[#1f1a17] lg:block">
-        <div className="absolute inset-0" style={{ background: 'radial-gradient(120% 80% at 20% 10%, var(--brand) 0%, color-mix(in srgb, var(--brand) 45%, #0d0b0a) 55%, color-mix(in srgb, var(--brand) 18%, #0d0b0a) 100%)' }} />
+        <div className="absolute inset-0" style={{ background: 'radial-gradient(120% 80% at 20% 10%, var(--brand) 0%, color-mix(in srgb, var(--brand) 45%, #262626) 55%, color-mix(in srgb, var(--brand) 18%, #262626) 100%)' }} />
         <svg className="absolute inset-x-0 bottom-0 w-full opacity-[0.16]" viewBox="0 0 800 400" preserveAspectRatio="none" aria-hidden>
           {Array.from({ length: 14 }).map((_, i) => (
             <path key={i} d={`M-20 ${150 + i * 20} C 200 ${110 + i * 22}, 600 ${110 + i * 22}, 820 ${150 + i * 20}`} stroke="#f6e7d8" strokeWidth="1.4" fill="none" />

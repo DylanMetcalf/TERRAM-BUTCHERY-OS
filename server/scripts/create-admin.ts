@@ -3,7 +3,7 @@
  *   npm run create-admin -- "Name" email@example.com 'password'
  */
 import { openDatabase, db } from '../db/db.js';
-import { seedCatalogue } from '../domain/products.js';
+import { seedCatalogue, upgradeCatalogue } from '../domain/products.js';
 import { createUser, updateUser } from '../domain/users.js';
 
 const [name, email, password] = process.argv.slice(2);
@@ -13,6 +13,7 @@ if (!name || !email || !password) {
 }
 openDatabase(process.env.DATABASE_PATH ?? './data/terram.db');
 seedCatalogue();
+upgradeCatalogue();
 const existing = db().prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE').get(email) as { id: string } | undefined;
 const system = { userId: null, kind: 'system' as const, name: 'CLI' };
 if (existing) {

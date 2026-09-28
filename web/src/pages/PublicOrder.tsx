@@ -23,10 +23,12 @@ interface CatProduct {
   options: { group: string; options: { name: string; is_default: boolean }[] }[];
 }
 interface Line { key: string; product_id: string; qty: Qty; preparation: Record<string, string>; special_instructions: string }
-interface State { step: 0 | 1 | 2 | 3; lines: Line[]; name: string; phone: string; email: string; fulfilment: 'collection' | 'delivery'; date: string; address: string; notes: string; client_ref: string }
+interface State { step: 0 | 1 | 2 | 3; lines: Line[]; name: string; phone: string; email: string; fulfilment: 'collection' | 'delivery'; date: string; address: string; notes: string; client_ref: string; accepted?: boolean }
 
 const KEY = 'terram:customer-order';
-const CATS = ['Beef', 'Lamb', 'Pork', 'Chicken', 'Sausages', 'Other'];
+/** "Beef – Steaks" → chip "Beef", section "Steaks" (matches the printed price lists). */
+const topLevel = (category: string) => category.split(/\s+[–-]\s+/)[0];
+const subLevel = (category: string) => category.split(/\s+[–-]\s+/).slice(1).join(' – ') || category;
 
 function initial(): State {
   try {
@@ -61,8 +63,8 @@ export default function PublicOrder() {
   const set = (p: Partial<State>) => setS((x) => ({ ...x, ...p }));
   const products = cat?.products ?? [];
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
-  const cats = ['All', ...CATS.filter((c) => products.some((p) => p.category === c))];
-  const shown = products.filter((p) => cat_ === 'All' || p.category === cat_);
+  const cats = ['All', ...new Set(products.map((p) => topLevel(p.category)))];
+  const sections = [...new Set(products.filter((p) => cat_ === 'All' || topLevel(p.category) === cat_).map((p) => p.category))];
   const total = s.lines.reduce<number | null>((sum, l) => {
     const p = byId.get(l.product_id);
     const v = p ? estimateLinePrice(l.qty, p.price_cents, p.price_unit) : null;
@@ -108,7 +110,8 @@ export default function PublicOrder() {
     );
 
   const allowedDays: number[] = s.fulfilment === 'delivery' ? info.fulfilment.deliveryDays : info.fulfilment.collectionDays;
-  const dates = Array.from({ length: 21 }, (_, i) => addDays(info.earliest_date, i)).filter((d) => allowedDays.includes(new Date(d + 'T00:00:00Z').getUTCDay())).slice(0, 8);
+  const dates = Array.from({ length: 45 }, (_, i) => addDays(info.earliest_date, i)).filter((d) => allowedDays.includes(new Date(d + 'T00:00:00Z').getUTCDay())).slice(0, 16);
+  const terms: string[] = (info.form.terms ?? '').split('\n').map((t: string) => t.trim()).filter(Boolean);
   const detailsOk = s.name.trim().length >= 2 && s.phone.replace(/\D/g, '').length >= 9;
   const whenOk = !!s.date && (s.fulfilment === 'collection' || s.address.trim().length > 5);
   const steps = ['Choose', 'Your details', 'Collection or delivery', 'Check & send'];
@@ -134,11 +137,14 @@ export default function PublicOrder() {
               <button key={c} onClick={() => setCat(c)} className={cx('h-10 shrink-0 rounded-full border px-4 text-[14px] font-medium', cat_ === c ? 'border-ink bg-ink text-bg' : 'border-line-strong bg-surface text-ink-2')}>{c}</button>
             ))}
           </div>
-          {(cat_ === 'All' ? cats.slice(1) : [cat_]).map((group) => (
-            <section key={group} className="mt-6">
-              {cat_ === 'All' && <h2 className="mb-2.5 font-display text-[20px] font-semibold">{group}</h2>}
+          {sections.map((group) => (
+            <section key={group} className="mt-7">
+              <h2 className="mb-2.5 flex items-baseline gap-2 font-display text-[19px] font-bold uppercase tracking-[0.02em]">
+                {cat_ === 'All' && subLevel(group) !== group && <span className="text-[12px] font-semibold tracking-[0.12em] text-ink-3">{topLevel(group)}</span>}
+                {subLevel(group)}
+              </h2>
               <div className="grid gap-3 sm:grid-cols-2">
-            {shown.filter((p) => p.category === group).map((p) => {
+            {products.filter((p) => p.category === group).map((p) => {
               const inCart = s.lines.filter((l) => l.product_id === p.id);
               return (
                 <button key={p.id} onClick={() => setAdding({ p })} className={cx('flex items-start gap-3 rounded-2xl border bg-surface p-4 text-left shadow-card transition hover:shadow-float active:scale-[0.99]', inCart.length ? 'border-brand/50' : 'border-line')}>
@@ -223,6 +229,16 @@ export default function PublicOrder() {
             {s.notes && <div className="text-ink-2">“{s.notes}”</div>}
           </Card>
           <p className="mt-4 text-[13.5px] text-ink-3">Prices are estimates — meat is priced by final weight. We’ll confirm your order before it’s prepared.</p>
+          {terms.length > 0 && (
+            <Card className="mt-4 p-4">
+              <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-3">Order terms</h2>
+              <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[14px] text-ink-2">{terms.map((t) => <li key={t}>{t}</li>)}</ul>
+              <label className="mt-4 flex items-start gap-3 text-[14.5px]">
+                <input type="checkbox" checked={!!s.accepted} onChange={(e) => set({ accepted: e.target.checked })} className="mt-0.5 size-5 shrink-0 accent-[var(--brand)]" />
+                <span>I confirm this order is correct and understand it is only confirmed once Terram Farm accepts it.</span>
+              </label>
+            </Card>
+          )}
           {error && <p className="mt-4 rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger-soft-ink" role="alert">{error}</p>}
         </div>
       )}
@@ -241,7 +257,7 @@ export default function PublicOrder() {
             {s.step < 3 ? (
               <Button variant="primary" size="lg" disabled={(s.step === 0 && !s.lines.length) || (s.step === 1 && !detailsOk) || (s.step === 2 && !whenOk)} onClick={() => set({ step: (s.step + 1) as State['step'] })}>Continue</Button>
             ) : (
-              <Button variant="primary" size="lg" disabled={!online} loading={submit.isPending} onClick={() => { setError(null); submit.mutate(); }}>Send order</Button>
+              <Button variant="primary" size="lg" disabled={!online || (terms.length > 0 && !s.accepted)} loading={submit.isPending} onClick={() => { setError(null); submit.mutate(); }}>Send order</Button>
             )}
           </div>
         </div>
@@ -301,14 +317,24 @@ function AddSheet({ p, existing, onAdd, onRemove, onClose, currency }: { p: CatP
 function Shell({ children, business, cartCount, onCart }: { children: React.ReactNode; business?: any; cartCount?: number; onCart?: () => void }) {
   return (
     <div className="min-h-dvh bg-bg">
-      <header className="border-b border-line bg-surface/80 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-3xl items-center justify-between px-4">
-          <div className="flex items-center gap-3"><Logo withWord={false} /><div><div className="font-display text-[18px] font-semibold leading-none">{business?.name ?? 'Terram Farm'}</div><div className="mt-1 text-[12px] text-ink-3">{business?.tagline ?? ''}</div></div></div>
-          {!!cartCount && <button onClick={onCart} className="inline-flex items-center gap-1.5 rounded-full bg-sunken px-3 py-1.5 text-[13px] font-semibold"><ShoppingBag className="size-4" />{cartCount}</button>}
+      <header className="bg-charcoal text-white">
+        <div className="mx-auto flex h-[72px] max-w-3xl items-center justify-between gap-3 px-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <Logo withWord={false} tone="light" />
+            <div className="min-w-0">
+              <div className="truncate font-display text-[19px] font-bold leading-none">{business?.name ?? 'Terram Farm'}</div>
+              <div className="mt-1 text-[11.5px] font-medium uppercase tracking-[0.14em] opacity-80">Order form</div>
+            </div>
+          </div>
+          {!!cartCount && <button onClick={onCart} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-[13px] font-semibold"><ShoppingBag className="size-4" />{cartCount}</button>}
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-6">{children}</main>
+      {business?.phone && (
+        <footer className="mx-auto max-w-3xl px-4 pb-32 text-center text-[13px] text-ink-3">
+          Questions? Call or WhatsApp <a className="font-semibold text-ink-2" href={`tel:${business.phone.replace(/\s/g, '')}`}>{business.phone}</a>
+        </footer>
+      )}
     </div>
   );
 }
-

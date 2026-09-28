@@ -82,12 +82,11 @@ export function Logo({ className, withWord = true, tone = 'default' }: { classNa
           <img src={`/brand/logo?v=${brand.version}`} alt={`${name} logo`} className={cx('h-9 w-auto max-w-[140px] object-contain', !showWord && withWord && 'h-10 max-w-[180px]')} />
         </span>
       ) : (
-        <svg viewBox="0 0 40 40" className="size-9 shrink-0" aria-hidden>
-          <rect width="40" height="40" rx="11" fill="var(--brand)" />
-          <circle cx="27.5" cy="13" r="4" fill="var(--brand-ink)" opacity="0.92" />
-          <path d="M6 21.5h28" stroke="var(--brand-ink)" strokeWidth="2" strokeLinecap="round" />
-          <path d="M17 21.5 8 33M19.3 21.5 16 33M20.7 21.5 24 33M23 21.5 32 33" stroke="var(--brand-ink)" strokeWidth="2" strokeLinecap="round" fill="none" opacity="0.92" />
-        </svg>
+        // Terram's own logo: charcoal on light backgrounds, white on dark ones
+        <span className="inline-flex size-11 shrink-0">
+          {tone !== 'light' && <img src="/brand/terram-logo.png" alt={`${name} logo`} className="terram-logo-dark size-full object-contain" />}
+          <img src="/brand/terram-logo-white.png" alt={`${name} logo`} className={cx('size-full object-contain', tone !== 'light' && 'terram-logo-light')} />
+        </span>
       )}
       {showWord && (
         <span className="leading-none">

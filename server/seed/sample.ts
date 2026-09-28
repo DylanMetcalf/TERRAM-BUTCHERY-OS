@@ -13,7 +13,7 @@ import { analyseImport, commitBatch, getBatch } from '../intelligence/imports.js
  * is_sample so it can be removed without touching real records.
  */
 export const SAMPLE_WHATSAPP = `John Smith:
-2kg mince
+2kg lean mince
 4 rumps
 2 ribeye bone in
 Collection Saturday
@@ -23,29 +23,29 @@ Sarah Naidoo:
 1kg boerewors
 
 Mark Botha:
-3kg chicken breasts
+3kg goulash
 Delivery Friday
 deliver to 14 Kerk Street, Parys
 
-Thandi Mokoena: Hi! Could I please get 2 lamb shanks, 1.5kg wors and a whole chicken spatchcocked for Friday? Collecting after 2pm
+Thandi Mokoena: Hi! Could I please get 2 lamb shanks, 1.5kg wors and a tray of eggs for Friday? Collecting after 2pm
 
 Pieter van Wyk:
 Leg of lamb deboned and rolled
-3 x 500g mince
-6 pork chops thick
+3 x 500g 80:20 mince
+6 lamb chops thick
 collect tomorrow
 
 Annelie Steyn: Morning, 4 T-bones and 2kg boerewors please, delivery Saturday. 7 Wilgerlaan, Vredefort
 
 Kagiso Dlamini:
-10 burger patties
-2kg chicken wings
-1kg streaky bacon
+1kg droewors
+2kg short rib
+1kg A-grade biltong
 Pick up Thursday
 
 John Smith: Actually make the mince 3kg.
 
-Mark Botha: 2 cowboy steaks as well please
+Mark Botha: 2 tomahawks as well please
 
 Sarah Naidoo: Can I have 4 of those steaks again?
 
@@ -55,8 +55,8 @@ Pete Venter: Thanks! 👍
 
 Liezl du Plessis:
 1 brisket
-2kg short rib
-soup bones 2kg
+2kg minute steak
+bones 2kg
 Collection Saturday`;
 
 export function sampleDataStatus() {
@@ -88,8 +88,8 @@ export async function loadSampleData(actor: Actor) {
       status: 'confirmed',
       items: [
         { product_id: P('beef_sirloin'), qty: { kind: 'count', count: 4, weight_g: null }, preparation: { Thickness: 'Thick cut' } },
-        { product_id: P('boerewors'), qty: { kind: 'weight', count: null, weight_g: 3000 } },
-        { product_id: P('lamb_chops'), qty: { kind: 'weight', count: null, weight_g: 1500 } },
+        { product_id: P('wors_normal'), qty: { kind: 'weight', count: null, weight_g: 3000 } },
+        { product_id: P('lamb_loin_chops'), qty: { kind: 'weight', count: null, weight_g: 1500 } },
       ],
       fulfilment_type: 'collection',
       requested_date: today,
@@ -105,8 +105,8 @@ export async function loadSampleData(actor: Actor) {
       source: 'form',
       status: 'review',
       items: [
-        { product_id: P('pork_belly'), qty: { kind: 'weight', count: null, weight_g: 2000 } },
-        { product_id: P('pork_ribs'), qty: { kind: 'weight', count: null, weight_g: 1500 }, preparation: { Style: 'Basted' } },
+        { product_id: P('lamb_leg'), qty: { kind: 'count', count: 1, weight_g: null } },
+        { product_id: P('biltong_geel_vet'), qty: { kind: 'weight', count: null, weight_g: 1000 }, preparation: { Cut: 'Sliced' } },
       ],
       fulfilment_type: 'delivery',
       requested_date: addDays(today, 3),
@@ -123,8 +123,8 @@ export async function loadSampleData(actor: Actor) {
       source: 'whatsapp',
       status: 'confirmed',
       items: [
-        { product_id: P('beef_mince'), qty: { kind: 'weight', count: null, weight_g: 2000 } },
-        { product_id: P('chicken_whole'), qty: { kind: 'count', count: 2, weight_g: null } },
+        { product_id: P('beef_mince_8020'), qty: { kind: 'weight', count: null, weight_g: 2000 } },
+        { product_id: P('eggs_tray'), qty: { kind: 'count', count: 2, weight_g: null } },
       ],
       fulfilment_type: 'collection',
       requested_date: addDays(today, -1),

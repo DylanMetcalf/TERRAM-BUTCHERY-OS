@@ -23,17 +23,20 @@ export interface BusinessSettings {
     learningThreshold: number; // corrections before an alias is suggested
   };
   printing: { showPrices: boolean; paper: 'A4' | 'Letter' };
-  customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean };
+  customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean; terms: string };
   /** Brand kit: logo (data URL), generated square app icons, and the main brand colour. */
   brand: { logo: string | null; icon192: string | null; icon512: string | null; primary: string; showName: boolean; version: number };
 }
+
+/** Terram green, from the brand kit and order form. */
+export const DEFAULT_BRAND_COLOUR = '#446041';
 
 export const DEFAULT_SETTINGS: BusinessSettings = {
   business: {
     name: 'Terram Farm',
     tagline: 'Grown with Purpose. Shared with Passion.',
-    phone: '',
-    email: '',
+    phone: '+27 79 889 5569',
+    email: 'orders@terramfarm.co.za',
     address: '',
     timezone: 'Africa/Johannesburg',
     currency: 'ZAR',
@@ -50,17 +53,24 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     deliveryDays: [3, 5],
     deliveryEnabled: true,
     collectionHours: '08:00 – 17:00',
-    deliveryNotes: 'Deliveries within the local area only.',
+    deliveryNotes: 'Delivery can be arranged. Delivery fees apply.',
   },
   ai: { enabled: true, model: 'claude-opus-5', effort: 'low', learningThreshold: 2 },
   printing: { showPrices: false, paper: 'A4' },
   customerForm: {
     enabled: true,
-    intro: 'Order our farm-raised, hand-cut meat. We will confirm your order and let you know when it is ready.',
+    intro: 'Farm-raised beef and lamb. Orders are subject to processing time and stock availability. Your order is confirmed once Terram Farm accepts it.',
     confirmationMessage: 'Thank you — your order has been received. We will be in touch to confirm it shortly.',
     showPrices: true,
+    terms: [
+      'Please place orders at least 2 weeks to 1 month in advance, so we can prepare your order to the highest standard.',
+      'Prices are per kg and subject to change. Your final price is based on the actual packed weight.',
+      'Limited to stock availability.',
+      'Dry-aged beef is available only for Rump, Sirloin, T-Bone and Rib-Eye. It is aged for up to 30 days, carries a 25% surcharge on the normal price, and must be confirmed by Terram Farm before processing.',
+      'Delivery fees apply to deliveries.',
+    ].join('\n'),
   },
-  brand: { logo: null, icon192: null, icon512: null, primary: '#7b2d26', showName: true, version: 0 },
+  brand: { logo: null, icon192: null, icon512: null, primary: DEFAULT_BRAND_COLOUR, showName: true, version: 0 },
 };
 
 let cache: BusinessSettings | null = null;

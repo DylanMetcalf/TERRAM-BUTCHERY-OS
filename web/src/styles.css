@@ -1,29 +1,29 @@
 @import 'tailwindcss';
 @import '@fontsource-variable/inter';
-@import '@fontsource-variable/fraunces';
+@import '@fontsource-variable/montserrat';
 
 /*
  * Terram design tokens — "modern rural premium".
  * Warm paper, deep ink, an oxblood accent, field green for done, ochre for attention.
  */
 :root {
-  --bg: #f6f3ee;
+  --bg: #f5f5f2;
   --surface: #ffffff;
-  --surface-2: #fbf9f6;
-  --sunken: #efebe4;
-  --ink: #1d1b18;
-  --ink-2: #5b554d;
-  --ink-3: #8a8378;
-  --line: #e7e1d7;
-  --line-strong: #d5ccbe;
-  --brand: #7b2d26;
-  --brand-hover: #682520;
+  --surface-2: #fafaf8;
+  --sunken: #ecece8;
+  --ink: #262626;
+  --ink-2: #55554f;
+  --ink-3: #85857e;
+  --line: #e4e4de;
+  --line-strong: #d1d1c9;
+  --brand: #446041;
+  --brand-hover: #374f35;
   --brand-ink: #ffffff;
-  --brand-soft: #f5e8e4;
-  --brand-soft-ink: #6a241e;
-  --field: #43613f;
-  --field-soft: #e6eee2;
-  --field-soft-ink: #2f4a2c;
+  --brand-soft: #eaefe7;
+  --brand-soft-ink: #31462e;
+  --field: #2f7a4a;
+  --field-soft: #e2f1e6;
+  --field-soft-ink: #1f5234;
   --ochre: #9a6412;
   --ochre-soft: #f8edd8;
   --ochre-soft-ink: #6f470b;
@@ -33,31 +33,32 @@
   --slate: #3f5b73;
   --slate-soft: #e7eef4;
   --slate-soft-ink: #2e4558;
-  --shadow: 0 1px 2px rgb(40 30 20 / 0.05), 0 2px 8px rgb(40 30 20 / 0.04);
-  --shadow-lg: 0 8px 30px rgb(40 30 20 / 0.12), 0 2px 6px rgb(40 30 20 / 0.06);
-  --focus: #7b2d26;
+  --charcoal: #303030;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 2px 8px rgb(0 0 0 / 0.04);
+  --shadow-lg: 0 8px 30px rgb(0 0 0 / 0.12), 0 2px 6px rgb(0 0 0 / 0.06);
+  --focus: #446041;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #161412;
-    --surface: #1f1c19;
-    --surface-2: #24211d;
-    --sunken: #12100e;
-    --ink: #f3efe8;
-    --ink-2: #c4bcb0;
-    --ink-3: #8f877c;
-    --line: #34302b;
-    --line-strong: #463f38;
-    --brand: #c9584c;
-    --brand-hover: #d86a5e;
-    --brand-ink: #1a0d0b;
-    --brand-soft: #3a211d;
-    --brand-soft-ink: #f2b9b0;
-    --field: #7fae76;
-    --field-soft: #203020;
-    --field-soft-ink: #b8d8b0;
+    --bg: #1f1f1f;
+    --surface: #2a2a2a;
+    --surface-2: #303030;
+    --sunken: #181818;
+    --ink: #f2f2ee;
+    --ink-2: #c3c3bc;
+    --ink-3: #8f8f88;
+    --line: #3a3a37;
+    --line-strong: #4b4b47;
+    --brand: #93b98d;
+    --brand-hover: #a6c7a1;
+    --brand-ink: #14210f;
+    --brand-soft: #2d3a2b;
+    --brand-soft-ink: #c6dec1;
+    --field: #6cc08a;
+    --field-soft: #1d3325;
+    --field-soft-ink: #b3e0c2;
     --ochre: #e0a445;
     --ochre-soft: #3a2c15;
     --ochre-soft-ink: #f1cf94;
@@ -67,11 +68,19 @@
     --slate: #8fb0cc;
     --slate-soft: #1c2a36;
     --slate-soft-ink: #bcd3e6;
+    --charcoal: #181818;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3);
     --shadow-lg: 0 10px 30px rgb(0 0 0 / 0.45);
-    --focus: #e27b70;
+    --focus: #93b98d;
     color-scheme: dark;
   }
+}
+
+/* Built-in Terram logo: charcoal version on light screens, white version in dark mode */
+.terram-logo-light { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .terram-logo-dark { display: none; }
+  :root:not([data-theme='light']) .terram-logo-light { display: block; }
 }
 
 @theme inline {
@@ -101,8 +110,9 @@
   --color-slate: var(--slate);
   --color-slate-soft: var(--slate-soft);
   --color-slate-soft-ink: var(--slate-soft-ink);
+  --color-charcoal: var(--charcoal);
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: 'Fraunces Variable', ui-serif, Georgia, serif;
+  --font-display: 'Montserrat Variable', 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
   --shadow-card: var(--shadow);
   --shadow-float: var(--shadow-lg);
   --radius-xl: 14px;

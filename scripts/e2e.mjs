@@ -10,9 +10,9 @@ const step = (m) => console.log('✓', m);
 const cust = await (await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })).newPage();
 cust.on('pageerror', (e) => errors.push('customer: ' + e.message));
 await cust.goto(base + '/order');
-await cust.getByRole('button', { name: /Beef Mince/ }).first().click();
+await cust.getByRole('button', { name: /^Lean Mince/ }).first().click();
 await cust.getByRole('button', { name: 'Add to order', exact: false }).click();
-await cust.getByRole('button', { name: /Rump Steak/ }).first().click();
+await cust.getByRole('button', { name: /^Rump\b/ }).first().click();
 await cust.getByRole('button', { name: /More quantity/ }).first().click();
 await cust.getByRole('button', { name: 'Thick cut' }).click();
 await cust.getByRole('button', { name: /Add to order/ }).click();
@@ -22,6 +22,7 @@ await cust.fill('#p', '071 555 3380');
 await cust.getByRole('button', { name: 'Continue' }).click();
 await cust.locator('button:has-text("Sat"), button:has-text("Tomorrow"), button:has-text("Fri")').first().click();
 await cust.getByRole('button', { name: 'Continue' }).click();
+await cust.getByRole('checkbox').check();
 await cust.screenshot({ path: `${shots}/1-customer-review.png`, fullPage: true });
 await cust.getByRole('button', { name: 'Send order' }).click();
 await cust.getByText('Order received').waitFor();
@@ -47,7 +48,7 @@ step('form order reviewed and confirmed');
 
 // 3. Paste messy WhatsApp messages
 await p.goto(base + '/import');
-await p.getByLabel('Messages to import').fill('Thabo:\n2kg mince\n4 rumps\nCollect tomorrow\n\nThabo: actually make the mince 3kg\n\nLeila: 3 cowboy steaks and 1kg wors, collect tomorrow\n\nThabo: thanks!');
+await p.getByLabel('Messages to import').fill('Thabo:\n2kg lean mince\n4 rumps\nCollect tomorrow\n\nThabo: actually make the mince 3kg\n\nLeila: 3 picanha steaks and 1kg wors, collect tomorrow\n\nThabo: thanks!');
 await p.getByRole('button', { name: /Read messages/ }).click();
 await p.getByText('Check what we understood').waitFor();
 await p.screenshot({ path: `${shots}/2-import-review.png`, fullPage: true });
@@ -56,14 +57,14 @@ await p.getByRole('button', { name: /Confirm/ }).last().click();
 await p.getByText(/order(s)? created/).waitFor();
 step('import confirmed: amendment folded in, unknown product sent to exceptions');
 
-// 4. Resolve the exception: cowboy steak → ribeye
+// 4. Resolve the exception: picanha (not on the price list) → rump
 await p.goto(base + '/exceptions');
-await p.getByText('Unknown product: “cowboy steaks”').first().waitFor();
+await p.getByText(/Unknown product: “picanha/).first().waitFor();
 await p.getByRole('button', { name: 'Choose product' }).first().click();
 const sheet = p.getByRole('dialog');
-await sheet.getByLabel('Search products').fill('rib eye');
-await sheet.getByRole('button', { name: /Beef Ribeye R/ }).click();
-await sheet.getByRole('button', { name: 'Bone-in' }).click();
+await sheet.getByLabel('Search products').fill('rump');
+await sheet.getByRole('button', { name: /^Rump R/ }).click();
+await sheet.getByRole('button', { name: 'Thick cut' }).click();
 await sheet.getByRole('button', { name: 'Save' }).click();
 await sheet.waitFor({ state: 'detached' });
 await p.getByText('Everything is under control').waitFor({ timeout: 5000 }).catch(() => undefined);

@@ -411,6 +411,22 @@ function candidatesForBare(items: { key?: string; id?: string; qty: Qty | null; 
   });
 }
 
+/**
+ * "Make the mince 3kg" when the order already has exactly one mince: a word that is
+ * ambiguous on its own ("mince" → Lean or 80:20) means the one already in the conversation.
+ */
+function resolveFromConversation(incoming: DraftItem, pi: { match: { suggestions: { product_id: string; name: string }[] } }, inOrder: { product_id: string | null; product_name?: string | null }[]) {
+  if (incoming.product_id) return;
+  const ids = new Set(pi.match.suggestions.map((x) => x.product_id));
+  const hits = [...new Map(inOrder.filter((i) => i.product_id && ids.has(i.product_id)).map((i) => [i.product_id!, i])).values()];
+  if (hits.length !== 1) return;
+  incoming.product_id = hits[0].product_id;
+  incoming.product_name = hits[0].product_name ?? pi.match.suggestions.find((x) => x.product_id === hits[0].product_id)?.name ?? null;
+  incoming.match = 'fuzzy';
+  incoming.suggestions = [];
+  incoming.reference = false;
+}
+
 function applyInBatchAmendment(c: ConvState, d: OrderDraft, im: InterpretedMessage) {
   const p = im.parsed;
   const s = im.split;
@@ -419,6 +435,7 @@ function applyInBatchAmendment(c: ConvState, d: OrderDraft, im: InterpretedMessa
   const touched: string[] = [];
   for (const pi of p.items) {
     const incoming = toDraftItem(pi, p.flags.reference);
+    resolveFromConversation(incoming, pi, d.items);
     if (!incoming.product_id) {
       // "4 of those steaks" style reference inside an amendment
       incoming.reference = true;
@@ -495,6 +512,7 @@ function buildAmendmentDraft(c: ConvState, im: InterpretedMessage, targets: Targ
   if (!target) return d;
   for (const pi of p.items) {
     const incoming = toDraftItem(pi, p.flags.reference);
+    resolveFromConversation(incoming, pi, target.items);
     if (!incoming.product_id) {
       d.reference = {
         qty: incoming.qty,

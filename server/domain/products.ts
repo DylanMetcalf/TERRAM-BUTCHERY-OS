@@ -1,7 +1,7 @@
 import { db, id, json, now, tx } from '../db/db.js';
 import { normalise } from '../../shared/text.js';
-import { CATALOGUE } from '../seed/catalogue.js';
-import { audit, type Actor } from '../services/audit.js';
+import { CATALOGUE, type SeedProduct } from '../seed/catalogue.js';
+import { audit, SYSTEM, type Actor } from '../services/audit.js';
 import { publish } from '../services/realtime.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import type { QuantityType } from '../../shared/quantity.js';
@@ -40,7 +40,10 @@ export interface Product {
   preparations: Preparation[];
 }
 
-export const CATEGORY_ORDER = ['Beef', 'Lamb', 'Pork', 'Chicken', 'Sausages', 'Other'];
+/** Categories in the order their first product appears (the price-list order). */
+export function categoryOrder(): string[] {
+  return [...new Set(listProducts().map((p) => p.category))];
+}
 
 function rowToProduct(r: any, aliases: any[], preps: any[]): Product {
   return {
@@ -298,9 +301,64 @@ export function addAlias(productId: string, phrase: string, source: 'admin' | 'l
   return requireProduct(productId);
 }
 
-export function seedCatalogue() {
+export function seedCatalogue(catalogue: SeedProduct[] = CATALOGUE) {
   const count = (db().prepare('SELECT COUNT(*) c FROM products').get() as any).c;
   if (count > 0) return;
+  insertCatalogue(catalogue, 0);
+}
+
+/** Bump when server/seed/catalogue.ts changes in a way existing installs should receive. */
+export const CATALOGUE_VERSION = 2;
+
+/**
+ * Brings an existing install onto Terram's real price list (version 2 replaced
+ * the generic starter products). If no orders exist yet, the starter products
+ * are replaced outright. Otherwise nothing is removed: Terram products that are
+ * missing are added and starter products Terram doesn't sell are switched off,
+ * so past orders keep their products.
+ */
+export function upgradeCatalogue() {
+  const row = db().prepare("SELECT value FROM settings WHERE key = 'catalogue_version'").get() as { value: string } | undefined;
+  const current = row ? Number(JSON.parse(row.value)) : 0;
+  if (current >= CATALOGUE_VERSION) return;
+  const setVersion = () =>
+    db()
+      .prepare("INSERT INTO settings (key, value, updated_at) VALUES ('catalogue_version', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+      .run(JSON.stringify(CATALOGUE_VERSION), now());
+  const slugs = new Set((db().prepare('SELECT slug FROM products').all() as { slug: string }[]).map((r) => r.slug));
+  const terramSlugs = new Set(CATALOGUE.map((p) => p.slug));
+  // Fresh install (seeded with the current catalogue) or already Terram's list
+  if (!slugs.size || [...terramSlugs].every((s) => slugs.has(s))) {
+    setVersion();
+    return;
+  }
+  const orders = (db().prepare('SELECT COUNT(*) n FROM order_items').get() as { n: number }).n;
+  tx(() => {
+    if (orders === 0) {
+      db().prepare('DELETE FROM products').run();
+      insertCatalogue(CATALOGUE, 0);
+    } else {
+      // Switch off starter products Terram doesn't sell and free their words for Terram's products
+      const retired = [...slugs].filter((s) => !terramSlugs.has(s));
+      const off = db().prepare('UPDATE products SET active = 0, customer_visible = 0, updated_at = ? WHERE slug = ?');
+      const freeAliases = db().prepare("DELETE FROM product_aliases WHERE source = 'seed' AND product_id = (SELECT id FROM products WHERE slug = ?)");
+      for (const s of retired) {
+        off.run(now(), s);
+        freeAliases.run(s);
+      }
+      // Products on both lists take the price-list name, section and price
+      const refresh = db().prepare('UPDATE products SET canonical_name = ?, customer_name = ?, category = ?, price_cents = ?, price_unit = ?, updated_at = ? WHERE slug = ?');
+      for (const p of CATALOGUE.filter((x) => slugs.has(x.slug))) refresh.run(p.name, p.customer_name ?? p.name, p.category, p.price_cents ?? null, p.price_unit ?? null, now(), p.slug);
+      const maxSort = (db().prepare('SELECT COALESCE(MAX(sort_order), 0) m FROM products').get() as { m: number }).m;
+      insertCatalogue(CATALOGUE.filter((p) => !slugs.has(p.slug)), maxSort + 1);
+    }
+    setVersion();
+    audit(SYSTEM, 'product.catalogue_upgraded', 'system', null, orders === 0 ? "Loaded Terram's price list as the product list" : "Added Terram's price list products; starter products Terram doesn't sell were switched off");
+  });
+  invalidateProducts();
+}
+
+function insertCatalogue(catalogue: SeedProduct[], sortFrom: number) {
   tx(() => {
     const ts = now();
     const insP = db().prepare(
@@ -308,9 +366,9 @@ export function seedCatalogue() {
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)`,
     );
     const insA = db().prepare('INSERT OR IGNORE INTO product_aliases (id, product_id, alias, source, created_at) VALUES (?,?,?,?,?)');
-    CATALOGUE.forEach((s, i) => {
+    catalogue.forEach((s, i) => {
       const pid = id('pr_');
-      insP.run(pid, s.slug, s.name, s.customer_name ?? s.name, s.category, s.description ?? null, s.quantity_type, s.allows_portions ? 1 : 0, s.piece_noun ?? 'piece', s.typical_piece_g ?? null, s.price_cents ?? null, s.price_unit ?? null, s.customer_visible === false ? 0 : 1, i, ts, ts);
+      insP.run(pid, s.slug, s.name, s.customer_name ?? s.name, s.category, s.description ?? null, s.quantity_type, s.allows_portions ? 1 : 0, s.piece_noun ?? 'piece', s.typical_piece_g ?? null, s.price_cents ?? null, s.price_unit ?? null, s.customer_visible === false ? 0 : 1, sortFrom + i, ts, ts);
       const aliases = new Set([s.name, s.customer_name ?? s.name, ...s.aliases].map(normalise).filter(Boolean));
       for (const a of aliases) insA.run(id('pa_'), pid, a, 'seed', ts);
       const preps = Object.entries(s.preps ?? {}).flatMap(([group, opts]) => opts.map(([name, keywords, isDefault]) => ({ group_name: group, name, keywords, is_default: !!isDefault })));

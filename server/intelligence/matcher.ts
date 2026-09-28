@@ -86,7 +86,7 @@ function findSquashed(tokens: string[], alias: string): { start: number; len: nu
 }
 
 function speciesOf(p: DictProduct): string[] {
-  const words = new Set([...p.aliasStrings.join(' ').split(' '), p.category.toLowerCase()]);
+  const words = new Set([...p.aliasStrings.join(' ').split(' '), ...normalise(p.category).split(' ')]);
   if (words.has('mutton')) words.add('lamb');
   if (words.has('lamb')) words.add('mutton');
   return SPECIES.filter((s) => words.has(s));

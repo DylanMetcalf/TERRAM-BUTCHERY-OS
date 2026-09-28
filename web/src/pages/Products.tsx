@@ -11,7 +11,6 @@ import { formatMoney } from '../lib/format';
 import type { Product } from '../lib/types';
 import { normalise } from '../../../shared/text';
 
-const CATEGORIES = ['Beef', 'Lamb', 'Pork', 'Chicken', 'Sausages', 'Other'];
 
 export default function Products() {
   const { data, isLoading, error, refetch } = useProducts();
@@ -28,7 +27,7 @@ export default function Products() {
     const n = normalise(q);
     return (data?.products ?? []).filter((p) => (show === 'all' ? true : show === 'active' ? p.active : !p.active)).filter((p) => !n || normalise(p.canonical_name).includes(n) || p.aliases.some((a) => a.alias.includes(n)));
   }, [data, q, show]);
-  const cats = [...new Set([...CATEGORIES, ...products.map((p) => p.category)])].filter((c) => products.some((p) => p.category === c));
+  const cats = [...new Set(products.map((p) => p.category))];
   const current = data?.products.find((p) => p.id === openId) ?? null;
   return (
     <div className="animate-rise">
@@ -104,6 +103,7 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
   const [aliases, setAliases] = useState<string[]>([]);
   const [aliasInput, setAliasInput] = useState('');
   const [preps, setPreps] = useState<PrepRow[]>([]);
+  const { data: allProducts } = useProducts();
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     if (!open) return;
@@ -113,7 +113,7 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
     setV({
       canonical_name: p?.canonical_name ?? '',
       customer_name: p?.customer_name ?? '',
-      category: p?.category ?? 'Beef',
+      category: p?.category ?? allProducts?.products[0]?.category ?? 'Beef – Steaks',
       description: p?.description ?? '',
       quantity_type: p?.quantity_type ?? 'weight',
       allows_portions: p?.allows_portions ?? false,
@@ -174,7 +174,7 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Category">
               <Select value={v.category} onChange={(e) => set('category', e.target.value)}>
-                {[...new Set([...CATEGORIES, v.category])].map((c) => <option key={c}>{c}</option>)}
+                {[...new Set([...(allProducts?.products ?? []).map((x) => x.category), v.category].filter(Boolean))].map((c) => <option key={c}>{c}</option>)}
               </Select>
             </Field>
             <Field label="Price" optional>

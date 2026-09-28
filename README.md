@@ -44,6 +44,8 @@ Business rules (collection/delivery days, lead time, whether online orders need 
 
 ## Brand kit and prices
 
+Terram's brand kit ships with the app: the logo (`web/public/brand/`), Terram green `#446041`, charcoal `#303030` and white, and Montserrat headings (the closest open font to Garet). App icons are built with `node scripts/make-icons.mjs`. The product dictionary (`server/seed/catalogue.ts`) is Terram's Beef and Lamb price lists; an install that started on the old generic list is moved onto it automatically at startup (without touching products used by existing orders).
+
 - **Settings → Branding:** upload a logo (PNG/JPG/WebP/SVG) and choose the brand colour. The app derives readable light and dark shades from it, and generates the Home Screen icon and the web-app manifest. Uploaded SVGs are served with a script-blocking security policy.
 - **Products → Update prices:** paste a price list in any common format. Each line is matched with the same dictionary used for orders, shown as old → new, and applied only when confirmed (audited).
 
@@ -153,7 +155,7 @@ scripts/       QA helpers: screenshots, overflow check, browser end-to-end run
 
 ```bash
 npm run typecheck
-npm test               # 90 tests, including the 50-order acceptance test
+npm test               # 96 tests, including the 50-order acceptance test
 ```
 
 The **50-order acceptance test** (`tests/acceptance-50.test.ts`) pastes a realistic chat with 50 orders, typos, varied wording, WhatsApp-export lines, amendments, additions, a vague "make those 2", a contradiction, unknown products, a double paste, a customer question, chatter and one of Terram's own replies. It then checks every order against ground truth, resolves the exceptions as staff would, and drives all orders through cutting, packing and fulfilment to completion.

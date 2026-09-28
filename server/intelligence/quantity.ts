@@ -27,9 +27,17 @@ function num(s: string): number {
   return Number(s.replace(',', '.'));
 }
 
+/**
+ * "80:20 mince", "80/20 mince" and "80 20 mince" are a fat ratio, not a quantity or
+ * two items. Rewritten to one token ("80to20") that no quantity rule reads as a number.
+ */
+export function protectRatios(text: string): string {
+  return text.replace(/\b(\d{2})\s*[:/\s-]\s*(\d{2})(?=\s*(?:mince|minced|beef|ground)\b)/gi, '$1to$2');
+}
+
 /** Rewrites spoken quantities into digits so the regexes stay simple. */
 export function preprocess(text: string): string {
-  let t = ` ${text.toLowerCase()} `;
+  let t = ` ${protectRatios(text.toLowerCase())} `;
   t = t.replace(/[×✖]/g, ' x ');
   t = t.replace(/\b(\d+)\s*(?:and a half|&\s*a\s*half|½)\s*/g, (_, n) => `${Number(n) + 0.5} `);
   t = t.replace(/\b(one|a)\s+and\s+a\s+half\s+/g, '1.5 ');
@@ -97,6 +105,9 @@ export function extractQuantity(input: string): QtyResult {
   if (/\bcouple\b/.test(t)) {
     return { qty: null, rest: t.replace(/\bcouple\b/, ' ').trim(), matched: 'a couple', ambiguous: true };
   }
+  // "half a lamb", "half lamb" — one of a product sold as a half (the alias keeps the word "half")
+  m = /^\s*half\s+(?:a\s+|an\s+)?(?=[a-z])/.exec(t);
+  if (m) return { qty: { kind: 'count', count: 1, weight_g: null }, rest: `half ${t.slice(m[0].length)}`.trim(), matched: 'half', ambiguous: false };
   // "a whole chicken", "a leg of lamb", "an oxtail"
   m = /^\s*(?:a|an)\s+/.exec(t);
   if (m) return { qty: { kind: 'count', count: 1, weight_g: null }, rest: strip(t, m), matched: 'a', ambiguous: false };

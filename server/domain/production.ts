@@ -1,6 +1,6 @@
 import { db } from '../db/db.js';
 import { formatQty, formatWeight, pluralise, type Qty } from '../../shared/quantity.js';
-import { CATEGORY_ORDER, listProducts } from './products.js';
+import { categoryOrder, listProducts } from './products.js';
 import { getItems, type OrderSummary, getOrderSummary } from './orders.js';
 
 /**
@@ -109,7 +109,8 @@ export function cuttingSheet(opts: { from?: string | null; to?: string | null; i
     const { piece_noun, typical_piece_g, sort, ...rest } = l;
     return rest;
   });
-  const catIndex = (c: string) => (CATEGORY_ORDER.indexOf(c) === -1 ? 99 : CATEGORY_ORDER.indexOf(c));
+  const cats = categoryOrder();
+  const catIndex = (c: string) => (cats.indexOf(c) === -1 ? 999 : cats.indexOf(c));
   const sortMap = new Map(listProducts().map((p) => [p.id, p.sort_order]));
   out.sort((a, b) => catIndex(a.category) - catIndex(b.category) || (sortMap.get(a.product_id) ?? 0) - (sortMap.get(b.product_id) ?? 0) || a.preparation_label.localeCompare(b.preparation_label));
   const orderIds = new Set(rows.map((r) => r.order_id));
