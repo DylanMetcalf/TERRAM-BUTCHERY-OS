@@ -1,5 +1,7 @@
 # Terram Butchery OS — single container: API + web app + SQLite on a volume.
 FROM node:22-bookworm-slim AS build
+# Compiler tools for native modules (better-sqlite3). Build stage only; the final image doesn't include them.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
