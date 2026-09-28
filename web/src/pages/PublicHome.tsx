@@ -3,6 +3,7 @@ import { ArrowRight, CalendarCheck, Mail, MessageCircle, Phone, ShoppingBag, Sto
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/order-bits';
+import { BackToTop } from '../components/BackToTop';
 import { api } from '../lib/api';
 
 /**
@@ -97,7 +98,7 @@ export default function PublicHome() {
             {[
               { icon: ShoppingBag, title: 'Choose online', body: 'Pick your cuts and quantities on our order form, check your order, then send it. Prices are shown per kg.' },
               { icon: CalendarCheck, title: 'We confirm', body: 'We check stock and confirm your order. Please order 2 weeks to a month ahead.' },
-              { icon: info?.fulfilment?.deliveryEnabled ? Truck : Store, title: 'Collect or delivery', body: info?.fulfilment?.deliveryEnabled ? `Collect from the farm${info?.fulfilment?.collectionHours ? ` (${info.fulfilment.collectionHours})` : ''}, or we can arrange delivery.` : 'Collect from the farm when it’s ready.' },
+              { icon: info?.fulfilment?.deliveryEnabled ? Truck : Store, title: 'Collect or delivery', body: `Collect from ${info?.fulfilment?.collectionPlace ?? 'our shop'}${info?.fulfilment?.collectionHours ? ` (${info.fulfilment.collectionHours})` : ''}${info?.fulfilment?.deliveryEnabled ? `, or have it delivered. ${info?.fulfilment?.deliveryNotes ?? ''}` : '.'}` },
             ].map((s, i) => (
               <li key={s.title} className="rounded-2xl bg-surface-2 p-5">
                 <span className="flex size-10 items-center justify-center rounded-xl bg-brand-soft text-brand"><s.icon className="size-5" /></span>
@@ -122,6 +123,7 @@ export default function PublicHome() {
         </section>
       </main>
 
+      <BackToTop />
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-5xl flex-col gap-3 px-5 py-8 text-[14px] text-ink-2 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <div className="flex flex-wrap gap-x-5 gap-y-2">

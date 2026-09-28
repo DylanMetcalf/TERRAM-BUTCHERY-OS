@@ -14,6 +14,9 @@ export interface BusinessSettings {
     deliveryDays: number[];
     deliveryEnabled: boolean;
     collectionHours: string;
+    /** Where customers collect, in their words, e.g. “our shop”. */
+    collectionPlace: string;
+    collectionAddress: string;
     deliveryNotes: string;
   };
   ai: {
@@ -53,7 +56,9 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     deliveryDays: [3, 5],
     deliveryEnabled: true,
     collectionHours: '08:00 – 17:00',
-    deliveryNotes: 'Delivery can be arranged. Delivery fees apply.',
+    collectionPlace: 'our shop',
+    collectionAddress: '',
+    deliveryNotes: 'We deliver in Pretoria. Delivery fees apply.',
   },
   ai: { enabled: true, model: 'claude-opus-5', effort: 'low', learningThreshold: 2 },
   printing: { showPrices: false, paper: 'A4' },

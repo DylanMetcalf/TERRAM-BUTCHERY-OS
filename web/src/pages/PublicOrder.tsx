@@ -2,6 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Check, Pencil, Plus, Search, ShoppingBag, Store, Trash2, Truck, WifiOff, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Logo } from '../components/order-bits';
+import { BackToTop } from '../components/BackToTop';
 import { QuantityInput } from '../components/quantity-input';
 import { Button, Card, cx, Field, Input, Segmented, Sheet, Spinner, Textarea } from '../components/ui';
 import { api, ApiError, newKey } from '../lib/api';
@@ -232,9 +233,9 @@ export default function PublicOrder() {
             {info.fulfilment.deliveryEnabled ? (
               <Segmented full size="lg" value={s.fulfilment} onChange={(v) => set({ fulfilment: v, date: '' })} options={[{ value: 'collection', label: <><Store className="size-4" />Collect</> }, { value: 'delivery', label: <><Truck className="size-4" />Delivery</> }]} />
             ) : (
-              <p className="text-ink-2">Orders are for collection at the farm.</p>
+              <p className="text-ink-2">Orders are for collection from {info.fulfilment.collectionPlace ?? 'our shop'}.</p>
             )}
-            <p className="mt-2 text-[13.5px] text-ink-3">{s.fulfilment === 'collection' ? `Collection hours: ${info.fulfilment.collectionHours}` : info.fulfilment.deliveryNotes}</p>
+            <p className="mt-2 text-[13.5px] text-ink-3">{s.fulfilment === 'collection' ? [`Collect from ${info.fulfilment.collectionPlace ?? 'our shop'}${info.fulfilment.collectionAddress ? `, ${info.fulfilment.collectionAddress}` : ''}`, info.fulfilment.collectionHours && `Hours: ${info.fulfilment.collectionHours}`].filter(Boolean).join(' · ') : info.fulfilment.deliveryNotes}</p>
           </div>
           <Field label="Which day?" className="mt-6">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -446,6 +447,7 @@ function Shell({ children, business, cartCount, onCart }: { children: React.Reac
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-5 py-7 sm:px-8 sm:py-10">{children}</main>
+      <BackToTop className="bottom-[calc(96px+env(safe-area-inset-bottom))]" />
       {business?.phone && (
         <footer className="mx-auto max-w-5xl px-5 pb-32 sm:px-8 text-center text-[13px] text-ink-3">
           Questions? Call or WhatsApp <a className="font-semibold text-ink-2" href={`tel:${business.phone.replace(/\s/g, '')}`}>{business.phone}</a>

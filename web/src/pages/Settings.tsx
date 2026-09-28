@@ -136,7 +136,11 @@ function OrdersSettings({ s }: { s: any }) {
       </Panel>
       <Panel title="Collection & delivery" footer={<Button variant="primary" loading={saveF.isPending} onClick={() => saveF.mutate(f)}>Save</Button>}>
         <Field label="Collection days"><DayPicker value={f.collectionDays} onChange={(v) => setF({ ...f, collectionDays: v })} /></Field>
-        <Field label="Collection hours"><Input value={f.collectionHours} onChange={(e) => setF({ ...f, collectionHours: e.target.value })} /></Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Customers collect from" hint="Finishes the sentence “Collect from …”, e.g. our shop."><Input value={f.collectionPlace} onChange={(e) => setF({ ...f, collectionPlace: e.target.value })} /></Field>
+          <Field label="Collection hours"><Input value={f.collectionHours} onChange={(e) => setF({ ...f, collectionHours: e.target.value })} /></Field>
+        </div>
+        <Field label="Collection address" optional hint="Shown to customers who choose collection."><Input value={f.collectionAddress} onChange={(e) => setF({ ...f, collectionAddress: e.target.value })} /></Field>
         <Switch checked={f.deliveryEnabled} onChange={(x) => setF({ ...f, deliveryEnabled: x })} label="Offer delivery" />
         {f.deliveryEnabled && (
           <>

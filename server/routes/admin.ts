@@ -55,6 +55,8 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
     deliveryDays: z.array(z.number().int().min(0).max(6)).max(7),
     deliveryEnabled: z.boolean(),
     collectionHours: z.string().max(100),
+    collectionPlace: z.string().trim().min(1).max(80),
+    collectionAddress: z.string().max(200),
     deliveryNotes: z.string().max(500),
   }).partial(),
   ai: z.object({
