@@ -59,6 +59,8 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
     collectionAddress: z.string().max(200),
     deliveryNotes: z.string().max(500),
     freeDeliveryKm: z.number().min(0).max(1000),
+    customerChooses: z.boolean(),
+    showDeliveryFees: z.boolean(),
     deliveryRatePerKmCents: z.number().int().min(0).max(100000),
   }).partial(),
   ai: z.object({
@@ -68,7 +70,7 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
     learningThreshold: z.number().int().min(1).max(20),
   }).partial(),
   printing: z.object({ showPrices: z.boolean(), paper: z.enum(['A4', 'Letter']) }).partial(),
-  customerForm: z.object({ enabled: z.boolean(), intro: z.string().max(600), confirmationMessage: z.string().max(600), showPrices: z.boolean(), terms: z.string().max(3000), notifyEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), emailCustomer: z.boolean() }).partial(),
+  customerForm: z.object({ enabled: z.boolean(), intro: z.string().max(600), confirmationMessage: z.string().max(600), showPrices: z.boolean(), terms: z.string().max(3000), noticeNote: z.string().max(400), notifyEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), emailCustomer: z.boolean() }).partial(),
   brand: z
     .object({
       logo: z.string().max(1_000_000).regex(/^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/, 'Upload a PNG, JPG, WebP or SVG image.').nullable(),

@@ -97,8 +97,10 @@ export default function PublicHome() {
           <ol className="mt-5 grid gap-4 sm:grid-cols-3">
             {[
               { icon: ShoppingBag, title: 'Choose online', body: 'Pick your cuts and quantities on our order form, check your order, then send it. Prices are shown per kg.' },
-              { icon: CalendarCheck, title: 'We confirm', body: 'We check stock and confirm your order. Please order 2 weeks to a month ahead.' },
-              { icon: info?.fulfilment?.deliveryEnabled ? Truck : Store, title: 'Collect or delivery', body: `Collect from ${info?.fulfilment?.collectionPlace ?? 'our shop'}${info?.fulfilment?.collectionHours ? ` (${info.fulfilment.collectionHours})` : ''}${info?.fulfilment?.deliveryEnabled ? `, or have it delivered. ${info?.fulfilment?.deliveryNotes ?? ''}` : '.'}` },
+              { icon: CalendarCheck, title: 'We confirm', body: 'We check stock and confirm your order. We recommend ordering 7–14 days ahead.' },
+              info?.fulfilment?.customerChooses === false
+                ? { icon: Truck, title: 'Delivery or collection', body: `We’ll contact you to arrange delivery or collection from ${info?.fulfilment?.collectionPlace ?? 'our shop'}. ${info?.fulfilment?.deliveryNotes ?? ''}` }
+                : { icon: info?.fulfilment?.deliveryEnabled ? Truck : Store, title: 'Collect or delivery', body: `Collect from ${info?.fulfilment?.collectionPlace ?? 'our shop'}${info?.fulfilment?.collectionHours ? ` (${info.fulfilment.collectionHours})` : ''}${info?.fulfilment?.deliveryEnabled ? `, or have it delivered. ${info?.fulfilment?.deliveryNotes ?? ''}` : '.'}` },
             ].map((s, i) => (
               <li key={s.title} className="rounded-2xl bg-surface-2 p-5">
                 <span className="flex size-10 items-center justify-center rounded-xl bg-brand-soft text-brand"><s.icon className="size-5" /></span>
@@ -130,7 +132,7 @@ export default function PublicHome() {
             {phone && <a href={`tel:${phone.replace(/\s/g, '')}`} className="inline-flex items-center gap-1.5 hover:text-ink"><Phone className="size-4" />{phone}</a>}
             {email && <a href={`mailto:${email}`} className="inline-flex items-center gap-1.5 hover:text-ink"><Mail className="size-4" />{email}</a>}
           </div>
-          <span className="text-ink-3">© {new Date().getFullYear()} {name}</span>
+          <span className="text-ink-3"><Link to="/privacy" className="hover:text-ink">Privacy notice</Link> · © {new Date().getFullYear()} {name}</span>
         </div>
       </footer>
     </div>

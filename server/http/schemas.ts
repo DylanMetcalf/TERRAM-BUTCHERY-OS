@@ -67,7 +67,7 @@ export const PublicOrderSchema = z.object({
   }),
   items: z.array(ItemSchema.omit({ special_instructions: true }).extend({ special_instructions: z.string().max(300).nullable().optional() })).max(40),
   special_request: optStr(1500),
-  fulfilment_type: z.enum(['collection', 'delivery']),
+  fulfilment_type: z.enum(['collection', 'delivery']).nullable().optional(),
   requested_date: ymd,
   delivery_address: optStr(300),
   notes: optStr(1000),

@@ -3,7 +3,7 @@ import { freshDb, STAFF } from './helpers';
 import { analyseImport, getBatch } from '../server/intelligence/imports';
 import { listProducts, upgradeCatalogue } from '../server/domain/products';
 import { createOrder } from '../server/domain/orders';
-import { Client, productId } from './helpers';
+import { Client, productId, signedIn } from './helpers';
 import { buildApp } from '../server/app';
 import { db } from '../server/db/db';
 import { addDays, localDate, weekdayOf } from '../server/lib/time';
@@ -143,7 +143,7 @@ describe('customer order form', () => {
     for (let i = 2; i < 10; i++) if ([2, 3, 4, 5, 6].includes(weekdayOf(addDays(today, i)))) return addDays(today, i);
     throw new Error('no day');
   };
-  const order = (ref: string, extra: any) => ({ customer: { name: 'Naledi Zulu', phone: '071 555 3380' }, items: [], fulfilment_type: 'collection', requested_date: day(), client_ref: ref, ...extra });
+  const order = (ref: string, extra: any) => ({ customer: { name: 'Naledi Zulu', phone: '071 555 3380' }, items: [], fulfilment_type: 'collection', delivery_address: '12 Kerk Street, Pretoria', requested_date: day(), client_ref: ref, ...extra });
   const eggs = (count: number) => ({ product_id: productId('eggs'), qty: { kind: 'count', count, weight_g: null } });
 
   it('only takes eggs in whole trays of 30', async () => {
@@ -172,5 +172,24 @@ describe('customer order form', () => {
     await c.post('/api/public/orders', order('ref-spec-0002', { items: [eggs(60)], special_request: 'Could you add 2kg dog bones?' }));
     expect((db().prepare('SELECT status FROM orders').get() as any).status).toBe('review');
     expect((db().prepare("SELECT severity FROM exceptions WHERE type = 'special_request'").get() as any).severity).toBe('warning');
+  });
+
+  it('asks only for an address by default, and lets customers choose when switched on', async () => {
+    const c = new Client(buildApp());
+    const ip = { 'x-forwarded-for': '203.0.113.77' }; // its own rate-limit bucket
+    const noAddress = await c.post('/api/public/orders', order('ref-mode-0001', { items: [eggs(30)], delivery_address: null }), ip);
+    expect(noAddress.status).toBe(400);
+    expect(noAddress.body.error).toMatch(/address/);
+    expect((await c.post('/api/public/orders', order('ref-mode-0002', { items: [eggs(30)], fulfilment_type: 'delivery' }), ip)).status).toBe(200);
+    const o = db().prepare("SELECT fulfilment_type, delivery_address FROM orders ORDER BY created_at DESC LIMIT 1").get() as any;
+    expect(o).toEqual({ fulfilment_type: null, delivery_address: '12 Kerk Street, Pretoria' }); // the family arranges it
+
+    const admin = await signedIn('admin');
+    expect((await admin.req('PUT', '/api/admin/settings/fulfilment', { customerChooses: true })).status).toBe(200);
+    expect((await c.post('/api/public/orders', order('ref-mode-0003', { items: [eggs(30)], delivery_address: null }), ip)).status).toBe(200);
+    expect((db().prepare("SELECT fulfilment_type FROM orders ORDER BY created_at DESC LIMIT 1").get() as any).fulfilment_type).toBe('collection');
+    const info = await c.get('/api/public/info');
+    expect(info.body.fulfilment.customerChooses).toBe(true);
+    expect(info.body.form.noticeNote).toMatch(/7–14 days/);
   });
 });

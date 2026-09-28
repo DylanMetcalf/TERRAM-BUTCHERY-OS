@@ -24,6 +24,7 @@ const order = (ref: string, extra: any = {}) => ({
   customer: { name: 'Naledi Zulu', phone: '071 555 3380', email: 'naledi@example.com' },
   items: [{ product_id: productId('beef_rump'), qty: { kind: 'count', count: 4, weight_g: null } }, { product_id: productId('eggs'), qty: { kind: 'count', count: 30, weight_g: null } }],
   fulfilment_type: 'collection',
+  delivery_address: '12 Kerk Street, Pretoria',
   requested_date: day(),
   client_ref: ref,
   ...extra,
@@ -52,6 +53,8 @@ describe('email for new online orders', () => {
     expect(copy.text).toContain('4 steaks Rump');
     expect(copy.text).not.toMatch(/\/orders\//); // no staff link for customers
     expect(copy.replyTo).toBe('orders@terramfarm.co.za');
+    expect(copy.text).toMatch(/Need to change something\? Reply to this email with your reference #\d+/);
+    expect(copy.html).toContain('https://wa.me/27798895569?text=');
   });
 
   it('can be switched off by clearing the addresses', async () => {

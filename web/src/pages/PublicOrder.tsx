@@ -1,8 +1,9 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Check, Pencil, Plus, Search, ShoppingBag, Store, Trash2, Truck, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, CalendarClock, Check, Pencil, Plus, Search, ShoppingBag, Store, Trash2, Truck, WifiOff, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Logo } from '../components/order-bits';
 import { BackToTop } from '../components/BackToTop';
+import { ChangeOrderButtons, ChangeOrderLink } from '../components/ChangeOrder';
 import { QuantityInput } from '../components/quantity-input';
 import { Button, Card, cx, Field, Input, Segmented, Sheet, Spinner, Textarea } from '../components/ui';
 import { api, ApiError, newKey } from '../lib/api';
@@ -99,9 +100,9 @@ export default function PublicOrder() {
       api.post<{ order_number: number | null; message: string }>('/api/public/orders', {
         customer: { name: s.name, phone: s.phone, email: s.email || undefined },
         items: s.lines.map((l) => ({ product_id: l.product_id, qty: l.qty, preparation: l.preparation, special_instructions: l.special_instructions || null })),
-        fulfilment_type: s.fulfilment,
+        fulfilment_type: info?.fulfilment?.customerChooses ? s.fulfilment : null,
         requested_date: s.date,
-        delivery_address: s.fulfilment === 'delivery' ? s.address : null,
+        delivery_address: !info?.fulfilment?.customerChooses || s.fulfilment === 'delivery' ? s.address : null,
         notes: s.notes || null,
         special_request: s.special?.trim() || null,
         client_ref: s.client_ref,
@@ -110,7 +111,7 @@ export default function PublicOrder() {
       setDone({ number: r.order_number, message: r.message });
       try {
         localStorage.removeItem(KEY);
-        localStorage.setItem(ME_KEY, JSON.stringify({ name: s.name, phone: s.phone, email: s.email, address: s.fulfilment === 'delivery' ? s.address : (loadMe()?.address ?? '') }));
+        localStorage.setItem(ME_KEY, JSON.stringify({ name: s.name, phone: s.phone, email: s.email, address: s.address || loadMe()?.address || '' }));
       } catch {
         /* ignore */
       }
@@ -130,17 +131,30 @@ export default function PublicOrder() {
           <h1 className="mt-6 font-display text-3xl font-semibold">Order received</h1>
           {done.number && <p className="mt-1 text-[15px] text-ink-3">Reference #{done.number}</p>}
           <p className="mt-4 text-[16px] leading-relaxed text-ink-2">{done.message}</p>
+          {s.email && <p className="mt-2 text-[14px] text-ink-3">A copy is on its way to {s.email}.</p>}
+          <div className="mt-8 rounded-2xl border border-line bg-surface p-4 text-left">
+            <div className="font-semibold">Need to change something?</div>
+            <p className="mt-1 text-[14px] text-ink-2">Message or call us with your reference number and we’ll update your order.</p>
+            <div className="mt-3"><ChangeOrderButtons phone={info.business.phone} email={info.business.email} reference={done.number} name={s.name.split(' ')[0]} /></div>
+          </div>
           <Button className="mt-8" onClick={() => { setDone(null); setS({ ...initial(), step: 0, lines: [], client_ref: newKey() }); }}>Place another order</Button>
         </div>
       </Shell>
     );
 
-  const allowedDays: number[] = s.fulfilment === 'delivery' ? info.fulfilment.deliveryDays : info.fulfilment.collectionDays;
+  // Address-only mode (the family arranges collection/delivery) vs customers choosing
+  const chooses: boolean = !!info.fulfilment.customerChooses;
+  const allowedDays: number[] = !chooses ? [...new Set<number>([...info.fulfilment.collectionDays, ...info.fulfilment.deliveryDays])] : s.fulfilment === 'delivery' ? info.fulfilment.deliveryDays : info.fulfilment.collectionDays;
   const dates = Array.from({ length: 45 }, (_, i) => addDays(info.earliest_date, i)).filter((d) => allowedDays.includes(new Date(d + 'T00:00:00Z').getUTCDay())).slice(0, 16);
+  const rate: number = info.fulfilment.deliveryRatePerKmCents ?? 0;
+  const feeLine: string | null = info.fulfilment.showDeliveryFees
+    ? `Delivery is free within ${info.fulfilment.freeDeliveryKm} km of ${info.fulfilment.collectionPlace ?? 'our shop'}.${rate > 0 ? ` Further away it’s ${formatMoney(rate, info.currency)} per km beyond that.` : ' Further away, we’ll quote you a delivery fee.'}`
+    : null;
   const terms: string[] = (info.form.terms ?? '').split('\n').map((t: string) => t.trim()).filter(Boolean);
   const detailsOk = s.name.trim().length >= 2 && s.phone.replace(/\D/g, '').length >= 9;
-  const whenOk = !!s.date && (s.fulfilment === 'collection' || s.address.trim().length > 5);
-  const steps = ['Choose', 'Your details', 'Collection or delivery', 'Check & send'];
+  const needsAddress = !chooses || s.fulfilment === 'delivery';
+  const whenOk = !!s.date && (!needsAddress || s.address.trim().length > 5);
+  const steps = ['Choose', 'Your details', chooses ? 'Collection or delivery' : 'Date & address', 'Check & send'];
 
   return (
     <Shell business={info.business} cartCount={s.lines.length + (s.special?.trim() ? 1 : 0)} onCart={() => setCartOpen(true)}>
@@ -158,6 +172,7 @@ export default function PublicOrder() {
         <div className="animate-rise pb-28">
           <h1 className="font-display text-[30px] font-semibold leading-tight">What would you like?</h1>
           <p className="mt-2 max-w-xl text-[15.5px] text-ink-2">{info.form.intro}</p>
+          <ChangeOrderLink phone={info.business.phone} email={info.business.email} className="mt-2 text-[14px] font-medium text-brand underline-offset-2 hover:underline" />
           <div className="relative mt-5">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4.5 -translate-y-1/2 text-ink-3" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search — e.g. rump, wors, lamb chops" className="h-12 pl-10 pr-10 text-[16px]" aria-label="Search products" />
@@ -222,22 +237,34 @@ export default function PublicOrder() {
             <Field label="Name" htmlFor="n"><Input id="n" big autoComplete="name" value={s.name} onChange={(e) => set({ name: e.target.value })} /></Field>
             <Field label="Mobile number" htmlFor="p" hint="We’ll use WhatsApp or SMS for updates."><Input id="p" big type="tel" inputMode="tel" autoComplete="tel" value={s.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
             <Field label="Email" htmlFor="e" optional hint="We’ll email you a copy of your order."><Input id="e" big type="email" autoComplete="email" value={s.email} onChange={(e) => set({ email: e.target.value })} /></Field>
-            <p className="text-[13px] text-ink-3">We only use your details for your orders and to contact you about them. We never share them.</p>
+            <p className="text-[13px] text-ink-3">We only use your details for your orders and to contact you about them. <a href="/privacy" target="_blank" rel="noreferrer" className="font-medium text-brand underline underline-offset-2">Privacy notice</a></p>
           </div>
         </div>
       )}
 
       {s.step === 2 && (
         <div className="mx-auto max-w-lg animate-rise pb-28">
-          <h1 className="font-display text-[28px] font-semibold">Collection or delivery?</h1>
-          <div className="mt-5">
-            {info.fulfilment.deliveryEnabled ? (
-              <Segmented full size="lg" value={s.fulfilment} onChange={(v) => set({ fulfilment: v, date: '' })} options={[{ value: 'collection', label: <><Store className="size-4" />Collect</> }, { value: 'delivery', label: <><Truck className="size-4" />Delivery</> }]} />
-            ) : (
-              <p className="text-ink-2">Orders are for collection from {info.fulfilment.collectionPlace ?? 'our shop'}.</p>
-            )}
-            <p className="mt-2 text-[13.5px] text-ink-3">{s.fulfilment === 'collection' ? [`Collect from ${info.fulfilment.collectionPlace ?? 'our shop'}${info.fulfilment.collectionAddress ? `, ${info.fulfilment.collectionAddress}` : ''}`, info.fulfilment.collectionHours && `Hours: ${info.fulfilment.collectionHours}`].filter(Boolean).join(' · ') : info.fulfilment.deliveryNotes}</p>
-          </div>
+          {chooses ? (
+            <>
+              <h1 className="font-display text-[28px] font-semibold">Collection or delivery?</h1>
+              <div className="mt-5">
+                {info.fulfilment.deliveryEnabled ? (
+                  <Segmented full size="lg" value={s.fulfilment} onChange={(v) => set({ fulfilment: v, date: '' })} options={[{ value: 'collection', label: <><Store className="size-4" />Collect</> }, { value: 'delivery', label: <><Truck className="size-4" />Delivery</> }]} />
+                ) : (
+                  <p className="text-ink-2">Orders are for collection from {info.fulfilment.collectionPlace ?? 'our shop'}.</p>
+                )}
+                <p className="mt-2 text-[13.5px] text-ink-3">{s.fulfilment === 'collection' ? [`Collect from ${info.fulfilment.collectionPlace ?? 'our shop'}${info.fulfilment.collectionAddress ? `, ${info.fulfilment.collectionAddress}` : ''}`, info.fulfilment.collectionHours && `Hours: ${info.fulfilment.collectionHours}`].filter(Boolean).join(' · ') : info.fulfilment.deliveryNotes}</p>
+                {s.fulfilment === 'delivery' && feeLine && <p className="mt-2 rounded-xl bg-brand-soft px-3 py-2 text-[13.5px] text-brand-soft-ink">{feeLine}</p>}
+              </div>
+            </>
+          ) : (
+            <>
+              <h1 className="font-display text-[28px] font-semibold">When would you like it?</h1>
+              <p className="mt-1 text-ink-2">Choose a day and give us your address. We’ll contact you to arrange delivery or collection.</p>
+              {feeLine && <p className="mt-3 rounded-xl bg-brand-soft px-3 py-2 text-[13.5px] text-brand-soft-ink">{feeLine}</p>}
+            </>
+          )}
+          {info.form.noticeNote && <p className="mt-5 flex gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-[13.5px] text-ink-2"><CalendarClock className="mt-0.5 size-4 shrink-0 text-ink-3" />{info.form.noticeNote}</p>}
           <Field label="Which day?" className="mt-6">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {dates.map((d) => (
@@ -249,7 +276,7 @@ export default function PublicOrder() {
             </div>
             {!dates.length && <p className="text-[14px] text-ink-3">No days are available right now — please contact us.</p>}
           </Field>
-          {s.fulfilment === 'delivery' && <Field label="Delivery address" className="mt-5"><Textarea rows={3} value={s.address} onChange={(e) => set({ address: e.target.value })} autoComplete="street-address" /></Field>}
+          {needsAddress && <Field label={chooses ? 'Delivery address' : 'Your address'} hint={chooses ? undefined : 'Street address and suburb, e.g. 12 Kerk Street, Pretoria East.'} className="mt-5"><Textarea rows={3} value={s.address} onChange={(e) => set({ address: e.target.value })} autoComplete="street-address" /></Field>}
           <Field label="Anything we should know?" optional className="mt-5"><Textarea rows={2} value={s.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="e.g. it’s for a braai for 10 people" /></Field>
         </div>
       )}
@@ -279,7 +306,9 @@ export default function PublicOrder() {
           )}
           <Card className="mt-3 space-y-1 p-4 text-[14.5px]">
             <div><b>{s.name}</b> · {s.phone}</div>
-            <div>{s.fulfilment === 'delivery' ? `Delivery to ${s.address}` : 'Collection'} · {s.date && longDate(s.date)}</div>
+            <div>{!chooses ? <>Wanted by {s.date && longDate(s.date)}</> : <>{s.fulfilment === 'delivery' ? `Delivery to ${s.address}` : 'Collection'} · {s.date && longDate(s.date)}</>}</div>
+            {!chooses && <div>{s.address}</div>}
+            {!chooses && <div className="text-[13.5px] text-ink-3">We’ll contact you to arrange delivery or collection.</div>}
             {s.notes && <div className="text-ink-2">“{s.notes}”</div>}
           </Card>
           <p className="mt-4 text-[13.5px] text-ink-3">Prices are estimates — meat is priced by final weight. We’ll confirm your order before it’s prepared.</p>

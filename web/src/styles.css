@@ -141,6 +141,17 @@
   html {
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
+    /* Feels like an app: no double-tap zoom, no sideways wobble */
+    touch-action: manipulation;
+    overflow-x: clip;
+  }
+  body {
+    overflow-x: clip;
+    overscroll-behavior-x: none;
+  }
+  /* iPhones zoom into any text box under 16px when it's tapped, and stay zoomed */
+  @media (pointer: coarse) {
+    input, textarea, select { font-size: max(16px, 1em) !important; }
   }
   body {
     background: var(--bg);
