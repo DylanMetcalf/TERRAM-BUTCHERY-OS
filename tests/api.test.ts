@@ -93,6 +93,7 @@ describe('customer order form', () => {
     customer: { name: 'Naledi Zulu', phone: '071 555 3380' },
     items: [{ product_id: productId('beef_mince'), qty: { kind: 'weight', weight_g: 1000 } }],
     fulfilment_type: 'collection',
+    delivery_address: '12 Kerk Street, Pretoria',
     requested_date: nextCollectionDay(),
     client_ref: ref,
     ...extra,

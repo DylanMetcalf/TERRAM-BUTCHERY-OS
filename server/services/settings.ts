@@ -14,7 +14,18 @@ export interface BusinessSettings {
     deliveryDays: number[];
     deliveryEnabled: boolean;
     collectionHours: string;
+    /** Where customers collect, in their words, e.g. “our shop”. */
+    collectionPlace: string;
+    collectionAddress: string;
     deliveryNotes: string;
+    /** Deliveries within this distance of the shop are free… */
+    freeDeliveryKm: number;
+    /** Customers choose collection or delivery on the form. Off: they give an address and the family arranges it. */
+    customerChooses: boolean;
+    /** Show the free radius and per-km fee on the order form. */
+    showDeliveryFees: boolean;
+    /** …and each km beyond it costs this much (cents). 0 = no distance fee. */
+    deliveryRatePerKmCents: number;
   };
   ai: {
     enabled: boolean;
@@ -23,7 +34,7 @@ export interface BusinessSettings {
     learningThreshold: number; // corrections before an alias is suggested
   };
   printing: { showPrices: boolean; paper: 'A4' | 'Letter' };
-  customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean; terms: string; /** Who gets an email for every online order. */ notifyEmails: string[] };
+  customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean; terms: string; /** Shown when choosing a date. */ noticeNote: string; /** Who gets an email for every online order. */ notifyEmails: string[]; /** Email the customer a copy of their order when they give an address. */ emailCustomer: boolean };
   /** Brand kit: logo (data URL), generated square app icons, and the main brand colour. */
   brand: { logo: string | null; icon192: string | null; icon512: string | null; primary: string; showName: boolean; version: number };
 }
@@ -53,22 +64,30 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     deliveryDays: [3, 5],
     deliveryEnabled: true,
     collectionHours: '08:00 – 17:00',
-    deliveryNotes: 'Delivery can be arranged. Delivery fees apply.',
+    collectionPlace: 'our shop',
+    collectionAddress: '',
+    deliveryNotes: 'We deliver in Pretoria and surrounds. A delivery fee may apply depending on distance; we’ll confirm it with you.',
+    freeDeliveryKm: 60,
+    deliveryRatePerKmCents: 0,
+    customerChooses: false,
+    showDeliveryFees: false,
   },
   ai: { enabled: true, model: 'claude-opus-5', effort: 'low', learningThreshold: 2 },
   printing: { showPrices: false, paper: 'A4' },
   customerForm: {
     enabled: true,
-    intro: 'Farm-raised beef and lamb. Orders are subject to processing time and stock availability. Your order is confirmed once Terram Farm accepts it.',
+    intro: 'Farm-raised Beef and Lamb. Orders are subject to processing time and stock availability. Your order is confirmed once Terram Farm accepts it.',
     confirmationMessage: 'Thank you — your order has been received. We will be in touch to confirm it shortly.',
     showPrices: true,
     notifyEmails: ['dylan@meacreo.co.za', 'Sharonm@imagine.co.za'],
+    emailCustomer: true,
+    noticeNote: 'We recommend ordering 7–14 days ahead. Sooner dates depend on what we have in stock; we’ll confirm with you.',
     terms: [
-      'Please place orders at least 2 weeks to 1 month in advance, so we can prepare your order to the highest standard.',
+      'We recommend placing orders 7–14 days in advance. Sooner orders depend on stock, and we’ll confirm what we can do.',
       'Prices are per kg and subject to change. Your final price is based on the actual packed weight.',
       'Limited to stock availability.',
       'Dry-aged beef is available only for Rump, Sirloin, T-Bone and Rib-Eye. It is aged for up to 30 days, carries a 25% surcharge on the normal price, and must be confirmed by Terram Farm before processing.',
-      'Delivery fees apply to deliveries.',
+      'A delivery fee may apply depending on distance; we’ll confirm it with you.',
     ].join('\n'),
   },
   brand: { logo: null, icon192: null, icon512: null, primary: DEFAULT_BRAND_COLOUR, showName: true, version: 0 },
@@ -101,6 +120,27 @@ export function updateSettings(section: keyof BusinessSettings, value: unknown, 
     .run(section, JSON.stringify(merged), now(), userId);
   cache = null;
   return getSettings();
+}
+
+/**
+ * Wording we've since improved: if a saved setting still holds an old default word for word,
+ * swap in the new default. Anything the family wrote themselves is left alone.
+ */
+const REWORDED: [section: keyof BusinessSettings, key: string, old: string[]][] = [
+  ['customerForm', 'terms', ["Please place orders at least 2 weeks to 1 month in advance, so we can prepare your order to the highest standard.\nPrices are per kg and subject to change. Your final price is based on the actual packed weight.\nLimited to stock availability.\nDry-aged beef is available only for Rump, Sirloin, T-Bone and Rib-Eye. It is aged for up to 30 days, carries a 25% surcharge on the normal price, and must be confirmed by Terram Farm before processing.\nDelivery fees apply to deliveries."]],
+  ['customerForm', 'intro', ['Farm-raised beef and lamb. Orders are subject to processing time and stock availability. Your order is confirmed once Terram Farm accepts it.']],
+  ['fulfilment', 'deliveryNotes', ['Delivery can be arranged. Delivery fees apply.', 'We deliver in Pretoria. Delivery fees apply.', 'Deliveries within the local area only.']],
+];
+export function refreshDefaultWording() {
+  for (const [section, key, olds] of REWORDED) {
+    const row = db().prepare('SELECT value FROM settings WHERE key = ?').get(section) as { value: string } | undefined;
+    if (!row) continue;
+    const stored = json<any>(row.value, {});
+    if (!olds.includes(stored?.[key])) continue;
+    stored[key] = (DEFAULT_SETTINGS[section] as any)[key];
+    db().prepare('UPDATE settings SET value = ?, updated_at = ? WHERE key = ?').run(JSON.stringify(stored), now(), section);
+  }
+  cache = null;
 }
 
 export function clearSettingsCache() {

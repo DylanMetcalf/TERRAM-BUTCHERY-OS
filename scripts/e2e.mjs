@@ -29,6 +29,8 @@ await cust.fill('#n', 'Naledi Zulu');
 await cust.fill('#p', '071 555 3380');
 await cust.getByRole('button', { name: 'Continue' }).click();
 await cust.locator('button:has-text("Sat"), button:has-text("Tomorrow"), button:has-text("Fri")').first().click();
+// Address-only mode (the default): the family arranges collection or delivery
+if (await cust.getByText('Your address').count()) await cust.locator('textarea').first().fill('12 Kerk Street, Pretoria East');
 await cust.getByRole('button', { name: 'Continue' }).click();
 await cust.getByRole('checkbox').check();
 await cust.screenshot({ path: `${shots}/1-customer-review.png`, fullPage: true });

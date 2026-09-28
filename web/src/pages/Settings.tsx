@@ -136,12 +136,23 @@ function OrdersSettings({ s }: { s: any }) {
       </Panel>
       <Panel title="Collection & delivery" footer={<Button variant="primary" loading={saveF.isPending} onClick={() => saveF.mutate(f)}>Save</Button>}>
         <Field label="Collection days"><DayPicker value={f.collectionDays} onChange={(v) => setF({ ...f, collectionDays: v })} /></Field>
-        <Field label="Collection hours"><Input value={f.collectionHours} onChange={(e) => setF({ ...f, collectionHours: e.target.value })} /></Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Customers collect from" hint="Finishes the sentence “Collect from …”, e.g. our shop."><Input value={f.collectionPlace} onChange={(e) => setF({ ...f, collectionPlace: e.target.value })} /></Field>
+          <Field label="Collection hours"><Input value={f.collectionHours} onChange={(e) => setF({ ...f, collectionHours: e.target.value })} /></Field>
+        </div>
+        <Field label="Collection address" optional hint="Shown to customers who choose collection."><Input value={f.collectionAddress} onChange={(e) => setF({ ...f, collectionAddress: e.target.value })} /></Field>
+        <Switch checked={!!f.customerChooses} onChange={(x) => setF({ ...f, customerChooses: x })} label="Customers choose collection or delivery" description="Off: the order form just asks for their address, and you contact them to arrange it. On: they pick collection or delivery themselves." />
         <Switch checked={f.deliveryEnabled} onChange={(x) => setF({ ...f, deliveryEnabled: x })} label="Offer delivery" />
         {f.deliveryEnabled && (
           <>
             <Field label="Delivery days"><DayPicker value={f.deliveryDays} onChange={(v) => setF({ ...f, deliveryDays: v })} /></Field>
-            <Field label="Delivery note for customers"><Input value={f.deliveryNotes} onChange={(e) => setF({ ...f, deliveryNotes: e.target.value })} /></Field>
+            <Field label="Delivery note for customers" hint="Shown on the order form. You don’t have to mention the distance or price here."><Input value={f.deliveryNotes} onChange={(e) => setF({ ...f, deliveryNotes: e.target.value })} /></Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Free delivery within (km)" hint="Distance from the shop."><Input type="number" min={0} value={f.freeDeliveryKm} onChange={(e) => setF({ ...f, freeDeliveryKm: Number(e.target.value) })} /></Field>
+              <Field label="Fee per km beyond that (R)" hint="0 = no distance fee. Staff enter the distance on each delivery order and the fee is worked out."><Input type="number" min={0} step="0.5" value={(f.deliveryRatePerKmCents ?? 0) / 100} onChange={(e) => setF({ ...f, deliveryRatePerKmCents: Math.round(Number(e.target.value) * 100) })} /></Field>
+            </div>
+            <Switch checked={!!f.showDeliveryFees} onChange={(x) => setF({ ...f, showDeliveryFees: x })} label="Show delivery fees on the order form" description="On: customers see “Delivery is free within 60 km; further away R… per km”. Off: nothing about fees is shown and you handle it yourselves." />
+            {(f.deliveryRatePerKmCents ?? 0) > 0 && <p className="-mt-2 text-[13px] text-ink-3">Example: a delivery {f.freeDeliveryKm + 15} km away costs 15 km × R{((f.deliveryRatePerKmCents ?? 0) / 100).toFixed(2)} = R{((15 * (f.deliveryRatePerKmCents ?? 0)) / 100).toFixed(2)}.</p>}
           </>
         )}
       </Panel>
@@ -202,7 +213,9 @@ function FormSettings({ s, env }: { s: any; env: any }) {
       <Switch checked={v.showPrices} onChange={(x) => setV({ ...v, showPrices: x })} label="Show prices" description="Shown as estimates — final price depends on weight." />
       <Field label="Welcome text"><Textarea rows={3} value={v.intro} onChange={(e) => setV({ ...v, intro: e.target.value })} /></Field>
       <Field label="Message after ordering" hint="Don’t promise the order is confirmed if you still review it."><Textarea rows={2} value={v.confirmationMessage} onChange={(e) => setV({ ...v, confirmationMessage: e.target.value })} /></Field>
+      <Field label="Notice note" hint="Shown when customers choose a date."><Textarea rows={2} value={v.noticeNote ?? ''} onChange={(e) => setV({ ...v, noticeNote: e.target.value })} /></Field>
       <Field label="Order terms" hint="One per line. Customers tick to accept these before sending. Leave empty to skip."><Textarea rows={6} value={v.terms} onChange={(e) => setV({ ...v, terms: e.target.value })} /></Field>
+      <Switch checked={v.emailCustomer !== false} onChange={(x) => setV({ ...v, emailCustomer: x })} label="Email customers a copy of their order" description="Sent when they give an email address: what they ordered, the reference number and that you’ll confirm it. Replies come to your business email." />
       <Field label="Email every online order to" hint="One address per line. Each new order arrives with the items, date, contact details and a link to open it.">
         <Textarea rows={3} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="name@example.com" />
       </Field>

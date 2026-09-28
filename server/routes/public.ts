@@ -24,8 +24,8 @@ r.get('/info', (c) => {
   return c.json({
     business: { name: s.business.name, tagline: s.business.tagline, phone: s.business.phone, email: s.business.email, address: s.business.address },
     // Only what the order form needs — never the internal email recipients
-    form: { enabled: s.customerForm.enabled, intro: s.customerForm.intro, confirmationMessage: s.customerForm.confirmationMessage, showPrices: s.customerForm.showPrices, terms: s.customerForm.terms },
-    fulfilment: { collectionDays: s.fulfilment.collectionDays, deliveryDays: s.fulfilment.deliveryDays, deliveryEnabled: s.fulfilment.deliveryEnabled, collectionHours: s.fulfilment.collectionHours, deliveryNotes: s.fulfilment.deliveryNotes },
+    form: { enabled: s.customerForm.enabled, intro: s.customerForm.intro, confirmationMessage: s.customerForm.confirmationMessage, showPrices: s.customerForm.showPrices, terms: s.customerForm.terms, noticeNote: s.customerForm.noticeNote },
+    fulfilment: { collectionDays: s.fulfilment.collectionDays, deliveryDays: s.fulfilment.deliveryDays, deliveryEnabled: s.fulfilment.deliveryEnabled, collectionHours: s.fulfilment.collectionHours, collectionPlace: s.fulfilment.collectionPlace, collectionAddress: s.fulfilment.collectionAddress, deliveryNotes: s.fulfilment.deliveryNotes, freeDeliveryKm: s.fulfilment.freeDeliveryKm, deliveryRatePerKmCents: s.fulfilment.deliveryRatePerKmCents, customerChooses: s.fulfilment.customerChooses, showDeliveryFees: s.fulfilment.showDeliveryFees },
     earliest_date: addDays(today, s.orders.leadTimeDays),
     today,
     currency: s.business.currency,
@@ -75,7 +75,12 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   if (input.requested_date < earliest) throw badRequest('Please choose a later date.');
   if (input.requested_date > addDays(today, 90)) throw badRequest('Please choose a date within the next three months.');
   const wd = weekdayOf(input.requested_date);
-  if (input.fulfilment_type === 'delivery') {
+  // "Address only" mode: the customer gives an address and the family arranges collection or delivery
+  const chooses = s.fulfilment.customerChooses;
+  const fulfilmentType = chooses ? (input.fulfilment_type ?? 'collection') : null;
+  if (!chooses) {
+    if (!input.delivery_address?.trim()) throw badRequest('Please enter your address so we can arrange your order.');
+  } else if (fulfilmentType === 'delivery') {
     if (!s.fulfilment.deliveryEnabled) throw badRequest('Delivery is not available at the moment.');
     if (!s.fulfilment.deliveryDays.includes(wd)) throw badRequest('We do not deliver on that day.');
     if (!input.delivery_address?.trim()) throw badRequest('Please enter your delivery address.');
@@ -100,7 +105,7 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   const summary = input.items.map((i) => `${formatQty(i.qty as any)} ${requireProduct(i.product_id).customer_name}${Object.values(i.preparation ?? {}).length ? ` (${Object.values(i.preparation ?? {}).join(', ')})` : ''}${i.special_instructions ? ` — ${i.special_instructions}` : ''}`).join('\n');
   db()
     .prepare("INSERT INTO messages (id, channel, external_id, direction, sender_name, sender_phone, body, received_at, classification, status, created_at) VALUES (?, 'form', ?, 'in', ?, ?, ?, ?, 'new_order', 'processed', ?)")
-    .run(messageId, input.client_ref, input.customer.name, phone, `${summary}${special ? `\nSpecial request: ${special}` : ''}\n${input.fulfilment_type === 'delivery' ? 'Delivery' : 'Collection'} ${input.requested_date}${input.notes ? `\nNote: ${input.notes}` : ''}\n\n${JSON.stringify(input)}`, now(), now());
+    .run(messageId, input.client_ref, input.customer.name, phone, `${summary}${special ? `\nSpecial request: ${special}` : ''}\n${fulfilmentType === 'delivery' ? 'Delivery' : fulfilmentType === 'collection' ? 'Collection' : 'Wanted by'} ${input.requested_date}${!chooses && input.delivery_address ? `\nAddress: ${input.delivery_address}` : ''}${input.notes ? `\nNote: ${input.notes}` : ''}\n\n${JSON.stringify(input)}`, now(), now());
   const order = createOrder(
     {
       customer,
@@ -108,9 +113,9 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
       items: input.items.map((i) => ({ product_id: i.product_id, qty: i.qty as any, preparation: i.preparation ?? {}, special_instructions: i.special_instructions ?? null, source_text: 'Order form' })),
       // A special request alone has nothing to cut yet: it waits until it's agreed with the customer
       status: !input.items.length ? 'needs_clarification' : s.orders.formOrdersRequireReview || special ? 'review' : 'confirmed',
-      fulfilment_type: input.fulfilment_type,
+      fulfilment_type: fulfilmentType,
       requested_date: input.requested_date,
-      delivery_address: input.fulfilment_type === 'delivery' ? input.delivery_address : null,
+      delivery_address: fulfilmentType === 'collection' ? null : input.delivery_address ?? null,
       contact_phone: input.customer.phone,
       notes: input.notes ?? null,
       idempotency_key: idemKey,
@@ -153,7 +158,7 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
 function emailNewOrder(c: any, orderId: string, special: string | null, notes: string | null, customerEmail: string | null) {
   const s = getSettings();
   const to = s.customerForm.notifyEmails;
-  if (!to.length) return;
+  if (!to.length && !(customerEmail && s.customerForm.emailCustomer)) return;
   const o = requireOrder(orderId);
   const items = getItems(orderId);
   const proto = c.req.header('x-forwarded-proto') ?? new URL(c.req.url).protocol.replace(':', '');
@@ -163,11 +168,11 @@ function emailNewOrder(c: any, orderId: string, special: string | null, notes: s
     return { text: `${i.qty_label} ${i.product_name}${i.preparation_label ? ` (${i.preparation_label})` : ''}${i.special_instructions ? ` — ${i.special_instructions}` : ''}`, est };
   });
   const total = lines.every((l) => l.est != null) && lines.length ? lines.reduce((t, l) => t + (l.est ?? 0), 0) : null;
-  const when = `${o.fulfilment_type === 'delivery' ? 'Delivery' : 'Collection'} on ${o.requested_date ?? '—'}`;
+  const when = o.fulfilment_type ? `${o.fulfilment_type === 'delivery' ? 'Delivery' : 'Collection'} on ${o.requested_date ?? '—'}` : `Wanted by ${o.requested_date ?? '—'} (collection or delivery to be arranged)`;
   const facts: [string, string][] = [
     ['Customer', `${o.customer_name}${o.contact_phone ? ` · ${o.contact_phone}` : ''}${customerEmail ? ` · ${customerEmail}` : ''}`],
     ['When', when],
-    ...(o.fulfilment_type === 'delivery' && o.delivery_address ? [['Address', o.delivery_address] as [string, string]] : []),
+    ...(o.fulfilment_type !== 'collection' && o.delivery_address ? [['Address', o.delivery_address] as [string, string]] : []),
     ...(notes ? [['Note', notes] as [string, string]] : []),
   ];
   const text = [
@@ -190,6 +195,42 @@ ${special ? `<p style="margin:0 0 12px;padding:10px 12px;background:#f8edd8;bord
 <p><a href="${escapeHtml(link)}" style="display:inline-block;background:#446041;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none">Open order in Terram</a></p>
 </div>`;
   sendEmailInBackground({ to, subject: `New order #${o.order_number} — ${o.customer_name}${special ? ' (special request)' : ''}`, text, html, replyTo: customerEmail }, `online order #${o.order_number}`);
+
+  // The customer's own copy: what they asked for, and that we'll confirm it (no staff link)
+  if (customerEmail && s.customerForm.emailCustomer) {
+    const b = s.business;
+    const wa = (b.phone ?? '').replace(/\D/g, '').replace(/^0/, '27');
+    const ctext = [
+      `Hi ${o.customer_name.split(' ')[0]},`,
+      '',
+      `Thank you for your order with ${b.name}. We've received it (reference #${o.order_number}) and will be in touch to confirm it.`,
+      '',
+      ...(lines.length ? ['Your order:', ...lines.map((l) => `- ${l.text}`)] : []),
+      ...(total != null ? ['', `Estimated total: ${formatMoney(total, b.currency)} (final price depends on the packed weight)`] : []),
+      ...(special ? ['', `Special request: ${special}`] : []),
+      '',
+      when,
+      ...(o.fulfilment_type !== 'collection' && o.delivery_address ? [`${o.fulfilment_type === 'delivery' ? 'Delivery to' : 'Your address'}: ${o.delivery_address}`] : []),
+      '',
+      `Need to change something? Reply to this email with your reference #${o.order_number}${b.phone ? `, or call/WhatsApp ${b.phone}` : ''}, and we'll update your order.`,
+      '',
+      b.name,
+    ].join('\n');
+    const chtml = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#262626;max-width:560px">
+<p>Hi ${escapeHtml(o.customer_name.split(' ')[0])},</p>
+<p>Thank you for your order with ${escapeHtml(b.name)}. We've received it (reference <b>#${o.order_number}</b>) and will be in touch to confirm it.</p>
+${lines.length ? `<ul style="padding-left:18px">${lines.map((l) => `<li style="margin:3px 0">${escapeHtml(l.text)}</li>`).join('')}</ul>` : ''}
+${total != null ? `<p>Estimated total: <b>${formatMoney(total, b.currency)}</b> <span style="color:#777">(final price depends on the packed weight)</span></p>` : ''}
+${special ? `<p style="padding:10px 12px;background:#f8edd8;border-radius:8px"><b>Special request:</b> ${escapeHtml(special)}</p>` : ''}
+<p>${escapeHtml(when)}${o.fulfilment_type !== 'collection' && o.delivery_address ? `<br>${o.fulfilment_type === 'delivery' ? 'Delivery to' : 'Your address'}: ${escapeHtml(o.delivery_address)}` : ''}</p>
+<div style="margin:18px 0;padding:12px 14px;border:1px solid #e4e4de;border-radius:10px">
+<b>Need to change something?</b><br>Reply to this email with your reference <b>#${o.order_number}</b>${b.phone ? `, or call us on ${escapeHtml(b.phone)}` : ''}, and we'll update your order.
+${wa ? `<p style="margin:10px 0 0"><a href="https://wa.me/${wa}?text=${encodeURIComponent(`Hi, I'd like to change my order #${o.order_number}: `)}" style="display:inline-block;background:#446041;color:#fff;padding:9px 14px;border-radius:8px;text-decoration:none">WhatsApp us about order #${o.order_number}</a></p>` : ''}
+</div>
+<p style="color:#446041;font-weight:bold">${escapeHtml(b.name)}</p>
+</div>`;
+    sendEmailInBackground({ to: [customerEmail], subject: `Your ${b.name} order #${o.order_number}`, text: ctext, html: chtml, replyTo: b.email || null }, `order confirmation to the customer #${o.order_number}`);
+  }
 }
 
 export default r;

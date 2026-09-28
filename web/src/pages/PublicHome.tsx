@@ -3,6 +3,7 @@ import { ArrowRight, CalendarCheck, Mail, MessageCircle, Phone, ShoppingBag, Sto
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/order-bits';
+import { BackToTop } from '../components/BackToTop';
 import { api } from '../lib/api';
 
 /**
@@ -25,7 +26,7 @@ export default function PublicHome() {
   const orderingOpen = info?.form?.enabled !== false;
 
   useEffect(() => {
-    document.title = `${name} · Farm-raised beef & lamb`;
+    document.title = `${name} · Farm-raised Beef & Lamb`;
   }, [name]);
 
   // One card per range (Beef, Lamb, Eggs…) with a few of its products
@@ -52,8 +53,8 @@ export default function PublicHome() {
       {/* Hero */}
       <section className="bg-charcoal text-white">
         <div className="mx-auto max-w-5xl px-5 pb-16 pt-10 sm:px-8 sm:pb-24 sm:pt-16">
-          <p className="text-[14px] font-semibold text-white/65">A Metcalf family farm</p>
-          <h1 className="mt-3 max-w-2xl font-display text-[38px] font-extrabold leading-[1.05] tracking-tight sm:text-[56px]">Farm-raised beef &amp; lamb.</h1>
+          <p className="text-[14px] font-semibold text-white/65">A Metcalf Family Farm</p>
+          <h1 className="mt-3 max-w-2xl font-display text-[38px] font-extrabold leading-[1.05] tracking-tight sm:text-[56px]">Farm-raised Beef &amp; Lamb.</h1>
           <p className="mt-4 max-w-xl text-[17px] leading-relaxed text-white/80">{info?.business.tagline ?? 'Grown with Purpose. Shared with Passion.'} Order online and we’ll prepare it for collection or delivery.</p>
           <div className="mt-8 flex flex-wrap gap-3">
             {orderingOpen && (
@@ -96,8 +97,10 @@ export default function PublicHome() {
           <ol className="mt-5 grid gap-4 sm:grid-cols-3">
             {[
               { icon: ShoppingBag, title: 'Choose online', body: 'Pick your cuts and quantities on our order form, check your order, then send it. Prices are shown per kg.' },
-              { icon: CalendarCheck, title: 'We confirm', body: 'We check stock and confirm your order. Please order 2 weeks to a month ahead.' },
-              { icon: info?.fulfilment?.deliveryEnabled ? Truck : Store, title: 'Collect or delivery', body: info?.fulfilment?.deliveryEnabled ? `Collect from the farm${info?.fulfilment?.collectionHours ? ` (${info.fulfilment.collectionHours})` : ''}, or we can arrange delivery.` : 'Collect from the farm when it’s ready.' },
+              { icon: CalendarCheck, title: 'We confirm', body: 'We check stock and confirm your order. We recommend ordering 7–14 days ahead.' },
+              info?.fulfilment?.customerChooses === false
+                ? { icon: Truck, title: 'Delivery or collection', body: `We’ll contact you to arrange delivery or collection from ${info?.fulfilment?.collectionPlace ?? 'our shop'}. ${info?.fulfilment?.deliveryNotes ?? ''}` }
+                : { icon: info?.fulfilment?.deliveryEnabled ? Truck : Store, title: 'Collect or delivery', body: `Collect from ${info?.fulfilment?.collectionPlace ?? 'our shop'}${info?.fulfilment?.collectionHours ? ` (${info.fulfilment.collectionHours})` : ''}${info?.fulfilment?.deliveryEnabled ? `, or have it delivered. ${info?.fulfilment?.deliveryNotes ?? ''}` : '.'}` },
             ].map((s, i) => (
               <li key={s.title} className="rounded-2xl bg-surface-2 p-5">
                 <span className="flex size-10 items-center justify-center rounded-xl bg-brand-soft text-brand"><s.icon className="size-5" /></span>
@@ -122,13 +125,14 @@ export default function PublicHome() {
         </section>
       </main>
 
+      <BackToTop />
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-5xl flex-col gap-3 px-5 py-8 text-[14px] text-ink-2 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <div className="flex flex-wrap gap-x-5 gap-y-2">
             {phone && <a href={`tel:${phone.replace(/\s/g, '')}`} className="inline-flex items-center gap-1.5 hover:text-ink"><Phone className="size-4" />{phone}</a>}
             {email && <a href={`mailto:${email}`} className="inline-flex items-center gap-1.5 hover:text-ink"><Mail className="size-4" />{email}</a>}
           </div>
-          <span className="text-ink-3">© {new Date().getFullYear()} {name}</span>
+          <span className="text-ink-3"><Link to="/privacy" className="hover:text-ink">Privacy notice</Link> · © {new Date().getFullYear()} {name}</span>
         </div>
       </footer>
     </div>

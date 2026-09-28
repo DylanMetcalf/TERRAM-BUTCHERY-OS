@@ -10,6 +10,7 @@ import {
   type PaymentStatus,
 } from '../../shared/workflow.js';
 import { formatQty, qtyEquals, validateQty, type Qty } from '../../shared/quantity.js';
+import { deliveryFeeCents } from '../../shared/delivery.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { isValidYmd } from '../lib/time.js';
 import { audit, type Actor } from '../services/audit.js';
@@ -94,6 +95,9 @@ export interface OrderSummary {
   delivery_address: string | null;
   delivery_notes: string | null;
   contact_phone: string | null;
+  /** Distance from the shop for a delivery, and the fee it works out to (see Settings). */
+  delivery_km: number | null;
+  delivery_fee_cents: number | null;
   notes: string | null;
   /** Free-text request from the order form's Special requests section (not on the price list). */
   special_request: string | null;
@@ -486,6 +490,7 @@ export interface OrderPatch {
   time_window?: string | null;
   delivery_address?: string | null;
   delivery_notes?: string | null;
+  delivery_km?: number | null;
   contact_phone?: string | null;
   notes?: string | null;
   payment_status?: PaymentStatus;
@@ -494,6 +499,7 @@ export interface OrderPatch {
 }
 
 const PATCH_LABEL: Record<keyof OrderPatch, string> = {
+  delivery_km: 'Delivery distance (km)',
   fulfilment_type: 'Fulfilment',
   requested_date: 'Date',
   time_window: 'Time',
@@ -521,9 +527,15 @@ export function updateOrder(orderId: string, patch: OrderPatch, actor: Actor, ro
     if ((order as any)[k] === v) continue;
     fields[k] = v;
     changes.push(`${PATCH_LABEL[k]}: ${fmt((order as any)[k])} → ${fmt(v)}`);
+    if (k === 'delivery_km') {
+      const f = getSettings().fulfilment;
+      fields.delivery_fee_cents = deliveryFeeCents(v, f.freeDeliveryKm, f.deliveryRatePerKmCents);
+      if (fields.delivery_fee_cents != null) changes.push(`Delivery fee: R${((fields.delivery_fee_cents as number) / 100).toFixed(2)}`);
+    }
   }
   if (!changes.length) return order;
-  if (Object.keys(fields).some((k) => k !== 'payment_status' && k !== 'accounting_ref' && k !== 'notes')) assertAmendable(order);
+  // Payment details, notes and the delivery distance/fee can be updated at any stage
+  if (Object.keys(fields).some((k) => !['payment_status', 'accounting_ref', 'notes', 'delivery_km', 'delivery_fee_cents'].includes(k))) assertAmendable(order);
   tx(() => {
     db()
       .prepare(`UPDATE orders SET ${Object.keys(fields).map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`)

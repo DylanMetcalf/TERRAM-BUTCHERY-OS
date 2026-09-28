@@ -47,6 +47,7 @@ const PrintView = lazy(() => import('./print/Print'));
 const Devices = lazy(() => import('./pages/Devices'));
 const PublicOrder = lazy(() => import('./pages/PublicOrder'));
 const PublicHome = lazy(() => import('./pages/PublicHome'));
+const PublicPrivacy = lazy(() => import('./pages/PublicPrivacy'));
 
 function FullSpinner() {
   return (
@@ -67,6 +68,9 @@ export function App() {
 
 function Routed() {
   const loc = useLocation();
+  if (loc.pathname === '/privacy') {
+    return <Suspense fallback={<FullSpinner />}><PublicPrivacy /></Suspense>;
+  }
   if (loc.pathname === '/order' || loc.pathname.startsWith('/order/')) {
     return (
       <Suspense fallback={<FullSpinner />}>
