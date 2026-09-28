@@ -12,7 +12,7 @@ for (const [label, vp, mobile] of [['desktop', { width: 1440, height: 1000 }, fa
   const p = await ctx.newPage();
   p.on('pageerror', (e) => errors.push(`${label} ${p.url()}: ${e.message}`));
   p.on('console', (m) => m.type() === 'error' && errors.push(`${label} ${p.url()} console: ${m.text()}`));
-  await p.goto(base + '/');
+  await p.goto(base + '/login');
   await p.fill('#email', 'dylan@terram.test');
   await p.fill('#password', 'butchery123');
   await p.click('button[type=submit]');

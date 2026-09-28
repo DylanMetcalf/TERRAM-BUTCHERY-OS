@@ -69,6 +69,18 @@ Each device stays signed in for about six months. If a phone is lost: **Settings
 - **Fulfilment**: **Tell customer** (opens WhatsApp with a ready message), then **Collected** or **Delivered**.
 - Customers can also order themselves from `your-address/order` (Settings → Customer form has the link).
 
+### Using terramfarm.co.za
+
+With the domain connected, **terramfarm.co.za** shows the farm's home page (products, how ordering works, Order now, WhatsApp). **terramfarm.co.za/order** is the order form, and **terramfarm.co.za/login** is where the family signs in. Signed-in devices go straight to the dashboard.
+
+1. **Render:** your service → **Settings → Custom Domains → Add Custom Domain** → `terramfarm.co.za`. Add `www.terramfarm.co.za` as well if Render doesn't add it for you. Render then shows the DNS records to create; keep that page open.
+2. **Before touching DNS, protect your email.** In Domains.co.za (client area → your domain → **DNS management**, or cPanel → **Zone Editor**), note the records that exist now. Changing the main address doesn't affect the **MX** records. But if `mail`, `webmail` or `cpanel` is a **CNAME pointing to terramfarm.co.za**, change each one to an **A record** with the IP address the main (`@`) record has *today*. Otherwise email would follow the website to Render.
+3. **Point the domain at Render**, using exactly what Render showed:
+   - the `@` (terramfarm.co.za) **A record** → Render's IP address (replace the old value; delete any other `@` A or AAAA records);
+   - `www` **CNAME** → your `….onrender.com` address.
+4. Back in Render, tap **Verify**. It usually works within an hour, sometimes a few. Render then adds the padlock (HTTPS) by itself.
+5. Anything currently on terramfarm.co.za (for example a page hosted at Domains.co.za) is replaced by the Terram home page.
+
 ### Email alerts for online orders
 
 Every order sent from the customer form can also be emailed to you, as a backup and a heads-up. The recipients are in **Settings → Customer form → Email every online order to**. They start as dylan@meacreo.co.za and Sharonm@imagine.co.za.

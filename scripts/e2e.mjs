@@ -32,7 +32,7 @@ step('customer placed an order on the public form');
 const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const p = await ctx.newPage();
 p.on('pageerror', (e) => errors.push('staff: ' + e.message));
-await p.goto(base + '/');
+await p.goto(base + '/login');
 await p.fill('#email', 'dylan@terram.test');
 await p.fill('#password', 'butchery123');
 await p.click('button[type=submit]');

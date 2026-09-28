@@ -2,7 +2,7 @@
   "name": "Terram Butchery",
   "short_name": "Terram",
   "description": "Orders, cutting, packing and fulfilment for Terram Farm's butchery.",
-  "start_url": "/",
+  "start_url": "/login",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
