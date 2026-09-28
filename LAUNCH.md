@@ -14,13 +14,15 @@ This guide gets the app online so that your Mac, your parents' Windows computers
 | **Render** — render.com, "Sign in with GitHub" | Runs the server and keeps the database on a disk | Starter web service (about $7/month) plus a 1 GB disk (cents per month). The free plan can't be used because it has no permanent disk. |
 | **Anthropic** — console.anthropic.com *(optional, can be added later)* | The assistant that reads messy messages | Pay per use. The rules engine handles clear orders for free and only messy messages use the assistant, so a small butchery should spend a few dollars a month. **Set a monthly spend limit in the console.** |
 
-## 2. Get the code ready (2 minutes)
+## 2. Get the code ready (already done)
 
-The code is on the branch `claude/terram-farm-butchery-os-n3ng2e`. Either merge it into `main` on GitHub (ask Claude to open a pull request, then click **Merge**), or pick that branch in Render in the next step.
+The finished code is on the `main` branch, and that's the branch Render uses. Later changes arrive as pull requests into `main`: click **Merge** on GitHub and Render updates the app by itself within a few minutes. Your data isn't touched.
+
+*Optional tidy-up:* GitHub → the repository → **Settings → General → Default branch**: switch it to `main`.
 
 ## 3. Create the server on Render (10 minutes, then about 5 minutes waiting)
 
-1. In Render: **New → Blueprint**, choose the `terram-butchery-os` repository (and the branch from step 2).
+1. In Render: **New → Blueprint**, choose the `terram-butchery-os` repository and the `main` branch.
 2. Render reads `render.yaml` and asks for four values:
    - `INITIAL_ADMIN_NAME`: your name (e.g. *Dylan*)
    - `INITIAL_ADMIN_EMAIL`: your email
@@ -79,7 +81,7 @@ The old form (dylanmetcalf.github.io/terramfarm-order-form) opens the customer's
 
 - The server makes a **backup every night** and keeps the last 14 (shown under Settings → Data & backup and in Intelligence → System health).
 - Once a week, click **Download full backup** (Settings → Data & backup) and keep the file on your Mac or in iCloud or Google Drive. That's your copy if the server ever disappears.
-- Render redeploys automatically when the code changes on the branch. Your data lives on the disk and isn't touched by redeploys.
+- Render redeploys automatically when a change is merged into `main`. Your data lives on the disk and isn't touched by redeploys.
 
 ## If something goes wrong
 
