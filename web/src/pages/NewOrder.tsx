@@ -1,9 +1,9 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Pencil, Plus, Store, Trash2, Truck, UserRound, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ItemEditor, type ItemDraft } from '../components/ItemEditor';
-import { CustomerPicker, NewCustomerFields, useProducts } from '../components/pickers';
+import { CustomerPicker, LookalikeCustomers, NewCustomerFields, useProducts } from '../components/pickers';
 import { Avatar, Button, Card, cx, Field, Input, PageHeader, SectionTitle, Segmented, Sheet, Textarea, useToast } from '../components/ui';
 import { api, ApiError, newKey } from '../lib/api';
 import { addDays, estimateLinePrice, formatMoney, formatQty, friendlyDate, todayYmd, weekdayShort } from '../lib/format';
@@ -49,6 +49,19 @@ export default function NewOrder() {
   const today = todayYmd();
   const products = productData?.products ?? [];
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+
+  // Started from a customer's page ("New order" there): fill that customer in
+  const [params, setParams] = useSearchParams();
+  const fromCustomer = params.get('customer');
+  useEffect(() => {
+    if (!fromCustomer) return;
+    api
+      .get<{ customer: Customer }>(`/api/customers/${fromCustomer}`)
+      .then((r) => setD((x) => ({ ...x, customer: r.customer, newCustomer: null, fulfilment: r.customer.preferred_fulfilment ?? x.fulfilment })))
+      .catch(() => undefined)
+      .finally(() => setParams({}, { replace: true }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromCustomer]);
 
   useEffect(() => {
     try {
@@ -129,6 +142,15 @@ export default function NewOrder() {
               <Card className="p-4">
                 <div className="mb-3 flex items-center justify-between"><span className="text-[14px] font-semibold">New customer</span><Button size="sm" variant="ghost" onClick={() => set({ newCustomer: null })}>Cancel</Button></div>
                 <NewCustomerFields value={d.newCustomer} onChange={(v) => set({ newCustomer: v })} />
+                <LookalikeCustomers
+                  name={d.newCustomer.name}
+                  phone={d.newCustomer.phone}
+                  email={d.newCustomer.email}
+                  onUse={async (x) => {
+                    const r = await api.get<{ customer: Customer }>(`/api/customers/${x.id}`);
+                    set({ customer: r.customer, newCustomer: null, fulfilment: r.customer.preferred_fulfilment ?? d.fulfilment });
+                  }}
+                />
               </Card>
             ) : (
               <button onClick={() => setPickCustomer(true)} className="flex w-full items-center gap-3 rounded-2xl border-2 border-dashed border-line-strong bg-surface px-4 py-5 text-left transition hover:border-brand hover:bg-brand-soft/40">

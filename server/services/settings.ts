@@ -23,7 +23,7 @@ export interface BusinessSettings {
     learningThreshold: number; // corrections before an alias is suggested
   };
   printing: { showPrices: boolean; paper: 'A4' | 'Letter' };
-  customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean; terms: string };
+  customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean; terms: string; /** Who gets an email for every online order. */ notifyEmails: string[] };
   /** Brand kit: logo (data URL), generated square app icons, and the main brand colour. */
   brand: { logo: string | null; icon192: string | null; icon512: string | null; primary: string; showName: boolean; version: number };
 }
@@ -62,6 +62,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     intro: 'Farm-raised beef and lamb. Orders are subject to processing time and stock availability. Your order is confirmed once Terram Farm accepts it.',
     confirmationMessage: 'Thank you — your order has been received. We will be in touch to confirm it shortly.',
     showPrices: true,
+    notifyEmails: ['dylan@meacreo.co.za', 'Sharonm@imagine.co.za'],
     terms: [
       'Please place orders at least 2 weeks to 1 month in advance, so we can prepare your order to the highest standard.',
       'Prices are per kg and subject to change. Your final price is based on the actual packed weight.',

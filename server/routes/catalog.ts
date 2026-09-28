@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { db, json } from '../db/db.js';
 import { formatQty } from '../../shared/quantity.js';
-import { createCustomer, requireCustomer, updateCustomer } from '../domain/customers.js';
+import { createCustomer, matchCustomer, requireCustomer, updateCustomer, type Customer } from '../domain/customers.js';
 import { addAlias, createProduct, listProducts, requireProduct, updateProduct } from '../domain/products.js';
 import { getOrderSummary } from '../domain/orders.js';
 import { applyPrices, previewPrices } from '../domain/prices.js';
@@ -30,6 +30,28 @@ customers.get('/', requirePerm('customers.read'), (c) => {
     .all(...args, limit, offset);
   const total = (db().prepare(`SELECT COUNT(*) n FROM customers c WHERE c.archived = 0 ${where}`).get(...args) as any).n;
   return c.json({ customers: rows, total });
+});
+
+/**
+ * Existing customers who look like the one being added: same phone, same email, or the
+ * same/similar name. Shown before saving so nobody ends up with two profiles by accident,
+ * and so two different people with the same name are told apart by phone number.
+ */
+customers.get('/lookalikes', requirePerm('customers.read'), (c) => {
+  const name = c.req.query('name')?.slice(0, 120) || null;
+  const phone = c.req.query('phone')?.slice(0, 40) || null;
+  const email = c.req.query('email')?.slice(0, 200) || null;
+  const found = new Map<string, { customer: Customer; reason: string }>();
+  const take = (q: Parameters<typeof matchCustomer>[0], label: (m: any) => string) => {
+    const m = matchCustomer(q);
+    if (m.status === 'matched' || m.status === 'probable') found.set(m.customer.id, found.get(m.customer.id) ?? { customer: m.customer, reason: label(m) });
+    if (m.status === 'ambiguous') for (const x of m.candidates) found.set(x.id, found.get(x.id) ?? { customer: x, reason: label(m) });
+  };
+  if (phone && phone.replace(/\D/g, '').length >= 9) take({ phone }, () => 'Same phone number');
+  if (email && email.includes('@')) take({ email }, () => 'Same email');
+  if (name && name.trim().length >= 2) take({ name }, (m) => (m.status === 'matched' || (m.status === 'ambiguous' && m.candidates.length) ? 'Same name' : 'Similar name'));
+  const list = [...found.values()].slice(0, 5).map(({ customer: x, reason }) => ({ id: x.id, name: x.name, phone: x.phone, email: x.email, reason }));
+  return c.json({ customers: list });
 });
 
 customers.post('/', requirePerm('customers.write'), async (c) => {

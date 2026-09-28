@@ -27,6 +27,17 @@ interface Line { key: string; product_id: string; qty: Qty; preparation: Record<
 interface State { step: 0 | 1 | 2 | 3; lines: Line[]; name: string; phone: string; email: string; fulfilment: 'collection' | 'delivery'; date: string; address: string; notes: string; client_ref: string; accepted?: boolean; special?: string }
 
 const KEY = 'terram:customer-order';
+/** The customer's own details, kept on their device after an order so they don't retype them next time. */
+const ME_KEY = 'terram:customer-me';
+type Me = { name: string; phone: string; email: string; address: string };
+function loadMe(): Me | null {
+  try {
+    const m = localStorage.getItem(ME_KEY);
+    return m ? JSON.parse(m) : null;
+  } catch {
+    return null;
+  }
+}
 /** "Beef – Steaks" → chip "Beef", section "Steaks" (matches the printed price lists). */
 const topLevel = (category: string) => category.split(/\s+[–-]\s+/)[0];
 const subLevel = (category: string) => category.split(/\s+[–-]\s+/).slice(1).join(' – ') || category;
@@ -38,7 +49,8 @@ function initial(): State {
   } catch {
     /* ignore */
   }
-  return { step: 0, lines: [], name: '', phone: '', email: '', fulfilment: 'collection', date: '', address: '', notes: '', client_ref: newKey() };
+  const me = loadMe();
+  return { step: 0, lines: [], name: me?.name ?? '', phone: me?.phone ?? '', email: me?.email ?? '', fulfilment: 'collection', date: '', address: me?.address ?? '', notes: '', client_ref: newKey() };
 }
 
 export default function PublicOrder() {
@@ -87,6 +99,7 @@ export default function PublicOrder() {
       setDone({ number: r.order_number, message: r.message });
       try {
         localStorage.removeItem(KEY);
+        localStorage.setItem(ME_KEY, JSON.stringify({ name: s.name, phone: s.phone, email: s.email, address: s.fulfilment === 'delivery' ? s.address : (loadMe()?.address ?? '') }));
       } catch {
         /* ignore */
       }
@@ -180,7 +193,12 @@ export default function PublicOrder() {
       {s.step === 1 && (
         <div className="mx-auto max-w-lg animate-rise pb-28">
           <h1 className="font-display text-[28px] font-semibold">Your details</h1>
-          <p className="mt-1 text-ink-2">So we can confirm your order and let you know when it’s ready.</p>
+          <p className="mt-1 text-ink-2">So we can confirm your order and let you know when it’s ready. We’ll remember these on this device for next time.</p>
+          {loadMe() && (
+            <button type="button" className="mt-2 text-[13.5px] font-medium text-brand underline-offset-2 hover:underline" onClick={() => { try { localStorage.removeItem(ME_KEY); } catch { /* ignore */ } set({ name: '', phone: '', email: '', address: '' }); }}>
+              Not you? Clear these details
+            </button>
+          )}
           <div className="mt-6 space-y-4">
             <Field label="Name" htmlFor="n"><Input id="n" big autoComplete="name" value={s.name} onChange={(e) => set({ name: e.target.value })} /></Field>
             <Field label="Mobile number" htmlFor="p" hint="We’ll use WhatsApp or SMS for updates."><Input id="p" big type="tel" inputMode="tel" autoComplete="tel" value={s.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
@@ -261,7 +279,7 @@ export default function PublicOrder() {
 
       {/* Sticky action bar */}
       <div className="safe-bottom fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
+        <div className="mx-auto flex max-w-3xl items-center gap-3 px-5 py-3 sm:px-8">
           {s.step > 0 && <Button size="lg" variant="ghost" icon={<ArrowLeft className="size-4" />} onClick={() => set({ step: (s.step - 1) as State['step'] })}>Back</Button>}
           {s.step === 0 && (
             <div className="min-w-0 flex-1 text-[14px]">
@@ -341,7 +359,7 @@ function Shell({ children, business, cartCount, onCart }: { children: React.Reac
   return (
     <div className="min-h-dvh bg-bg">
       <header className="bg-charcoal text-white">
-        <div className="mx-auto flex h-[72px] max-w-3xl items-center justify-between gap-3 px-4">
+        <div className="mx-auto flex h-[72px] max-w-3xl items-center justify-between gap-3 px-5 sm:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <Logo withWord={false} tone="light" />
             <div className="min-w-0">
@@ -352,9 +370,9 @@ function Shell({ children, business, cartCount, onCart }: { children: React.Reac
           {!!cartCount && <button onClick={onCart} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-[13px] font-semibold"><ShoppingBag className="size-4" />{cartCount}</button>}
         </div>
       </header>
-      <main className="mx-auto max-w-3xl px-4 py-6">{children}</main>
+      <main className="mx-auto max-w-3xl px-5 py-7 sm:px-8 sm:py-10">{children}</main>
       {business?.phone && (
-        <footer className="mx-auto max-w-3xl px-4 pb-32 text-center text-[13px] text-ink-3">
+        <footer className="mx-auto max-w-3xl px-5 pb-32 sm:px-8 text-center text-[13px] text-ink-3">
           Questions? Call or WhatsApp <a className="font-semibold text-ink-2" href={`tel:${business.phone.replace(/\s/g, '')}`}>{business.phone}</a>
         </footer>
       )}

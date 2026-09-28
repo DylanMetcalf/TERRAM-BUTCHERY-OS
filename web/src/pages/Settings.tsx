@@ -45,7 +45,7 @@ export default function Settings() {
               {tab === 'business' && <Business s={data.settings} />}
               {tab === 'brand' && <BrandKit initial={{ logo: data.settings.brand.logo, icon192: data.settings.brand.icon192, icon512: data.settings.brand.icon512, primary: data.settings.brand.primary, showName: data.settings.brand.showName }} />}
               {tab === 'orders' && <OrdersSettings s={data.settings} />}
-              {tab === 'form' && <FormSettings s={data.settings} />}
+              {tab === 'form' && <FormSettings s={data.settings} env={data.environment} />}
               {tab === 'assistant' && <Assistant s={data.settings} env={data.environment} />}
               {tab === 'team' && <Team />}
               {tab === 'data' && <DataBackup />}
@@ -148,12 +148,20 @@ function OrdersSettings({ s }: { s: any }) {
   );
 }
 
-function FormSettings({ s }: { s: any }) {
+function FormSettings({ s, env }: { s: any; env: any }) {
   const [v, setV] = useState(s.customerForm);
+  const [emails, setEmails] = useState<string>((s.customerForm.notifyEmails ?? []).join('\n'));
   const save = useSave('customerForm');
+  const toast = useToast();
+  const parsedEmails = emails.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+  const test = useMutation({
+    mutationFn: () => api.post<{ to: string[] }>('/api/admin/test-email', {}),
+    onSuccess: (r) => toast({ tone: 'success', title: 'Test email sent', body: `Check ${r.to.join(' and ')} (and the spam folder).` }),
+    onError: (e) => toast({ tone: 'error', title: e instanceof ApiError ? e.message : 'Could not send.' }),
+  });
   const url = `${window.location.origin}/order`;
   return (
-    <Panel title="Customer order form" footer={<Button variant="primary" loading={save.isPending} onClick={() => save.mutate(v)}>Save</Button>}>
+    <Panel title="Customer order form" footer={<Button variant="primary" loading={save.isPending} onClick={() => save.mutate({ ...v, notifyEmails: parsedEmails })}>Save</Button>}>
       <Callout tone="slate" icon={<Link2 className="size-5" />} action={<a href="/order" target="_blank" rel="noreferrer"><Button size="sm">Open form</Button></a>}>
         Share this link with customers: <b className="break-all">{url}</b>
       </Callout>
@@ -162,6 +170,17 @@ function FormSettings({ s }: { s: any }) {
       <Field label="Welcome text"><Textarea rows={3} value={v.intro} onChange={(e) => setV({ ...v, intro: e.target.value })} /></Field>
       <Field label="Message after ordering" hint="Don’t promise the order is confirmed if you still review it."><Textarea rows={2} value={v.confirmationMessage} onChange={(e) => setV({ ...v, confirmationMessage: e.target.value })} /></Field>
       <Field label="Order terms" hint="One per line. Customers tick to accept these before sending. Leave empty to skip."><Textarea rows={6} value={v.terms} onChange={(e) => setV({ ...v, terms: e.target.value })} /></Field>
+      <Field label="Email every online order to" hint="One address per line. Each new order arrives with the items, date, contact details and a link to open it.">
+        <Textarea rows={3} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="name@example.com" />
+      </Field>
+      <Callout
+        tone={env?.email_outbound ? 'field' : 'ochre'}
+        action={env?.email_outbound && <Button size="sm" loading={test.isPending} onClick={() => test.mutate()}>Send test email</Button>}
+      >
+        {env?.email_outbound
+          ? <>Email is set up. Orders are sent from <b>{env.email_from}</b>. Save first, then send a test.</>
+          : <>Email isn’t switched on yet. Add your mailbox’s SMTP details on the server (Render → Environment: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS). Orders still arrive in the app either way.</>}
+      </Callout>
     </Panel>
   );
 }

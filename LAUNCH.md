@@ -69,6 +69,21 @@ Each device stays signed in for about six months. If a phone is lost: **Settings
 - **Fulfilment**: **Tell customer** (opens WhatsApp with a ready message), then **Collected** or **Delivered**.
 - Customers can also order themselves from `your-address/order` (Settings → Customer form has the link).
 
+### Email alerts for online orders
+
+Every order sent from the customer form can also be emailed to you, as a backup and a heads-up. The recipients are in **Settings → Customer form → Email every online order to**. They start as dylan@meacreo.co.za and Sharonm@imagine.co.za.
+
+To switch sending on, the server needs a mailbox to send from. The easiest is your business email:
+
+1. Ask whoever hosts meacreo.co.za email for its **SMTP settings**: server name, port, username and password.
+   - Google Workspace or Gmail: `smtp.gmail.com`, port `587`, your address, and an **App password** (Google Account → Security → App passwords).
+   - Microsoft 365: `smtp.office365.com`, port `587` (SMTP sending must be allowed for the mailbox).
+2. In Render: your service → **Environment** → **Add environment variable**, one per line:
+   `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER` (e.g. dylan@meacreo.co.za), `SMTP_PASS`. Save; Render restarts the app.
+3. In Terram: **Settings → Customer form → Send test email**. If it doesn't arrive, check spam, then send Claude the error it shows.
+
+Without these settings nothing is emailed, and orders still arrive in the app as normal.
+
 ### Special requests
 
 The order form has its own **Special requests** section at the end of the product list, for items that aren't on your price list, such as venison or specific cuts. A request shows up in **Needs attention** as "Special request on order #…". Agree the details and price with the customer, add the items to the order, then tap **Agreed with customer**. An order with only a special request waits in "Needs clarification" until then.

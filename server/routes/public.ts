@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { db, id, now } from '../db/db.js';
-import { formatQty } from '../../shared/quantity.js';
+import { estimateLinePrice, formatMoney, formatQty } from '../../shared/quantity.js';
+import { escapeHtml, sendEmailInBackground } from '../services/email.js';
 import { normalisePhone } from '../../shared/text.js';
 import { AppError, badRequest } from '../lib/errors.js';
 import { addDays, localDate, weekdayOf } from '../lib/time.js';
@@ -143,7 +144,51 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   const dups = findPossibleDuplicates(order.customer_id, getItems(order.id).map((i) => ({ product_id: i.product_id, qty: i.qty })), { excludeOrderId: order.id, requestedDate: order.requested_date });
   if (dups.length)
     raiseException({ type: 'possible_duplicate', severity: 'warning', title: `Online order #${order.order_number} may duplicate #${dups[0].order_number}`, detail: dups[0].reasons.join(', '), order_id: order.id, payload: { duplicate_of: { order_id: dups[0].order_id, order_number: dups[0].order_number } } });
+  emailNewOrder(c, order.id, special, input.notes ?? null, input.customer.email || null);
   return c.json({ ok: true, order_number: order.order_number, message: s.customerForm.confirmationMessage });
 });
+
+/** Emails a new online order to the addresses in Settings → Customer form (the family's backup copy). */
+function emailNewOrder(c: any, orderId: string, special: string | null, notes: string | null, customerEmail: string | null) {
+  const s = getSettings();
+  const to = s.customerForm.notifyEmails;
+  if (!to.length) return;
+  const o = requireOrder(orderId);
+  const items = getItems(orderId);
+  const proto = c.req.header('x-forwarded-proto') ?? new URL(c.req.url).protocol.replace(':', '');
+  const link = `${proto}://${c.req.header('x-forwarded-host') ?? c.req.header('host') ?? new URL(c.req.url).host}/orders/${o.id}`;
+  const lines = items.map((i) => {
+    const est = estimateLinePrice(i.qty, (i as any).price_cents ?? null, (i as any).price_unit ?? null);
+    return { text: `${i.qty_label} ${i.product_name}${i.preparation_label ? ` (${i.preparation_label})` : ''}${i.special_instructions ? ` — ${i.special_instructions}` : ''}`, est };
+  });
+  const total = lines.every((l) => l.est != null) && lines.length ? lines.reduce((t, l) => t + (l.est ?? 0), 0) : null;
+  const when = `${o.fulfilment_type === 'delivery' ? 'Delivery' : 'Collection'} on ${o.requested_date ?? '—'}`;
+  const facts: [string, string][] = [
+    ['Customer', `${o.customer_name}${o.contact_phone ? ` · ${o.contact_phone}` : ''}${customerEmail ? ` · ${customerEmail}` : ''}`],
+    ['When', when],
+    ...(o.fulfilment_type === 'delivery' && o.delivery_address ? [['Address', o.delivery_address] as [string, string]] : []),
+    ...(notes ? [['Note', notes] as [string, string]] : []),
+  ];
+  const text = [
+    `New online order #${o.order_number}`,
+    '',
+    ...facts.map(([k, v]) => `${k}: ${v}`),
+    '',
+    ...(lines.length ? ['Items:', ...lines.map((l) => `- ${l.text}`)] : []),
+    ...(total != null ? ['', `Estimated total: ${formatMoney(total, s.business.currency)}`] : []),
+    ...(special ? ['', `SPECIAL REQUEST: ${special}`] : []),
+    '',
+    `Open it in Terram: ${link}`,
+  ].join('\n');
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#262626;max-width:560px">
+<h2 style="margin:0 0 12px;color:#446041">New online order #${o.order_number}</h2>
+<table style="border-collapse:collapse;margin-bottom:14px">${facts.map(([k, v]) => `<tr><td style="padding:3px 12px 3px 0;color:#777">${k}</td><td style="padding:3px 0"><b>${escapeHtml(v)}</b></td></tr>`).join('')}</table>
+${lines.length ? `<ul style="padding-left:18px;margin:0 0 12px">${lines.map((l) => `<li style="margin:3px 0">${escapeHtml(l.text)}</li>`).join('')}</ul>` : ''}
+${total != null ? `<p style="margin:0 0 12px">Estimated total: <b>${formatMoney(total, s.business.currency)}</b></p>` : ''}
+${special ? `<p style="margin:0 0 12px;padding:10px 12px;background:#f8edd8;border-radius:8px"><b>Special request:</b> ${escapeHtml(special)}</p>` : ''}
+<p><a href="${escapeHtml(link)}" style="display:inline-block;background:#446041;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none">Open order in Terram</a></p>
+</div>`;
+  sendEmailInBackground({ to, subject: `New order #${o.order_number} — ${o.customer_name}${special ? ' (special request)' : ''}`, text, html, replyTo: customerEmail }, `online order #${o.order_number}`);
+}
 
 export default r;

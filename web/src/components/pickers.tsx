@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { Check, Search, UserPlus } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Check, Search, UserPlus, Users } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, qs } from '../lib/api';
 import type { Customer, Product } from '../lib/types';
 import { normalise } from '../../../shared/text';
@@ -108,6 +108,47 @@ export function NewCustomerFields({ value, onChange }: { value: { name: string; 
       <Field label="Email" optional>
         <Input value={value.email} type="email" onChange={(e) => onChange({ ...value, email: e.target.value })} />
       </Field>
+    </div>
+  );
+}
+
+interface Lookalike { id: string; name: string; phone: string | null; email: string | null; reason: string }
+
+/**
+ * "Already a customer?" — shown while adding someone new. Same phone or email means it's
+ * almost certainly the same person; the same name with a different phone may be a different one.
+ */
+export function LookalikeCustomers({ name, phone, email, onUse, useLabel = 'Use this customer' }: { name: string; phone: string; email: string; onUse: (c: Lookalike) => void; useLabel?: string }) {
+  const [q, setQ] = useState({ name, phone, email });
+  useEffect(() => {
+    const t = setTimeout(() => setQ({ name, phone, email }), 350);
+    return () => clearTimeout(t);
+  }, [name, phone, email]);
+  const enabled = q.name.trim().length >= 2 || q.phone.replace(/\D/g, '').length >= 9 || q.email.includes('@');
+  const { data } = useQuery({
+    queryKey: ['customers', 'lookalikes', q],
+    queryFn: () => api.get<{ customers: Lookalike[] }>(`/api/customers/lookalikes${qs(q)}`),
+    enabled,
+    placeholderData: (p) => p,
+  });
+  const list = enabled ? (data?.customers ?? []) : [];
+  if (!list.length) return null;
+  return (
+    <div className="mt-3 rounded-2xl border border-ochre/40 bg-ochre-soft p-3 text-ochre-soft-ink">
+      <div className="mb-2 flex items-center gap-2 text-[13.5px] font-semibold"><Users className="size-4" />Already a customer?</div>
+      <ul className="space-y-2">
+        {list.map((c) => (
+          <li key={c.id} className="flex items-center gap-3 rounded-xl bg-surface px-3 py-2 text-ink">
+            <Avatar name={c.name} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[14.5px] font-semibold">{c.name}</div>
+              <div className="truncate text-[12.5px] text-ink-3">{[c.reason, c.phone, c.email].filter(Boolean).join(' · ')}</div>
+            </div>
+            <Button size="sm" onClick={() => onUse(c)}>{useLabel}</Button>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[12.5px]">A different person with the same name? Carry on and add their phone number so the two are told apart.</p>
     </div>
   );
 }
