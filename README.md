@@ -155,7 +155,7 @@ scripts/       QA helpers: screenshots, overflow check, browser end-to-end run
 
 ```bash
 npm run typecheck
-npm test               # 97 tests, including the 50-order acceptance test
+npm test               # 98 tests, including the 50-order acceptance test
 ```
 
 The **50-order acceptance test** (`tests/acceptance-50.test.ts`) pastes a realistic chat with 50 orders, typos, varied wording, WhatsApp-export lines, amendments, additions, a vague "make those 2", a contradiction, unknown products, a double paste, a customer question, chatter and one of Terram's own replies. It then checks every order against ground truth, resolves the exceptions as staff would, and drives all orders through cutting, packing and fulfilment to completion.

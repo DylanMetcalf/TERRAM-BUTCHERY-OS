@@ -46,6 +46,8 @@ export function preprocess(text: string): string {
   t = t.replace(/\b1\/2\s*(kg|kilo)s?\b/g, '0.5 kg');
   t = t.replace(/\bquarter\s+(?:of\s+)?(?:a\s+)?(kg|kilo)s?\b/g, '0.25 kg');
   t = t.replace(/\b(?:a|one)\s+(kg|kilo|kilogram)s?\b/g, '1 kg');
+  // Eggs come in trays of 30: "2 trays of eggs" → 60 eggs, "a tray of eggs" → 30
+  t = t.replace(/\b(?:(\d+)\s+|(?:a|an|one)\s+)?trays?\s+(?:of\s+)?(?=(?:[a-z]+\s+)?eggs?\b)/g, (_, n) => `${(n ? Number(n) : 1) * 30} `);
   t = t.replace(/\bhalf\s+(?:a\s+)?dozen\b/g, '6');
   t = t.replace(/\b(?:a|one)\s+dozen\b/g, '12');
   t = t.replace(/\b(\d+)\s+dozen\b/g, (_, n) => String(Number(n) * 12));

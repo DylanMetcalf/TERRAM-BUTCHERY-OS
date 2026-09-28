@@ -34,7 +34,7 @@ describe("Terram's price list as the product dictionary", () => {
       ['Skilpadjies', 95], ['Smoked Brisket (Marinated)', 450], ['Brisket Fat', 130], ['Body Fat', 80],
       ['Whole Lamb', 140], ['Half Lamb', 145], ['Lamb Shoulder', 210], ['Leg of Lamb', 225],
       ['Lamb Loin Chops', 265], ['Lamb Rib Chops', 260], ['Lamb Shoulder Chops', 235],
-      ['Lamb Shanks', 240], ['Lamb Ribs', 230], ['Lamb Tails', 200], ['Lamb Stew', 175], ['Whole Sheep', 135], ['Tray of 30 Eggs', 60],
+      ['Lamb Shanks', 240], ['Lamb Ribs', 230], ['Lamb Tails', 200], ['Lamb Stew', 175], ['Whole Sheep', 135], ['Eggs', 2.5],
     ];
     for (const [name, rand] of expected) expect(byName.get(name)?.price_cents, name).toBe(rand * 100);
     expect(listProducts()).toHaveLength(CATALOGUE.length);
@@ -77,7 +77,7 @@ bones 2kg`),
       '4 chops Lamb Shoulder Chops',
       '2kg Lamb Ribs',
       '1 half lamb Half Lamb',
-      '2 trays Tray of 30 Eggs',
+      '60 eggs Eggs',
       '3kg Goulash',
       '2kg Bones',
     ]);
@@ -120,5 +120,9 @@ bones 2kg`),
     const msgs = (b.drafts[0].data as any).issues.map((i: any) => i.message);
     expect(msgs).toContain('Which “mince”? Lean Mince or 80:20 Mince.');
     expect(msgs).toContain('Which “biltong sliced”? A-Grade Biltong or Geel Vet Biltong.');
+  });
+
+  it('eggs are sold per egg: trays are 30, dozens are 12', async () => {
+    expect(await read('Sarah:\na tray of eggs\n2 dozen eggs\n\nJohn:\n45 eggs\n\nMary:\n3 trays eggs')).toEqual(['30 eggs Eggs', '24 eggs Eggs', '45 eggs Eggs', '90 eggs Eggs']);
   });
 });

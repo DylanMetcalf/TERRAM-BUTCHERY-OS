@@ -26,6 +26,7 @@ export interface SeedProduct {
   aliases: string[];
   preps?: Record<string, Prep[]>;
   customer_visible?: boolean;
+  internal_notes?: string;
 }
 
 const THICKNESS: Prep[] = [
@@ -253,7 +254,10 @@ export const CATALOGUE: SeedProduct[] = [
   },
   // ── Eggs ────────────────────────────────────────────────
   {
-    slug: 'eggs_tray', name: 'Tray of 30 Eggs', category: 'Eggs', quantity_type: 'count', piece_noun: 'tray',
-    price_cents: kg(60), price_unit: 'each', aliases: ['eggs', 'egg', 'tray of eggs', 'egg tray', 'egg trays', 'tray eggs', 'trays of eggs', 'farm eggs'],
+    // Retail price per egg. "A tray" is read as 30 eggs, "a dozen" as 12.
+    slug: 'eggs', name: 'Eggs', category: 'Eggs', quantity_type: 'count', piece_noun: 'egg',
+    price_cents: 250, price_unit: 'each', description: 'R2.50 per egg. A tray is 30 eggs.',
+    internal_notes: 'Retail R2.50/egg. Wholesale (R2/egg) is handled outside the app.',
+    aliases: ['eggs', 'egg', 'farm eggs', 'free range eggs', 'tray of eggs', 'egg tray', 'trays of eggs'],
   },
 ];

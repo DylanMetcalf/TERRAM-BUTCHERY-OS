@@ -124,7 +124,7 @@ export async function loadSampleData(actor: Actor) {
       status: 'confirmed',
       items: [
         { product_id: P('beef_mince_8020'), qty: { kind: 'weight', count: null, weight_g: 2000 } },
-        { product_id: P('eggs_tray'), qty: { kind: 'count', count: 2, weight_g: null } },
+        { product_id: P('eggs'), qty: { kind: 'count', count: 60, weight_g: null } },
       ],
       fulfilment_type: 'collection',
       requested_date: addDays(today, -1),
