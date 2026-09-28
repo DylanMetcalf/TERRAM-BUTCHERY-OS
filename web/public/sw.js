@@ -1,6 +1,6 @@
 /* Terram service worker — offline shell only. API data is never cached, so
    nobody ever sees stale orders presented as current. */
-const CACHE = 'terram-shell-v2';
+const CACHE = 'terram-shell-v3';
 const SHELL = ['/', '/manifest.webmanifest', '/favicon.png', '/icon-192.png', '/brand/terram-logo.png', '/brand/terram-logo-white.png'];
 
 self.addEventListener('install', (e) => {

@@ -20,6 +20,8 @@ import { actorOf, requirePerm, type Env } from '../http/context.js';
 import { body, ymdParam } from '../http/schemas.js';
 import { localDate, addDays } from '../lib/time.js';
 import { businessTz } from '../services/settings.js';
+import { emailConfigured, emailFrom, sendEmail } from '../services/email.js';
+import { rateLimit } from '../http/security.js';
 
 const r = new Hono<Env>();
 
@@ -62,7 +64,7 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
     learningThreshold: z.number().int().min(1).max(20),
   }).partial(),
   printing: z.object({ showPrices: z.boolean(), paper: z.enum(['A4', 'Letter']) }).partial(),
-  customerForm: z.object({ enabled: z.boolean(), intro: z.string().max(600), confirmationMessage: z.string().max(600), showPrices: z.boolean(), terms: z.string().max(3000) }).partial(),
+  customerForm: z.object({ enabled: z.boolean(), intro: z.string().max(600), confirmationMessage: z.string().max(600), showPrices: z.boolean(), terms: z.string().max(3000), notifyEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10) }).partial(),
   brand: z
     .object({
       logo: z.string().max(1_000_000).regex(/^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/, 'Upload a PNG, JPG, WebP or SVG image.').nullable(),
@@ -76,7 +78,7 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
 };
 
 r.get('/settings', requirePerm('settings.read'), (c) =>
-  c.json({ settings: getSettings(), environment: { ai_key: !!process.env.ANTHROPIC_API_KEY, whatsapp: !!process.env.WHATSAPP_VERIFY_TOKEN, whatsapp_secret: !!process.env.WHATSAPP_APP_SECRET, email_inbound: !!process.env.EMAIL_INBOUND_TOKEN } }),
+  c.json({ settings: getSettings(), environment: { ai_key: !!process.env.ANTHROPIC_API_KEY, whatsapp: !!process.env.WHATSAPP_VERIFY_TOKEN, whatsapp_secret: !!process.env.WHATSAPP_APP_SECRET, email_inbound: !!process.env.EMAIL_INBOUND_TOKEN, email_outbound: emailConfigured(), email_from: emailConfigured() ? emailFrom() : null } }),
 );
 
 r.put('/settings/:section', requirePerm('settings.write'), async (c) => {
@@ -89,6 +91,19 @@ r.put('/settings/:section', requirePerm('settings.write'), async (c) => {
   audit(actorOf(c), 'settings.updated', 'settings', section, `Updated ${section} settings`, { before, after: settings[section] });
   publish(['settings']);
   return c.json({ settings });
+});
+
+r.post('/test-email', requirePerm('settings.write'), rateLimit('test-email', 5, 10 * 60_000), async (c) => {
+  const to = getSettings().customerForm.notifyEmails;
+  if (!to.length) throw badRequest('Add at least one email address first, then save.');
+  if (!emailConfigured()) throw badRequest('Email isn’t set up on the server yet. Add the SMTP settings in Render → Environment (see the guide).');
+  try {
+    await sendEmail({ to, subject: 'Terram test email', text: 'This is a test from Terram Butchery OS. New online orders will be emailed to this address.', html: '<p>This is a test from Terram Butchery OS. New online orders will be emailed to this address.</p>' });
+  } catch (e: any) {
+    throw badRequest(`The email server said: ${String(e?.message ?? e).slice(0, 200)}`);
+  }
+  audit(actorOf(c), 'settings.test_email', 'settings', 'customerForm', `Sent a test email to ${to.join(', ')}`);
+  return c.json({ ok: true, to });
 });
 
 // ── Users ──────────────────────────────────────────────────

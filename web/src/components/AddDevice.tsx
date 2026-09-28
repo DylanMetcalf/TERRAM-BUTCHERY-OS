@@ -50,7 +50,8 @@ const STEPS: Record<Kind, { title: string; steps: string[]; note?: string }> = {
 /** Everything needed to put Terram on another phone, tablet or computer. */
 export function AddDevice() {
   const toast = useToast();
-  const url = window.location.origin;
+  // Straight to sign-in (the main address shows the public home page when signed out)
+  const url = `${window.location.origin}/login`;
   const [kind, setKind] = useState<Kind>(detect);
   const [qr, setQr] = useState('');
   useEffect(() => {

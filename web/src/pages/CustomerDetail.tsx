@@ -39,7 +39,7 @@ export default function CustomerDetail() {
           {c.phone && <a href={`tel:${c.phone}`}><Button icon={<Phone className="size-4" />}>Call</Button></a>}
           {wa && <a href={wa} target="_blank" rel="noreferrer"><Button icon={<MessageCircle className="size-4" />}>WhatsApp</Button></a>}
           {can('customers.write') && <Button icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>Edit</Button>}
-          {can('orders.write') && <Link to="/orders/new"><Button variant="primary" icon={<Plus className="size-4" />}>New order</Button></Link>}
+          {can('orders.write') && <Link to={`/orders/new?customer=${id}`}><Button variant="primary" icon={<Plus className="size-4" />}>New order</Button></Link>}
         </div>
       </div>
 

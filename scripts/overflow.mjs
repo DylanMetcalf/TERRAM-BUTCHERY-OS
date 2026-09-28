@@ -2,7 +2,7 @@ import { chromium } from 'playwright-core';
 const base = 'http://localhost:8092';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true })).newPage();
-await p.goto(base); await p.fill('#email', 'dylan@terram.test'); await p.fill('#password', 'butchery123'); await p.click('button[type=submit]'); await p.waitForTimeout(1000);
+await p.goto(base + '/login'); await p.fill('#email', 'dylan@terram.test'); await p.fill('#password', 'butchery123'); await p.click('button[type=submit]'); await p.waitForTimeout(1000);
 for (const path of (process.argv[2] ?? '/').split(',')) {
   await p.goto(base + path); await p.waitForTimeout(800);
   const r = await p.evaluate(() => {

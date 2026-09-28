@@ -184,7 +184,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
       {/* Top bar */}
       <header className="safe-top sticky top-0 z-20 border-b border-line/70 bg-bg/85 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-[1280px] items-center gap-3 px-4 sm:px-6 lg:h-16 lg:px-8">
+        <div className="mx-auto flex h-14 max-w-[1200px] items-center gap-3 px-5 sm:px-8 lg:h-16 lg:px-12 xl:px-16">
           <Link to="/" className="lg:hidden" aria-label="Today">
             <Logo withWord={false} />
           </Link>
@@ -205,7 +205,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1280px] px-4 pb-[calc(96px+env(safe-area-inset-bottom))] pt-5 sm:px-6 sm:pt-7 lg:px-8 lg:pb-16">{children}</main>
+      <main className="mx-auto max-w-[1200px] px-5 pb-[calc(112px+env(safe-area-inset-bottom))] pt-6 sm:px-8 sm:pt-9 lg:px-12 lg:pb-24 lg:pt-10 xl:px-16">{children}</main>
 
       {/* Mobile bottom navigation */}
       <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 backdrop-blur-md lg:hidden" aria-label="Main">

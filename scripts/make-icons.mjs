@@ -7,10 +7,10 @@ const CHARCOAL = '#303030';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }).catch(async () => chromium.launch());
 // [size, logo scale, file, rounded corners]
 for (const [size, scale, name, round] of [
-  [192, 0.84, 'icon-192.png', false],
-  [512, 0.84, 'icon-512.png', false],
-  [512, 0.62, 'icon-maskable-512.png', false],
-  [180, 0.84, 'apple-touch-icon.png', false],
+  [192, 0.64, 'icon-192.png', false],
+  [512, 0.64, 'icon-512.png', false],
+  [512, 0.52, 'icon-maskable-512.png', false],
+  [180, 0.64, 'apple-touch-icon.png', false],
   [64, 0.96, 'favicon.png', true],
 ]) {
   const p = await b.newPage({ viewport: { width: size, height: size } });

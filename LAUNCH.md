@@ -69,6 +69,33 @@ Each device stays signed in for about six months. If a phone is lost: **Settings
 - **Fulfilment**: **Tell customer** (opens WhatsApp with a ready message), then **Collected** or **Delivered**.
 - Customers can also order themselves from `your-address/order` (Settings → Customer form has the link).
 
+### Using terramfarm.co.za
+
+With the domain connected, **terramfarm.co.za** shows the farm's home page (products, how ordering works, Order now, WhatsApp). **terramfarm.co.za/order** is the order form, and **terramfarm.co.za/login** is where the family signs in. Signed-in devices go straight to the dashboard.
+
+1. **Render:** your service → **Settings → Custom Domains → Add Custom Domain** → `terramfarm.co.za`. Add `www.terramfarm.co.za` as well if Render doesn't add it for you. Render then shows the DNS records to create; keep that page open.
+2. **Before touching DNS, protect your email.** In Domains.co.za (client area → your domain → **DNS management**, or cPanel → **Zone Editor**), note the records that exist now. Changing the main address doesn't affect the **MX** records. But if `mail`, `webmail` or `cpanel` is a **CNAME pointing to terramfarm.co.za**, change each one to an **A record** with the IP address the main (`@`) record has *today*. Otherwise email would follow the website to Render.
+3. **Point the domain at Render**, using exactly what Render showed:
+   - the `@` (terramfarm.co.za) **A record** → Render's IP address (replace the old value; delete any other `@` A or AAAA records);
+   - `www` **CNAME** → your `….onrender.com` address.
+4. Back in Render, tap **Verify**. It usually works within an hour, sometimes a few. Render then adds the padlock (HTTPS) by itself.
+5. Anything currently on terramfarm.co.za (for example a page hosted at Domains.co.za) is replaced by the Terram home page.
+
+### Email alerts for online orders
+
+Every order sent from the customer form can also be emailed to you, as a backup and a heads-up. The recipients are in **Settings → Customer form → Email every online order to**. They start as dylan@meacreo.co.za and Sharonm@imagine.co.za.
+
+To switch sending on, the server needs a mailbox to send from. The easiest is your business email:
+
+1. Ask whoever hosts meacreo.co.za email for its **SMTP settings**: server name, port, username and password.
+   - Google Workspace or Gmail: `smtp.gmail.com`, port `587`, your address, and an **App password** (Google Account → Security → App passwords).
+   - Microsoft 365: `smtp.office365.com`, port `587` (SMTP sending must be allowed for the mailbox).
+2. In Render: your service → **Environment** → **Add environment variable**, one per line:
+   `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER` (e.g. dylan@meacreo.co.za), `SMTP_PASS`. Save; Render restarts the app.
+3. In Terram: **Settings → Customer form → Send test email**. If it doesn't arrive, check spam, then send Claude the error it shows.
+
+Without these settings nothing is emailed, and orders still arrive in the app as normal.
+
 ### Special requests
 
 The order form has its own **Special requests** section at the end of the product list, for items that aren't on your price list, such as venison or specific cuts. A request shows up in **Needs attention** as "Special request on order #…". Agree the details and price with the customer, add the items to the order, then tap **Agreed with customer**. An order with only a special request waits in "Needs clarification" until then.

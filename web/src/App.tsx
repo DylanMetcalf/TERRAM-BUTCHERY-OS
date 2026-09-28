@@ -46,6 +46,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const PrintView = lazy(() => import('./print/Print'));
 const Devices = lazy(() => import('./pages/Devices'));
 const PublicOrder = lazy(() => import('./pages/PublicOrder'));
+const PublicHome = lazy(() => import('./pages/PublicHome'));
 
 function FullSpinner() {
   return (
@@ -79,6 +80,7 @@ function Routed() {
 }
 
 function InternalApp() {
+  const loc = useLocation();
   const { data: me, isLoading, error, refetch } = useMeQuery();
   const qc = useQueryClient();
   const signedIn = !!me?.user;
@@ -98,7 +100,11 @@ function InternalApp() {
         </button>
       </div>
     );
-  if (!me.user) return <LoginPage setup={me.needs_setup} family={me.family_login} />;
+  if (!me.user) {
+    // Visitors to the main address see the farm's home page; staff sign in at /login
+    if (loc.pathname === '/' && !me.needs_setup) return <Suspense fallback={<FullSpinner />}><PublicHome /></Suspense>;
+    return <LoginPage setup={me.needs_setup} family={me.family_login} />;
+  }
 
   return (
     <MeProvider me={me}>

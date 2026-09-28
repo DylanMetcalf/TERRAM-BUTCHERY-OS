@@ -110,7 +110,7 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
         name: `${s.business.name} Butchery`,
         short_name: s.business.name.split(' ')[0] || 'Terram',
         description: 'Orders, cutting, packing and fulfilment.',
-        start_url: '/',
+        start_url: '/login',
         scope: '/',
         display: 'standalone',
         background_color: '#f5f5f2',

@@ -7,6 +7,7 @@ import { api, ApiError, qs } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { timeAgo } from '../lib/format';
 import type { Customer } from '../lib/types';
+import { LookalikeCustomers } from '../components/pickers';
 
 export default function Customers() {
   const [params] = useSearchParams();
@@ -92,6 +93,7 @@ export function CustomerForm({ open, onClose, customer }: { open: boolean; onClo
           <Segmented full value={v.preferred_fulfilment} onChange={(x) => setV({ ...v, preferred_fulfilment: x })} options={[{ value: '', label: 'No preference' }, { value: 'collection', label: 'Collects' }, { value: 'delivery', label: 'Delivery' }]} />
         </Field>
         <Field label="Notes" optional hint="Shown on every order — e.g. “likes steaks thick”, “gate code 1234”."><Textarea rows={3} value={v.notes} onChange={(e) => setV({ ...v, notes: e.target.value })} /></Field>
+        {!customer && <LookalikeCustomers name={v.name} phone={v.phone} email={v.email} useLabel="Open" onUse={(x) => { onClose(); navigate(`/customers/${x.id}`); }} />}
         {err && <p className="text-[14px] text-danger">{err}</p>}
       </div>
     </Sheet>
