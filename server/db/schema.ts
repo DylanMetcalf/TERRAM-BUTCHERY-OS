@@ -373,10 +373,10 @@ ALTER TABLE sessions ADD COLUMN via TEXT NOT NULL DEFAULT 'password';
   },
   {
     id: 4,
-    name: 'product-minimum-order',
+    name: 'product-pack-size',
     sql: `
-ALTER TABLE products ADD COLUMN min_count INTEGER;
-UPDATE products SET min_count = 30 WHERE slug = 'eggs';
+ALTER TABLE products ADD COLUMN pack_size INTEGER;
+UPDATE products SET pack_size = 30 WHERE slug = 'eggs';
 ALTER TABLE orders ADD COLUMN special_request TEXT;
 `,
   },

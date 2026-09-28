@@ -16,7 +16,7 @@ export type IssueCode =
   | 'missing_quantity'
   | 'invalid_quantity'
   | 'ambiguous_quantity'
-  | 'below_minimum'
+  | 'not_pack_multiple'
   | 'fuzzy_match'
   | 'unrecognised_words'
   | 'conflicting_preparation'
@@ -193,8 +193,8 @@ export function itemIssues(item: DraftItem): DraftIssue[] {
     const problem = validateQty(item.qty, p.quantity_type, p.allows_portions);
     if (problem) issues.push({ code: 'invalid_quantity', severity: 'blocking', message: `${p.canonical_name}: ${problem}`, item_key: item.key });
     else if (item.qty_ambiguous) issues.push({ code: 'ambiguous_quantity', severity: 'warning', message: `Check the quantity for ${p.canonical_name} — “${item.source_text}”.`, item_key: item.key });
-    if (p.min_count && item.qty.kind === 'count' && (item.qty.count ?? 0) < p.min_count) {
-      issues.push({ code: 'below_minimum', severity: 'warning', message: `${p.canonical_name}: the minimum order is ${formatQty({ kind: 'count', count: p.min_count, weight_g: null }, p.piece_noun)}. This asks for ${formatQty(item.qty, p.piece_noun)}.`, item_key: item.key });
+    if (p.pack_size && item.qty.kind === 'count' && (item.qty.count ?? 0) % p.pack_size !== 0) {
+      issues.push({ code: 'not_pack_multiple', severity: 'warning', message: `${p.canonical_name} are sold in lots of ${p.pack_size} (${p.pack_size}, ${p.pack_size * 2}, ${p.pack_size * 3}…). This asks for ${formatQty(item.qty, p.piece_noun)}.`, item_key: item.key });
     }
   }
   if (item.match === 'fuzzy') issues.push({ code: 'fuzzy_match', severity: 'warning', message: `Read “${item.phrase}” as ${p.canonical_name}.`, item_key: item.key });

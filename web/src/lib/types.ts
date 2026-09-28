@@ -85,7 +85,7 @@ export interface Product {
   allows_portions: boolean;
   piece_noun: string;
   typical_piece_g: number | null;
-  min_count: number | null;
+  pack_size: number | null;
   price_cents: number | null;
   price_unit: 'kg' | 'each' | null;
   packaging: string | null;

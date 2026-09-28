@@ -94,7 +94,7 @@ const ProductInput = z.object({
   allows_portions: z.boolean().optional(),
   piece_noun: z.string().trim().max(30).optional(),
   typical_piece_g: z.number().int().positive().max(100000).nullable().optional(),
-  min_count: z.number().int().positive().max(10000).nullable().optional(),
+  pack_size: z.number().int().positive().max(10000).nullable().optional(),
   price_cents: z.number().int().min(0).max(100_000_000).nullable().optional(),
   price_unit: z.enum(['kg', 'each']).nullable().optional(),
   packaging: z.string().max(200).nullable().optional(),

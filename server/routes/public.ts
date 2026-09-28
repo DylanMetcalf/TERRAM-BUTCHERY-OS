@@ -48,7 +48,7 @@ r.get('/catalogue', (c) => {
       allows_portions: p.allows_portions,
       piece_noun: p.piece_noun,
       typical_piece_g: p.typical_piece_g,
-      min_count: p.min_count,
+      pack_size: p.pack_size,
       price_cents: show ? p.price_cents : null,
       price_unit: show ? p.price_unit : null,
       options: prepGroups(p, { customerOnly: true }).map((g) => ({ group: g.group, options: g.options.map((o) => ({ name: o.name, is_default: o.is_default })) })),
@@ -83,7 +83,7 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   for (const it of input.items) {
     const p = requireProduct(it.product_id);
     if (!p.active || !p.customer_visible) throw badRequest('One of the products is no longer available. Please refresh the page.');
-    if (p.min_count && it.qty.kind === 'count' && (it.qty.count ?? 0) < p.min_count) throw badRequest(`${p.customer_name}: the minimum order is ${p.min_count}.`);
+    if (p.pack_size && (it.qty.kind !== 'count' || (it.qty.count ?? 0) % p.pack_size !== 0)) throw badRequest(`${p.customer_name} are sold in lots of ${p.pack_size}. Please choose ${p.pack_size}, ${p.pack_size * 2}, ${p.pack_size * 3}…`);
     for (const [g, v] of Object.entries(it.preparation ?? {})) {
       const opt = p.preparations.find((o) => o.group_name === g && o.name === v);
       if (!opt || !opt.customer_visible || !opt.active) throw badRequest(`That option is not available for ${p.customer_name}.`);

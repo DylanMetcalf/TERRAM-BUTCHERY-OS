@@ -7,11 +7,11 @@ import { cx, Segmented } from './ui';
  * Quantity entry that respects product rules: weight-only, count-only, or
  * either — plus "6 × 500g" portions where the product allows it.
  */
-export function QuantityInput({ value, onChange, quantityType, allowsPortions, pieceNoun = 'piece', autoFocus, minCount }: { value: Qty | null; onChange: (q: Qty | null) => void; quantityType: QuantityType; allowsPortions: boolean; pieceNoun?: string; autoFocus?: boolean; /** e.g. eggs: 30. Starts there and the − button stops there. */ minCount?: number }) {
+export function QuantityInput({ value, onChange, quantityType, allowsPortions, pieceNoun = 'piece', autoFocus, packSize }: { value: Qty | null; onChange: (q: Qty | null) => void; quantityType: QuantityType; allowsPortions: boolean; pieceNoun?: string; autoFocus?: boolean; /** Sold only in multiples of this (eggs: 30). + and − move a whole pack. */ packSize?: number }) {
   const kinds: Qty['kind'][] = quantityType === 'weight' ? ['weight'] : quantityType === 'count' ? ['count'] : ['count', 'weight'];
   if (allowsPortions) kinds.push('portions');
   const [kind, setKind] = useState<Qty['kind']>(value?.kind ?? kinds[0]);
-  const [count, setCount] = useState<string>(value?.count != null ? String(value.count) : kind === 'weight' ? '' : String(minCount ?? 1));
+  const [count, setCount] = useState<string>(value?.count != null ? String(value.count) : kind === 'weight' ? '' : String(packSize ?? 1));
   const [kg, setKg] = useState<string>(value?.weight_g != null ? String(value.weight_g / (value.kind === 'portions' ? 1 : 1000)) : kind === 'portions' ? '500' : '1');
   const [unit, setUnit] = useState<'kg' | 'g'>(value?.kind === 'portions' ? 'g' : value?.weight_g && value.weight_g < 1000 && value.kind === 'weight' ? 'g' : 'kg');
 
@@ -31,7 +31,7 @@ export function QuantityInput({ value, onChange, quantityType, allowsPortions, p
   }, [kind, count, kg, unit]);
 
   // With a minimum (eggs: 30), + and − move a whole minimum at a time (a tray)
-  const step = (d: number) => setCount(String(Math.max(minCount ?? 1, (Math.round(Number(count)) || 0) + d * (minCount ?? 1))));
+  const step = (d: number) => setCount(String(Math.max(packSize ?? 1, (Math.round(Number(count)) || 0) + d * (packSize ?? 1))));
   const stepW = (d: number) => {
     const cur = Number(String(kg).replace(',', '.')) || 0;
     const inc = unit === 'kg' ? 0.5 : 100;

@@ -129,9 +129,11 @@ bones 2kg`),
     expect(await read('Sarah:\na tray of eggs\n2 dozen eggs\n\nJohn:\n45 eggs\n\nMary:\n3 trays eggs')).toEqual(['30 eggs Eggs', '24 eggs Eggs', '45 eggs Eggs', '90 eggs Eggs']);
   });
 
-  it('pasted egg orders below a tray are flagged', async () => {
-    const b = getBatch(await analyseImport({ text: 'Sarah:\n12 eggs', useAi: false }, STAFF));
-    expect((b.drafts[0].data as any).issues.map((i: any) => i.message)).toContain('Eggs: the minimum order is 30 eggs. This asks for 12 eggs.');
+  it('pasted egg orders that aren’t whole trays are flagged', async () => {
+    const msgs = async (text: string) => (getBatch(await analyseImport({ text, useAi: false }, STAFF)).drafts[0].data as any).issues.map((i: any) => i.message);
+    expect(await msgs('Sarah:\n12 eggs')).toContain('Eggs are sold in lots of 30 (30, 60, 90…). This asks for 12 eggs.');
+    expect(await msgs('Sarah:\n45 eggs')).toContain('Eggs are sold in lots of 30 (30, 60, 90…). This asks for 45 eggs.');
+    expect((await msgs('Sarah:\n2 trays of eggs\nCollect Saturday')).filter((m: string) => /lots of/.test(m))).toEqual([]);
   });
 });
 
@@ -144,12 +146,13 @@ describe('customer order form', () => {
   const order = (ref: string, extra: any) => ({ customer: { name: 'Naledi Zulu', phone: '071 555 3380' }, items: [], fulfilment_type: 'collection', requested_date: day(), client_ref: ref, ...extra });
   const eggs = (count: number) => ({ product_id: productId('eggs'), qty: { kind: 'count', count, weight_g: null } });
 
-  it('needs at least a tray of eggs', async () => {
+  it('only takes eggs in whole trays of 30', async () => {
     const c = new Client(buildApp());
-    const few = await c.post('/api/public/orders', order('ref-eggs-0001', { items: [eggs(12)] }));
-    expect(few.status).toBe(400);
-    expect(few.body.error).toMatch(/minimum order is 30/);
-    expect((await c.post('/api/public/orders', order('ref-eggs-0002', { items: [eggs(30)] }))).status).toBe(200);
+    for (const [n, ok] of [[12, false], [45, false], [30, true], [90, true]] as const) {
+      const r = await c.post('/api/public/orders', order(`ref-eggs-00${n}`, { items: [eggs(n)] }));
+      expect(r.status, `${n} eggs`).toBe(ok ? 200 : 400);
+      if (!ok) expect(r.body.error).toMatch(/sold in lots of 30/);
+    }
   });
 
   it('takes a special request on its own and sends it to Needs attention', async () => {

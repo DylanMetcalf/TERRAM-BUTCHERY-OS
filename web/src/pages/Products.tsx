@@ -119,7 +119,7 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
       allows_portions: p?.allows_portions ?? false,
       piece_noun: p?.piece_noun ?? 'piece',
       typical_piece_g: p?.typical_piece_g ?? '',
-      min_count: p?.min_count ?? '',
+      pack_size: p?.pack_size ?? '',
       price: p?.price_cents != null ? (p.price_cents / 100).toFixed(2) : '',
       price_unit: p?.price_unit ?? 'kg',
       active: p?.active ?? true,
@@ -140,7 +140,7 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
         allows_portions: v.allows_portions,
         piece_noun: v.piece_noun || 'piece',
         typical_piece_g: v.typical_piece_g ? Number(v.typical_piece_g) : null,
-        min_count: v.min_count ? Number(v.min_count) : null,
+        pack_size: v.pack_size ? Number(v.pack_size) : null,
         price_cents: v.price !== '' ? Math.round(Number(String(v.price).replace(',', '.')) * 100) : null,
         price_unit: v.price !== '' ? v.price_unit : null,
         active: v.active,
@@ -196,7 +196,7 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="A piece is called" hint="e.g. steak, chop, leg"><Input value={v.piece_noun ?? ''} onChange={(e) => set('piece_noun', e.target.value)} /></Field>
               <Field label="Typical piece weight (g)" optional hint="Helps estimate totals on the cutting sheet."><Input inputMode="numeric" value={v.typical_piece_g ?? ''} onChange={(e) => set('typical_piece_g', e.target.value.replace(/\D/g, ''))} /></Field>
-              {v.quantity_type !== 'weight' && <Field label="Minimum order (pieces)" optional hint="e.g. 30 for eggs. The order form won’t go lower; pasted orders below it are flagged."><Input inputMode="numeric" value={v.min_count ?? ''} onChange={(e) => set('min_count', e.target.value.replace(/\D/g, ''))} /></Field>}
+              {v.quantity_type !== 'weight' && <Field label="Sold in lots of (pieces)" optional hint="e.g. 30 for eggs: customers can only order 30, 60, 90… Pasted orders that don’t fit are flagged."><Input inputMode="numeric" value={v.pack_size ?? ''} onChange={(e) => set('pack_size', e.target.value.replace(/\D/g, ''))} /></Field>}
             </div>
             <Switch checked={!!v.allows_portions} onChange={(x) => set('allows_portions', x)} label="Can be ordered in packs" description="e.g. “6 × 500g”" />
           </div>

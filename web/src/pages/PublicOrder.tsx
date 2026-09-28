@@ -18,7 +18,7 @@ interface CatProduct {
   allows_portions: boolean;
   piece_noun: string;
   typical_piece_g: number | null;
-  min_count: number | null;
+  pack_size: number | null;
   price_cents: number | null;
   price_unit: 'kg' | 'each' | null;
   options: { group: string; options: { name: string; is_default: boolean }[] }[];
@@ -170,8 +170,8 @@ export default function PublicOrder() {
           {cat_ === 'All' && (
             <section className="mt-9">
               <h2 className="mb-1 font-display text-[19px] font-bold uppercase tracking-[0.02em]">Special requests</h2>
-              <p className="mb-3 max-w-xl text-[14.5px] text-ink-2">Something that isn’t on the list, a special cut or a bigger order? Describe it here. We’ll confirm availability and price with you before anything is prepared.</p>
-              <Textarea rows={4} value={s.special ?? ''} onChange={(e) => set({ special: e.target.value })} maxLength={1500} placeholder="e.g. a whole lamb cut for a potjie and braai, or 5kg of dog bones" aria-label="Special requests" />
+              <p className="mb-3 max-w-xl text-[14.5px] text-ink-2">Looking for something that isn’t on our price list, like venison or a specific cut? Tell us what you’d like and roughly how much. We’ll confirm availability and price with you before anything is prepared.</p>
+              <Textarea rows={4} value={s.special ?? ''} onChange={(e) => set({ special: e.target.value })} maxLength={1500} placeholder="e.g. 2kg venison steaks, or a picanha roast of about 1.5kg" aria-label="Special requests" />
             </section>
           )}
         </div>
@@ -299,7 +299,7 @@ function AddSheet({ p, existing, onAdd, onRemove, onClose, currency }: { p: CatP
   const [note, setNote] = useState('');
   const price = qty ? estimateLinePrice(qty, p.price_cents, p.price_unit) : null;
   return (
-    <Sheet open onClose={onClose} title={p.name} subtitle={p.description ?? undefined} footer={<Button variant="primary" size="lg" full disabled={!qty || (!!p.min_count && qty.kind === 'count' && (qty.count ?? 0) < p.min_count)} onClick={() => qty && onAdd({ key: newKey(), product_id: p.id, qty, preparation: prep, special_instructions: note.trim() })} icon={<ShoppingBag className="size-4" />}>Add to order{price != null ? ` · ≈ ${formatMoney(price, currency)}` : ''}</Button>}>
+    <Sheet open onClose={onClose} title={p.name} subtitle={p.description ?? undefined} footer={<Button variant="primary" size="lg" full disabled={!qty || (!!p.pack_size && (qty.count ?? 0) % p.pack_size !== 0)} onClick={() => qty && onAdd({ key: newKey(), product_id: p.id, qty, preparation: prep, special_instructions: note.trim() })} icon={<ShoppingBag className="size-4" />}>Add to order{price != null ? ` · ≈ ${formatMoney(price, currency)}` : ''}</Button>}>
       <div className="space-y-6">
         {existing.length > 0 && (
           <div className="space-y-2">
@@ -312,8 +312,14 @@ function AddSheet({ p, existing, onAdd, onRemove, onClose, currency }: { p: CatP
           </div>
         )}
         <Field label="How much?">
-          <QuantityInput value={qty} onChange={setQty} quantityType={p.quantity_type} allowsPortions={p.allows_portions} pieceNoun={p.piece_noun} minCount={p.min_count ?? undefined} />
-          {p.min_count && <p className="mt-2 text-[13px] text-ink-3">Minimum order: {p.min_count} {p.piece_noun}s.</p>}
+          <QuantityInput value={qty} onChange={setQty} quantityType={p.quantity_type} allowsPortions={p.allows_portions} pieceNoun={p.piece_noun} packSize={p.pack_size ?? undefined} />
+          {p.pack_size && (
+            <p className={cx('mt-2 text-[13px]', qty && (qty.count ?? 0) % p.pack_size !== 0 ? 'font-medium text-danger' : 'text-ink-3')}>
+              {qty && (qty.count ?? 0) % p.pack_size === 0 && (qty.count ?? 0) > 0
+                ? `${(qty.count ?? 0) / p.pack_size} × ${p.pack_size} ${p.piece_noun}s`
+                : `Sold in lots of ${p.pack_size}: ${p.pack_size}, ${p.pack_size * 2}, ${p.pack_size * 3}…`}
+            </p>
+          )}
           {p.typical_piece_g && p.quantity_type !== 'weight' && <p className="mt-2 text-[13px] text-ink-3">One {p.piece_noun} is about {p.typical_piece_g >= 1000 ? `${p.typical_piece_g / 1000}kg` : `${p.typical_piece_g}g`}.</p>}
         </Field>
         {p.options.map((g) => (
