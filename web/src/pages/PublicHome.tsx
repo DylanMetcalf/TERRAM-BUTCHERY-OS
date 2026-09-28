@@ -52,7 +52,7 @@ export default function PublicHome() {
       {/* Hero */}
       <section className="bg-charcoal text-white">
         <div className="mx-auto max-w-5xl px-5 pb-16 pt-10 sm:px-8 sm:pb-24 sm:pt-16">
-          <p className="text-[12.5px] font-semibold uppercase tracking-[0.18em] text-white/60">A Metcalf family farm</p>
+          <p className="text-[14px] font-semibold text-white/65">A Metcalf family farm</p>
           <h1 className="mt-3 max-w-2xl font-display text-[38px] font-extrabold leading-[1.05] tracking-tight sm:text-[56px]">Farm-raised beef &amp; lamb.</h1>
           <p className="mt-4 max-w-xl text-[17px] leading-relaxed text-white/80">{info?.business.tagline ?? 'Grown with Purpose. Shared with Passion.'} Order online and we’ll prepare it for collection or delivery.</p>
           <div className="mt-8 flex flex-wrap gap-3">
@@ -95,7 +95,7 @@ export default function PublicHome() {
           <h2 className="font-display text-[26px] font-bold">How ordering works</h2>
           <ol className="mt-5 grid gap-4 sm:grid-cols-3">
             {[
-              { icon: ShoppingBag, title: 'Choose online', body: 'Pick your cuts and quantities on our order form. Prices are shown per kg.' },
+              { icon: ShoppingBag, title: 'Choose online', body: 'Pick your cuts and quantities on our order form, check your order, then send it. Prices are shown per kg.' },
               { icon: CalendarCheck, title: 'We confirm', body: 'We check stock and confirm your order. Please order 2 weeks to a month ahead.' },
               { icon: info?.fulfilment?.deliveryEnabled ? Truck : Store, title: 'Collect or delivery', body: info?.fulfilment?.deliveryEnabled ? `Collect from the farm${info?.fulfilment?.collectionHours ? ` (${info.fulfilment.collectionHours})` : ''}, or we can arrange delivery.` : 'Collect from the farm when it’s ready.' },
             ].map((s, i) => (

@@ -16,7 +16,15 @@ await cust.getByRole('button', { name: /^Rump\b/ }).first().click();
 await cust.getByRole('button', { name: /More quantity/ }).first().click();
 await cust.getByRole('button', { name: 'Thick cut' }).click();
 await cust.getByRole('button', { name: /Add to order/ }).click();
-await cust.getByRole('button', { name: 'Continue' }).click();
+// Search, add something by mistake, then remove it in the cart
+await cust.getByLabel('Search products').fill('droewors');
+await cust.getByRole('button', { name: /^Droewors/ }).first().click();
+await cust.getByRole('button', { name: /Add to order/ }).click();
+await cust.getByLabel('Search products').fill('');
+await cust.getByRole('button', { name: /View order/ }).click();
+await cust.getByRole('button', { name: 'Remove Droewors' }).click();
+if (await cust.getByRole('dialog').getByText('Droewors').count()) errors.push('removing from the cart did not work');
+await cust.getByRole('button', { name: 'Checkout' }).click();
 await cust.fill('#n', 'Naledi Zulu');
 await cust.fill('#p', '071 555 3380');
 await cust.getByRole('button', { name: 'Continue' }).click();

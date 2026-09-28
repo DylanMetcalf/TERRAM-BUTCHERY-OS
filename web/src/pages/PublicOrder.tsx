@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Check, Plus, ShoppingBag, Store, Trash2, Truck, WifiOff } from 'lucide-react';
+import { ArrowLeft, Check, Pencil, Plus, Search, ShoppingBag, Store, Trash2, Truck, WifiOff, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Logo } from '../components/order-bits';
 import { QuantityInput } from '../components/quantity-input';
@@ -59,6 +59,8 @@ export default function PublicOrder() {
   const { data: cat } = useQuery({ queryKey: ['catalogue'], queryFn: () => api.get<{ products: CatProduct[] }>('/api/public/catalogue') });
   const [s, setS] = useState<State>(initial);
   const [adding, setAdding] = useState<{ p: CatProduct; line?: Line } | null>(null);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [q, setQ] = useState('');
   const [cat_, setCat] = useState('All');
   const [done, setDone] = useState<{ number: number | null; message: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +79,15 @@ export default function PublicOrder() {
   const products = cat?.products ?? [];
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const cats = ['All', ...new Set(products.map((p) => topLevel(p.category)))];
-  const sections = [...new Set(products.filter((p) => cat_ === 'All' || topLevel(p.category) === cat_).map((p) => p.category))];
+  // Search: every word must appear in the product's name, section or description ("rib eye", "wors", "lamb chops")
+  const words = q.toLowerCase().replace(/[^a-z0-9: ]+/g, ' ').split(' ').filter(Boolean);
+  const matches = (p: CatProduct) => {
+    if (!words.length) return true;
+    const hay = `${p.name} ${p.category} ${p.description ?? ''}`.toLowerCase().replace(/[^a-z0-9: ]+/g, ' ');
+    return words.every((w) => hay.includes(w) || hay.replace(/ /g, '').includes(w));
+  };
+  const visible = products.filter((p) => (words.length || cat_ === 'All' || topLevel(p.category) === cat_) && matches(p));
+  const sections = [...new Set(visible.map((p) => p.category))];
   const total = s.lines.reduce<number | null>((sum, l) => {
     const p = byId.get(l.product_id);
     const v = p ? estimateLinePrice(l.qty, p.price_cents, p.price_unit) : null;
@@ -132,7 +142,7 @@ export default function PublicOrder() {
   const steps = ['Choose', 'Your details', 'Collection or delivery', 'Check & send'];
 
   return (
-    <Shell business={info.business} cartCount={s.lines.length} onCart={() => set({ step: 0 })}>
+    <Shell business={info.business} cartCount={s.lines.length + (s.special?.trim() ? 1 : 0)} onCart={() => setCartOpen(true)}>
       {!online && <div className="mb-4 flex items-center gap-2 rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger-soft-ink"><WifiOff className="size-4" /> You’re offline. Your order is saved on this device — send it when you’re back online.</div>}
       <ol className="mb-6 flex gap-1.5" aria-label="Progress">
         {steps.map((t, i) => (
@@ -147,19 +157,27 @@ export default function PublicOrder() {
         <div className="animate-rise pb-28">
           <h1 className="font-display text-[30px] font-semibold leading-tight">What would you like?</h1>
           <p className="mt-2 max-w-xl text-[15.5px] text-ink-2">{info.form.intro}</p>
-          <div className="-mx-4 mt-5 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-none">
+          <div className="relative mt-5">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4.5 -translate-y-1/2 text-ink-3" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search — e.g. rump, wors, lamb chops" className="h-12 pl-10 pr-10 text-[16px]" aria-label="Search products" />
+            {q && <button type="button" onClick={() => setQ('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-ink-3 hover:bg-sunken" aria-label="Clear search"><X className="size-4" /></button>}
+          </div>
+          {!words.length && <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-none">
             {cats.map((c) => (
               <button key={c} onClick={() => setCat(c)} className={cx('h-10 shrink-0 rounded-full border px-4 text-[14px] font-medium', cat_ === c ? 'border-ink bg-ink text-bg' : 'border-line-strong bg-surface text-ink-2')}>{c}</button>
             ))}
-          </div>
+          </div>}
+          {words.length > 0 && !visible.length && (
+            <p className="mt-6 rounded-2xl bg-surface-2 p-4 text-[14.5px] text-ink-2">Nothing on our price list matches “{q}”. Ask for it under <b>Special requests</b> below and we’ll let you know.</p>
+          )}
           {sections.map((group) => (
             <section key={group} className="mt-7">
-              <h2 className="mb-2.5 flex items-baseline gap-2 font-display text-[19px] font-bold uppercase tracking-[0.02em]">
-                {cat_ === 'All' && subLevel(group) !== group && <span className="text-[12px] font-semibold tracking-[0.12em] text-ink-3">{topLevel(group)}</span>}
+              <h2 className="mb-2.5 flex items-baseline gap-2 font-display text-[20px] font-bold">
+                {subLevel(group) !== group && <span className="text-[15px] font-semibold text-ink-3">{topLevel(group)} ·</span>}
                 {subLevel(group)}
               </h2>
-              <div className="grid gap-3 sm:grid-cols-2">
-            {products.filter((p) => p.category === group).map((p) => {
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {visible.filter((p) => p.category === group).map((p) => {
               const inCart = s.lines.filter((l) => l.product_id === p.id);
               return (
                 <button key={p.id} onClick={() => setAdding({ p })} className={cx('flex items-start gap-3 rounded-2xl border bg-surface p-4 text-left shadow-card transition hover:shadow-float active:scale-[0.99]', inCart.length ? 'border-brand/50' : 'border-line')}>
@@ -180,11 +198,11 @@ export default function PublicOrder() {
               </div>
             </section>
           ))}
-          {cat_ === 'All' && (
-            <section className="mt-9">
-              <h2 className="mb-1 font-display text-[19px] font-bold uppercase tracking-[0.02em]">Special requests</h2>
+          {(cat_ === 'All' || words.length > 0) && (
+            <section className="mt-9" id="special-requests">
+              <h2 className="mb-1 font-display text-[20px] font-bold">Special requests</h2>
               <p className="mb-3 max-w-xl text-[14.5px] text-ink-2">Looking for something that isn’t on our price list, like venison or a specific cut? Tell us what you’d like and roughly how much. We’ll confirm availability and price with you before anything is prepared.</p>
-              <Textarea rows={4} value={s.special ?? ''} onChange={(e) => set({ special: e.target.value })} maxLength={1500} placeholder="e.g. 2kg venison steaks, or a picanha roast of about 1.5kg" aria-label="Special requests" />
+              <Textarea rows={4} className="max-w-2xl" value={s.special ?? ''} onChange={(e) => set({ special: e.target.value })} maxLength={1500} placeholder="e.g. 2kg venison steaks, or a picanha roast of about 1.5kg" aria-label="Special requests" />
             </section>
           )}
         </div>
@@ -252,7 +270,7 @@ export default function PublicOrder() {
           </Card>
           {s.special?.trim() && (
             <Card className="mt-3 p-4 text-[14.5px]">
-              <div className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-3">Special request</div>
+              <div className="text-[13.5px] font-semibold text-ink-3">Special request</div>
               <p className="mt-1 whitespace-pre-line">{s.special.trim()}</p>
               <p className="mt-2 text-[13px] text-ink-3">We’ll confirm availability and price with you.</p>
             </Card>
@@ -265,7 +283,7 @@ export default function PublicOrder() {
           <p className="mt-4 text-[13.5px] text-ink-3">Prices are estimates — meat is priced by final weight. We’ll confirm your order before it’s prepared.</p>
           {terms.length > 0 && (
             <Card className="mt-4 p-4">
-              <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-3">Order terms</h2>
+              <h2 className="text-[13.5px] font-semibold text-ink-3">Order terms</h2>
               <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[14px] text-ink-2">{terms.map((t) => <li key={t}>{t}</li>)}</ul>
               <label className="mt-4 flex items-start gap-3 text-[14.5px]">
                 <input type="checkbox" checked={!!s.accepted} onChange={(e) => set({ accepted: e.target.checked })} className="mt-0.5 size-5 shrink-0 accent-[var(--brand)]" />
@@ -279,7 +297,7 @@ export default function PublicOrder() {
 
       {/* Sticky action bar */}
       <div className="safe-bottom fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-5 py-3 sm:px-8">
+        <div className="mx-auto flex max-w-5xl items-center gap-3 px-5 py-3 sm:px-8">
           {s.step > 0 && <Button size="lg" variant="ghost" icon={<ArrowLeft className="size-4" />} onClick={() => set({ step: (s.step - 1) as State['step'] })}>Back</Button>}
           {s.step === 0 && (
             <div className="min-w-0 flex-1 text-[14px]">
@@ -289,7 +307,11 @@ export default function PublicOrder() {
           )}
           <div className={cx('flex', s.step > 0 && 'flex-1 justify-end')}>
             {s.step < 3 ? (
-              <Button variant="primary" size="lg" disabled={(s.step === 0 && !s.lines.length && !s.special?.trim()) || (s.step === 1 && !detailsOk) || (s.step === 2 && !whenOk)} onClick={() => set({ step: (s.step + 1) as State['step'] })}>Continue</Button>
+              s.step === 0 ? (
+                <Button variant="primary" size="lg" icon={<ShoppingBag className="size-4" />} disabled={!s.lines.length && !s.special?.trim()} onClick={() => setCartOpen(true)}>View order</Button>
+              ) : (
+                <Button variant="primary" size="lg" disabled={(s.step === 1 && !detailsOk) || (s.step === 2 && !whenOk)} onClick={() => set({ step: (s.step + 1) as State['step'] })}>Continue</Button>
+              )
             ) : (
               <Button variant="primary" size="lg" disabled={!online || (terms.length > 0 && !s.accepted)} loading={submit.isPending} onClick={() => { setError(null); submit.mutate(); }}>Send order</Button>
             )}
@@ -300,24 +322,77 @@ export default function PublicOrder() {
       {adding && (
         <AddSheet
           p={adding.p}
-          existing={s.lines.filter((l) => l.product_id === adding.p.id)}
+          line={adding.line}
+          existing={adding.line ? [] : s.lines.filter((l) => l.product_id === adding.p.id)}
           currency={info.currency}
           onClose={() => setAdding(null)}
           onRemove={(key) => set({ lines: s.lines.filter((l) => l.key !== key) })}
-          onAdd={(l) => { set({ lines: [...s.lines, l] }); setAdding(null); }}
+          onAdd={(l) => {
+            // Editing replaces the line in place; adding appends
+            set({ lines: adding.line ? s.lines.map((x) => (x.key === adding.line!.key ? { ...l, key: x.key } : x)) : [...s.lines, l] });
+            setAdding(null);
+          }}
         />
       )}
+
+      <Sheet
+        open={cartOpen && !adding}
+        onClose={() => setCartOpen(false)}
+        title="Your order"
+        subtitle={s.lines.length ? `${s.lines.length} item${s.lines.length === 1 ? '' : 's'}${total != null && total > 0 ? ` · ≈ ${formatMoney(total, info.currency)}` : ''}` : undefined}
+        footer={
+          <div className="flex gap-2">
+            <Button size="lg" variant="ghost" onClick={() => setCartOpen(false)}>Add more</Button>
+            <Button size="lg" variant="primary" full disabled={!s.lines.length && !s.special?.trim()} onClick={() => { setCartOpen(false); set({ step: 1 }); }}>Checkout</Button>
+          </div>
+        }
+      >
+        {!s.lines.length && !s.special?.trim() ? (
+          <p className="py-6 text-center text-ink-2">Nothing in your order yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {s.lines.map((l) => {
+              const p = byId.get(l.product_id);
+              if (!p) return null;
+              const prep = Object.values(l.preparation).filter((v) => !p.options.some((g) => g.options.some((o) => o.name === v && o.is_default)));
+              const est = estimateLinePrice(l.qty, p.price_cents, p.price_unit);
+              return (
+                <div key={l.key} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold">{p.name}</div>
+                    <div className="text-[13.5px] text-ink-2">{[formatQty(l.qty, p.piece_noun), ...prep, l.special_instructions].filter(Boolean).join(' · ')}</div>
+                    {est != null && <div className="text-[13px] text-ink-3">≈ {formatMoney(est, info.currency)}</div>}
+                  </div>
+                  <button type="button" onClick={() => setAdding({ p, line: l })} className="rounded-xl p-2.5 text-ink-2 hover:bg-sunken" aria-label={`Change ${p.name}`}><Pencil className="size-4" /></button>
+                  <button type="button" onClick={() => set({ lines: s.lines.filter((x) => x.key !== l.key) })} className="rounded-xl p-2.5 text-danger hover:bg-danger-soft" aria-label={`Remove ${p.name}`}><Trash2 className="size-4" /></button>
+                </div>
+              );
+            })}
+            {s.special?.trim() && (
+              <div className="flex items-start gap-3 rounded-2xl border border-ochre/40 bg-ochre-soft p-3 text-ochre-soft-ink">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold">Special request</div>
+                  <div className="whitespace-pre-line text-[13.5px]">{s.special.trim()}</div>
+                </div>
+                <button type="button" onClick={() => set({ special: '' })} className="rounded-xl p-2.5 hover:bg-white/40" aria-label="Remove special request"><Trash2 className="size-4" /></button>
+              </div>
+            )}
+            {total != null && total > 0 && <p className="pt-2 text-right text-[15px]">Estimated total <b>{formatMoney(total, info.currency)}</b></p>}
+            <p className="text-[12.5px] text-ink-3">Prices are estimates. Meat is priced by its final weight.</p>
+          </div>
+        )}
+      </Sheet>
     </Shell>
   );
 }
 
-function AddSheet({ p, existing, onAdd, onRemove, onClose, currency }: { p: CatProduct; existing: Line[]; onAdd: (l: Line) => void; onRemove: (key: string) => void; onClose: () => void; currency: string }) {
-  const [qty, setQty] = useState<Qty | null>(null);
-  const [prep, setPrep] = useState<Record<string, string>>(() => Object.fromEntries(p.options.map((g) => [g.group, g.options.find((o) => o.is_default)?.name ?? g.options[0]?.name]).filter(([, v]) => v)));
-  const [note, setNote] = useState('');
+function AddSheet({ p, line, existing, onAdd, onRemove, onClose, currency }: { p: CatProduct; line?: Line; existing: Line[]; onAdd: (l: Line) => void; onRemove: (key: string) => void; onClose: () => void; currency: string }) {
+  const [qty, setQty] = useState<Qty | null>(line?.qty ?? null);
+  const [prep, setPrep] = useState<Record<string, string>>(() => line?.preparation ?? Object.fromEntries(p.options.map((g) => [g.group, g.options.find((o) => o.is_default)?.name ?? g.options[0]?.name]).filter(([, v]) => v)));
+  const [note, setNote] = useState(line?.special_instructions ?? '');
   const price = qty ? estimateLinePrice(qty, p.price_cents, p.price_unit) : null;
   return (
-    <Sheet open onClose={onClose} title={p.name} subtitle={p.description ?? undefined} footer={<Button variant="primary" size="lg" full disabled={!qty || (!!p.pack_size && (qty.count ?? 0) % p.pack_size !== 0)} onClick={() => qty && onAdd({ key: newKey(), product_id: p.id, qty, preparation: prep, special_instructions: note.trim() })} icon={<ShoppingBag className="size-4" />}>Add to order{price != null ? ` · ≈ ${formatMoney(price, currency)}` : ''}</Button>}>
+    <Sheet open onClose={onClose} title={p.name} subtitle={p.description ?? undefined} footer={<Button variant="primary" size="lg" full disabled={!qty || (!!p.pack_size && (qty.count ?? 0) % p.pack_size !== 0)} onClick={() => qty && onAdd({ key: newKey(), product_id: p.id, qty, preparation: prep, special_instructions: note.trim() })} icon={<ShoppingBag className="size-4" />}>{line ? 'Update' : 'Add to order'}{price != null ? ` · ≈ ${formatMoney(price, currency)}` : ''}</Button>}>
       <div className="space-y-6">
         {existing.length > 0 && (
           <div className="space-y-2">
@@ -359,20 +434,20 @@ function Shell({ children, business, cartCount, onCart }: { children: React.Reac
   return (
     <div className="min-h-dvh bg-bg">
       <header className="bg-charcoal text-white">
-        <div className="mx-auto flex h-[72px] max-w-3xl items-center justify-between gap-3 px-5 sm:px-8">
+        <div className="mx-auto flex h-[72px] max-w-5xl items-center justify-between gap-3 px-5 sm:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <Logo withWord={false} tone="light" />
             <div className="min-w-0">
               <div className="truncate font-display text-[19px] font-bold leading-none">{business?.name ?? 'Terram Farm'}</div>
-              <div className="mt-1 text-[11.5px] font-medium uppercase tracking-[0.14em] opacity-80">Order form</div>
+              <div className="mt-1 text-[12.5px] font-medium opacity-80">Order form</div>
             </div>
           </div>
           {!!cartCount && <button onClick={onCart} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-[13px] font-semibold"><ShoppingBag className="size-4" />{cartCount}</button>}
         </div>
       </header>
-      <main className="mx-auto max-w-3xl px-5 py-7 sm:px-8 sm:py-10">{children}</main>
+      <main className="mx-auto max-w-5xl px-5 py-7 sm:px-8 sm:py-10">{children}</main>
       {business?.phone && (
-        <footer className="mx-auto max-w-3xl px-5 pb-32 sm:px-8 text-center text-[13px] text-ink-3">
+        <footer className="mx-auto max-w-5xl px-5 pb-32 sm:px-8 text-center text-[13px] text-ink-3">
           Questions? Call or WhatsApp <a className="font-semibold text-ink-2" href={`tel:${business.phone.replace(/\s/g, '')}`}>{business.phone}</a>
         </footer>
       )}
