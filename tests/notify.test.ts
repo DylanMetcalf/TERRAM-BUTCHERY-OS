@@ -77,4 +77,10 @@ describe('adding a customer who may already exist', () => {
     expect(await look('name=Sara%20Naidoo')).toEqual(['Sarah Naidoo: Similar name']);
     expect(await look('name=Thandi%20Mokoena&phone=0719990000')).toEqual([]);
   });
+
+  it('never shows the recipients on the public order form', async () => {
+    const r = await new Client(buildApp()).get('/api/public/info');
+    expect(JSON.stringify(r.body)).not.toMatch(/meacreo|imagine\.co\.za|notifyEmails/);
+    expect(r.body.form.terms).toBeTruthy();
+  });
 });
