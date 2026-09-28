@@ -102,7 +102,7 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   const customer = match.status === 'matched' ? { id: match.customer.id } : { new: { name: input.customer.name, phone: input.customer.phone, email: input.customer.email || null, address: input.delivery_address ?? null } };
   // Preserve the raw submission as a message, like any other channel
   const messageId = id('ms_');
-  const summary = input.items.map((i) => `${formatQty(i.qty as any)} ${requireProduct(i.product_id).customer_name}${Object.values(i.preparation ?? {}).length ? ` (${Object.values(i.preparation ?? {}).join(', ')})` : ''}${i.special_instructions ? ` — ${i.special_instructions}` : ''}`).join('\n');
+  const summary = input.items.map((i) => `${formatQty(i.qty as any, requireProduct(i.product_id).piece_noun)} ${requireProduct(i.product_id).customer_name}${Object.values(i.preparation ?? {}).length ? ` (${Object.values(i.preparation ?? {}).join(', ')})` : ''}${i.special_instructions ? ` — ${i.special_instructions}` : ''}`).join('\n');
   db()
     .prepare("INSERT INTO messages (id, channel, external_id, direction, sender_name, sender_phone, body, received_at, classification, status, created_at) VALUES (?, 'form', ?, 'in', ?, ?, ?, ?, 'new_order', 'processed', ?)")
     .run(messageId, input.client_ref, input.customer.name, phone, `${summary}${special ? `\nSpecial request: ${special}` : ''}\n${fulfilmentType === 'delivery' ? 'Delivery' : fulfilmentType === 'collection' ? 'Collection' : 'Wanted by'} ${input.requested_date}${!chooses && input.delivery_address ? `\nAddress: ${input.delivery_address}` : ''}${input.notes ? `\nNote: ${input.notes}` : ''}\n\n${JSON.stringify(input)}`, now(), now());

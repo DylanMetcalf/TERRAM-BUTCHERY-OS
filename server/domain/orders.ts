@@ -305,6 +305,25 @@ export function createOrder(input: CreateOrderInput, actor: Actor): OrderSummary
 
 // ── Workflow transitions ────────────────────────────────────
 
+/**
+ * Permanently deletes an order (a mistake, a test, a duplicate). Items, history and questions go
+ * with it; original messages are kept but unlinked. The audit log keeps who deleted it and what it was.
+ */
+export function deleteOrder(orderId: string, actor: Actor): { order_number: number } {
+  const o = requireOrder(orderId);
+  const items = getItems(orderId).map((i) => `${i.qty_label} ${i.product_name}`).join(', ');
+  tx(() => {
+    db().prepare('DELETE FROM exceptions WHERE order_id = ?').run(orderId);
+    db().prepare('DELETE FROM notifications WHERE order_id = ?').run(orderId);
+    db().prepare('UPDATE messages SET order_id = NULL WHERE order_id = ?').run(orderId);
+    db().prepare('UPDATE import_drafts SET order_id = NULL WHERE order_id = ?').run(orderId);
+    db().prepare('DELETE FROM orders WHERE id = ?').run(orderId); // items and events cascade
+    audit(actor, 'order.deleted', 'order', orderId, `Deleted order #${o.order_number} for ${o.customer_name} (${STATUS_LABEL[o.status]})${items ? `: ${items}` : ''}`, { order_number: o.order_number, customer_id: o.customer_id, status: o.status });
+  });
+  publish(['orders', 'exceptions'], { orderId });
+  return { order_number: o.order_number };
+}
+
 export function transition(orderId: string, to: OrderStatus, actor: Actor, role: Role | null, opts: { note?: string; system?: boolean } = {}): OrderSummary {
   const order = requireOrder(orderId);
   const from = order.status;

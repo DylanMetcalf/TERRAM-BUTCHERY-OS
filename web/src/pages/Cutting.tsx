@@ -124,7 +124,7 @@ export default function Cutting() {
         <div className="space-y-7">
           {cats.map((cat) => (
             <section key={cat}>
-              <h2 className="mb-2.5 font-display text-[20px] font-semibold">{cat}</h2>
+              <h2 className="mb-2 font-display text-[17px] font-semibold">{cat}</h2>
               <div className="space-y-2.5">
                 {lines.filter((l) => l.category === cat).map((l) => (
                   <CutRow key={l.key} l={l} canCut={canCut} busy={cut.isPending} onCut={(ids, v, label) => cut.mutate({ ids, cut: v, label })} />
@@ -145,13 +145,13 @@ function CutRow({ l, canCut, onCut, busy }: { l: CutLine; canCut: boolean; onCut
   const today = todayYmd();
   return (
     <Card className={cx('overflow-hidden transition-colors', done && 'bg-field-soft/50 border-field/25')}>
-      <div className="flex items-center gap-3 p-3.5 sm:gap-4 sm:p-4">
+      <div className="flex items-center gap-3 px-3.5 py-3 sm:gap-4 sm:px-4">
         <button onClick={() => setOpen((v) => !v)} className="min-w-0 flex-1 text-left" aria-expanded={open}>
           <div className="flex flex-wrap items-baseline gap-x-2.5">
-            <span className={cx('text-[18px] font-semibold sm:text-[19px]', done && 'text-ink-2')}>{l.product_name}</span>
-            {l.preparation_label && <span className="rounded-md bg-brand-soft px-2 py-0.5 text-[14px] font-semibold text-brand-soft-ink">{l.preparation_label}</span>}
+            <span className={cx('text-[16px] font-semibold sm:text-[16.5px]', done && 'text-ink-2')}>{l.product_name}</span>
+            {l.preparation_label && <span className="rounded-md bg-brand-soft px-2 py-0.5 text-[13px] font-semibold text-brand-soft-ink">{l.preparation_label}</span>}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 text-[13.5px] text-ink-3">
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[13px] text-ink-3">
             <span>{l.orders.length} order{l.orders.length === 1 ? '' : 's'}</span>
             {notes.length > 0 && <span className="font-medium text-ochre">{notes.length} special instruction{notes.length === 1 ? '' : 's'}</span>}
             {l.cut_items > 0 && !done && <span className="text-field">{l.cut_items}/{l.total_items} cut</span>}
@@ -159,18 +159,17 @@ function CutRow({ l, canCut, onCut, busy }: { l: CutLine; canCut: boolean; onCut
           </div>
         </button>
         <div className="shrink-0 text-right">
-          <div className={cx('font-display text-[26px] font-semibold leading-none tabular sm:text-[30px]', done && 'text-field')}>{l.total_label}</div>
+          <div className={cx('font-display text-[21px] font-semibold leading-none tabular sm:text-[23px]', done && 'text-field')}>{l.total_label}</div>
           {l.estimate_label && <div className="mt-1 text-[12.5px] text-ink-3">{l.estimate_label}</div>}
         </div>
         {canCut && (
           <Button
             variant={done ? 'ghost' : 'success'}
-            size="lg"
-            className="w-14 shrink-0 px-0 sm:w-auto sm:px-5"
+            className="w-12 shrink-0 px-0 sm:w-auto sm:px-4"
             disabled={busy}
             onClick={() => onCut(l.orders.filter((o) => o.cut === done).map((o) => o.item_id), !done, `${l.product_name}`)}
             aria-label={done ? `Undo ${l.product_name}` : `Mark ${l.product_name} cut`}
-            icon={done ? <Undo2 className="size-5" /> : <Check className="size-5" strokeWidth={3} />}
+            icon={done ? <Undo2 className="size-4" /> : <Check className="size-4" strokeWidth={3} />}
           >
             <span className="hidden sm:inline">{done ? 'Undo' : 'Done'}</span>
           </Button>
@@ -179,14 +178,14 @@ function CutRow({ l, canCut, onCut, busy }: { l: CutLine; canCut: boolean; onCut
       {(open || notes.length > 0) && (
         <ul className={cx('divide-y divide-line border-t border-line bg-surface-2', !open && 'hidden sm:block')}>
           {(open ? l.orders : notes).map((o) => (
-            <li key={o.item_id} className="flex items-center gap-3 px-4 py-2.5">
+            <li key={o.item_id} className="flex items-center gap-3 px-4 py-2">
               {canCut && open && <BigCheck size="md" checked={o.cut} onChange={(v) => onCut([o.item_id], v)} label={`${o.customer_name} cut`} />}
               <div className="min-w-0 flex-1">
-                <Link to={`/orders/${o.order_id}`} className="text-[14.5px] font-medium hover:underline">{o.customer_name}</Link>
+                <Link to={`/orders/${o.order_id}`} className="text-[14px] font-medium hover:underline">{o.customer_name}</Link>
                 <span className="ml-2 text-[12.5px] text-ink-3">#{o.order_number} · {friendlyDate(o.requested_date, today)}</span>
                 {o.special_instructions && <div className="text-[13.5px] font-medium text-ochre">“{o.special_instructions}”</div>}
               </div>
-              <span className="shrink-0 text-[15px] font-semibold tabular">{o.qty_label}</span>
+              <span className="shrink-0 text-[14px] font-semibold tabular">{o.qty_label}</span>
             </li>
           ))}
         </ul>

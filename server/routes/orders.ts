@@ -24,7 +24,7 @@ import {
   updateItem,
   updateOrder,
   type OrderSummary,
-} from '../domain/orders.js';
+ deleteOrder } from '../domain/orders.js';
 import { findPossibleDuplicates } from '../domain/duplicates.js';
 import { raiseException } from '../domain/exceptions.js';
 import { actorOf, requirePerm, roleOf, type Env } from '../http/context.js';
@@ -180,6 +180,9 @@ r.post('/:id/items', requirePerm('orders.write'), async (c) => {
   const item = addItem(c.req.param('id'), { ...input, preparation: input.preparation ?? {} }, actorOf(c), { reason: 'Added by staff' });
   return c.json({ item });
 });
+
+// Permanent delete — managers and admins only (like cancelling)
+r.delete('/:id', requirePerm('orders.cancel'), (c) => c.json({ ok: true, ...deleteOrder(c.req.param('id'), actorOf(c)) }));
 
 r.post('/:id/notes', requirePerm('orders.write'), async (c) => {
   const { text } = await body(c, z.object({ text: z.string().min(1).max(1000) }));

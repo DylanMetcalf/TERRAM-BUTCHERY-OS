@@ -83,10 +83,10 @@ function PackCard({ o }: { o: PackOrder }) {
   const canPack = can('production.write');
   return (
     <Card className={cx('flex flex-col overflow-hidden transition', all && 'border-field/40')}>
-      <div className="flex items-start justify-between gap-3 border-b border-line p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-5">
         <div className="min-w-0">
-          <Link to={`/orders/${o.id}`} className="font-display text-[24px] font-semibold uppercase leading-tight tracking-tight hover:underline">{o.customer_name}</Link>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 text-[14px] text-ink-2">
+          <Link to={`/orders/${o.id}`} className="font-display text-[19px] font-semibold leading-tight tracking-tight hover:underline">{o.customer_name}</Link>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[13.5px] text-ink-2">
             <span className="tabular">#{o.order_number}</span>
             <span className="inline-flex items-center gap-1">{o.fulfilment_type === 'delivery' ? <Truck className="size-4" /> : <Store className="size-4" />}{o.fulfilment_type === 'delivery' ? 'Delivery' : 'Collection'} · {friendlyDate(o.requested_date, todayYmd())}{o.time_window ? ` · ${o.time_window}` : ''}</span>
           </div>
@@ -95,14 +95,14 @@ function PackCard({ o }: { o: PackOrder }) {
       </div>
       <ul className="flex-1 divide-y divide-line">
         {items.map((i) => (
-          <li key={i.id} className={cx('flex items-center gap-4 px-4 py-3.5 transition-colors sm:px-5', i.packed_at && 'bg-field-soft/40')}>
+          <li key={i.id} className={cx('flex items-center gap-3.5 px-4 py-2.5 transition-colors sm:px-5', i.packed_at && 'bg-field-soft/40')}>
             <BigCheck checked={!!i.packed_at} disabled={!canPack} onChange={(v) => pack.mutate({ id: i.id, packed: v })} label={`${i.qty_label} ${i.product_name}`} />
             <div className="min-w-0 flex-1">
-              <div className={cx('text-[18px] font-semibold leading-snug', i.packed_at && 'text-ink-2')}>
+              <div className={cx('text-[16px] font-semibold leading-snug', i.packed_at && 'text-ink-2')}>
                 <span className="tabular">{qtyBeforeName(i.qty)}</span> {i.product_name}
               </div>
-              {i.preparation_label && <div className="text-[15px] font-semibold text-brand">{i.preparation_label}</div>}
-              {i.special_instructions && <div className="text-[14.5px] font-medium text-ochre">⚑ {i.special_instructions}</div>}
+              {i.preparation_label && <div className="text-[13.5px] font-semibold text-brand">{i.preparation_label}</div>}
+              {i.special_instructions && <div className="text-[13.5px] font-medium text-ochre">⚑ {i.special_instructions}</div>}
               {i.packed_weight_g && <div className="text-[13px] text-ink-3">Weighed {(i.packed_weight_g / 1000).toFixed(2)}kg</div>}
             </div>
             {canPack && (i.qty.kind !== 'count' || i.price_unit === 'kg') && (
@@ -116,7 +116,7 @@ function PackCard({ o }: { o: PackOrder }) {
       {o.notes && <p className="border-t border-line bg-ochre-soft px-5 py-3 text-[14.5px] font-medium text-ochre-soft-ink">Note: {o.notes}</p>}
       {canPack && (
         <div className="border-t border-line p-3 sm:p-4">
-          <Button variant={all ? 'success' : 'secondary'} size="xl" full disabled={!all} loading={done.isPending} onClick={() => done.mutate()} icon={<Check className="size-6" strokeWidth={3} />}>
+          <Button variant={all ? 'success' : 'secondary'} size="lg" full disabled={!all} loading={done.isPending} onClick={() => done.mutate()} icon={<Check className="size-5" strokeWidth={3} />}>
             {all ? 'Packed' : `Tick ${items.length - packedCount} more item${items.length - packedCount === 1 ? '' : 's'}`}
           </Button>
         </div>
