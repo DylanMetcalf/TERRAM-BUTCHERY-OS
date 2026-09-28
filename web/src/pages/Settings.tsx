@@ -8,6 +8,7 @@ import { useCan, useMe } from '../lib/auth';
 import { dateTime, timeAgo } from '../lib/format';
 import { ROLES, ROLE_DESCRIPTION, ROLE_LABEL, type Role } from '../../../shared/permissions';
 import { BrandKit } from '../components/BrandKit';
+import QRCode from 'qrcode';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -148,6 +149,37 @@ function OrdersSettings({ s }: { s: any }) {
   );
 }
 
+/** QR code + share buttons for the customer order form (print it on price lists, post it on WhatsApp). */
+function OrderFormShare({ url }: { url: string }) {
+  const [qr, setQr] = useState('');
+  const toast = useToast();
+  useEffect(() => {
+    QRCode.toDataURL(url, { margin: 2, width: 1024, color: { dark: '#303030', light: '#ffffff' } }).then(setQr).catch(() => setQr(''));
+  }, [url]);
+  const message = `Order from Terram Farm here: ${url}`;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast({ tone: 'success', title: 'Link copied' });
+    } catch {
+      toast({ tone: 'error', title: 'Couldn’t copy — press and hold the link above instead.' });
+    }
+  };
+  return (
+    <div className="flex flex-col items-center gap-4 rounded-2xl border border-line bg-surface-2 p-4 sm:flex-row sm:items-start">
+      {qr ? <img src={qr} alt="QR code for the order form" className="size-36 shrink-0 rounded-xl border border-line bg-white p-1" /> : <div className="size-36 shrink-0 rounded-xl bg-sunken" />}
+      <div className="min-w-0 flex-1 space-y-3 text-center sm:text-left">
+        <p className="text-[14px] text-ink-2">Customers scan this with their phone camera to open the order form. Print it on your price lists or at the farm, or send the link on WhatsApp.</p>
+        <div className="flex flex-wrap justify-center gap-2 sm:justify-start">
+          {qr && <a href={qr} download="terram-order-form-qr.png"><Button size="sm" icon={<Download className="size-4" />}>Download QR code</Button></a>}
+          <Button size="sm" onClick={copy}>Copy link</Button>
+          <a href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer"><Button size="sm">Share on WhatsApp</Button></a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FormSettings({ s, env }: { s: any; env: any }) {
   const [v, setV] = useState(s.customerForm);
   const [emails, setEmails] = useState<string>((s.customerForm.notifyEmails ?? []).join('\n'));
@@ -165,6 +197,7 @@ function FormSettings({ s, env }: { s: any; env: any }) {
       <Callout tone="slate" icon={<Link2 className="size-5" />} action={<a href="/order" target="_blank" rel="noreferrer"><Button size="sm">Open form</Button></a>}>
         Share this link with customers: <b className="break-all">{url}</b>
       </Callout>
+      <OrderFormShare url={url} />
       <Switch checked={v.enabled} onChange={(x) => setV({ ...v, enabled: x })} label="Accept online orders" description="Turn off to pause the form (e.g. over holidays)." />
       <Switch checked={v.showPrices} onChange={(x) => setV({ ...v, showPrices: x })} label="Show prices" description="Shown as estimates — final price depends on weight." />
       <Field label="Welcome text"><Textarea rows={3} value={v.intro} onChange={(e) => setV({ ...v, intro: e.target.value })} /></Field>
