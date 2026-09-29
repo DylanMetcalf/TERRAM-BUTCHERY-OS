@@ -42,6 +42,7 @@ const Products = lazy(() => import('./pages/Products'));
 const Exceptions = lazy(() => import('./pages/Exceptions'));
 const Intelligence = lazy(() => import('./pages/Intelligence'));
 const Reports = lazy(() => import('./pages/Reports'));
+const Stock = lazy(() => import('./pages/Stock'));
 const Settings = lazy(() => import('./pages/Settings'));
 const PrintView = lazy(() => import('./print/Print'));
 const Devices = lazy(() => import('./pages/Devices'));
@@ -135,6 +136,7 @@ function InternalApp() {
                   <Route path="/exceptions" element={<Exceptions />} />
                   <Route path="/intelligence" element={<Intelligence />} />
                   <Route path="/reports" element={<Reports />} />
+                  <Route path="/stock" element={<Stock />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/devices" element={<Devices />} />
                   <Route path="/login" element={<Navigate to="/" replace />} />

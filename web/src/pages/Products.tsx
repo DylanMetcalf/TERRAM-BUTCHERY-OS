@@ -53,7 +53,7 @@ export default function Products() {
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search names and aliases" className="pl-9" aria-label="Search products" />
         </div>
-        <Segmented value={show} onChange={setShow} options={[{ value: 'active', label: 'Available' }, { value: 'inactive', label: 'Unavailable' }, { value: 'all', label: 'All' }]} />
+        <Segmented value={show} onChange={setShow} options={[{ value: 'active', label: 'In stock' }, { value: 'inactive', label: 'Out of stock' }, { value: 'all', label: 'All' }]} />
       </div>
       {error ? (
         <ErrorState error={error} retry={refetch} />
@@ -77,7 +77,7 @@ export default function Products() {
                     <div className="mt-2.5 flex flex-wrap gap-1.5">
                       <Badge size="sm">{p.quantity_type === 'weight' ? 'By weight' : p.quantity_type === 'count' ? `By ${p.piece_noun}` : 'Weight or pieces'}</Badge>
                       {p.allows_portions && <Badge size="sm">Packs</Badge>}
-                      {!p.active && <Badge size="sm" tone="danger">Unavailable</Badge>}
+                      {!p.active && <Badge size="sm" tone="danger">{p.customer_visible ? 'Out of stock' : 'Unavailable'}</Badge>}
                       {!p.customer_visible && <Badge size="sm" tone="slate"><EyeOff className="size-3" />Internal</Badge>}
                       {!!p.orders_90d && <Badge size="sm" tone="field">{p.orders_90d} order{p.orders_90d === 1 ? "" : "s"} · 90d</Badge>}
                     </div>
@@ -253,8 +253,8 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
 
         <section className="space-y-1">
           <SectionTitle>Availability</SectionTitle>
-          <Switch checked={!!v.active} onChange={(x) => set('active', x)} label="Available" description="Unavailable products can’t be added to new orders." />
-          <Switch checked={!!v.customer_visible} onChange={(x) => set('customer_visible', x)} label="Show on the customer order form" />
+          <Switch checked={!!v.active} onChange={(x) => set('active', x)} label="In stock" description="Switch off when you’ve run out. It can’t be added to new orders, and the order form shows it as “Out of stock” instead of hiding it." />
+          <Switch checked={!!v.customer_visible} onChange={(x) => set('customer_visible', x)} label="Show on the customer order form" description="Switch off to hide it from customers completely (e.g. internal or discontinued products)." />
           <Field label="Internal notes" optional className="pt-3"><Textarea rows={2} value={v.internal_notes ?? ''} onChange={(e) => set('internal_notes', e.target.value)} /></Field>
         </section>
         {err && <p className="rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger-soft-ink">{err}</p>}

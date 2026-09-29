@@ -3,7 +3,7 @@
  * devices receive it over Server-Sent Events and refresh what they show.
  * (Single-process deployment. For multiple instances, back this with Redis/Postgres NOTIFY.)
  */
-export type Topic = 'orders' | 'exceptions' | 'customers' | 'products' | 'imports' | 'settings' | 'intelligence';
+export type Topic = 'orders' | 'exceptions' | 'customers' | 'products' | 'imports' | 'settings' | 'intelligence' | 'stock';
 
 export interface ChangeEvent {
   topics: Topic[];

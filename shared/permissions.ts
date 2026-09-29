@@ -25,11 +25,15 @@ export type Permission =
   | 'exceptions.resolve'
   | 'customers.read'
   | 'customers.write'
+  | 'customers.delete'
   | 'products.read'
   | 'products.write'
   | 'intelligence.read'
   | 'intelligence.approve'
   | 'reports.read'
+  | 'stock.read'
+  | 'stock.write'
+  | 'stock.costs'
   | 'payments.write'
   | 'settings.read'
   | 'settings.write'
@@ -47,12 +51,16 @@ const STAFF: Permission[] = [
   'customers.write',
   'products.read',
   'reports.read',
+  'stock.read',
+  'stock.write',
 ];
 
 const MANAGER: Permission[] = [
   ...STAFF,
   'orders.cancel',
   'orders.reopen',
+  'customers.delete',
+  'stock.costs',
   'products.write',
   'intelligence.read',
   'intelligence.approve',
@@ -63,7 +71,7 @@ const MANAGER: Permission[] = [
 
 const ADMIN: Permission[] = [...MANAGER, 'settings.write', 'users.manage', 'data.export'];
 
-const VIEWER: Permission[] = ['orders.read', 'customers.read', 'products.read', 'reports.read', 'intelligence.read'];
+const VIEWER: Permission[] = ['orders.read', 'customers.read', 'products.read', 'reports.read', 'intelligence.read', 'stock.read'];
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   admin: ADMIN,

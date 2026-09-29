@@ -17,6 +17,7 @@ import { exceptions, imports, intelligence, misc } from './routes/intelligence.j
 import admin from './routes/admin.js';
 import publicRoutes from './routes/public.js';
 import integrations from './routes/integrations.js';
+import stock from './routes/stock.js';
 
 export function buildApp(opts: { staticDir?: string | null } = {}) {
   const app = new Hono<Env>();
@@ -53,6 +54,7 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
   api.route('/imports', imports);
   api.route('/exceptions', exceptions);
   api.route('/intelligence', intelligence);
+  api.route('/stock', stock);
   api.route('/admin', admin);
   api.route('/', misc);
 

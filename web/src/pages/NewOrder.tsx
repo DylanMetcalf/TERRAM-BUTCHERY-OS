@@ -124,7 +124,7 @@ export default function NewOrder() {
         subtitle="For phone calls, walk-ins and anything typed by hand."
         actions={(d.items.length > 0 || hasCustomer) && <Button variant="ghost" icon={<X className="size-4" />} onClick={() => { setD(blank()); try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ } }}>Start over</Button>}
       />
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-6">
           {/* Customer */}
           <section>

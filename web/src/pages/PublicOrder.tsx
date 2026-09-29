@@ -16,6 +16,7 @@ interface CatProduct {
   name: string;
   category: string;
   description: string | null;
+  out_of_stock?: boolean;
   quantity_type: QuantityType;
   allows_portions: boolean;
   piece_noun: string;
@@ -82,6 +83,17 @@ export default function PublicOrder() {
   const products = cat?.products ?? [];
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const cats = ['All', ...new Set(products.map((p) => topLevel(p.category)))];
+  // A saved order from an earlier visit may hold something that has since run out: take it out and say so
+  const [removedNote, setRemovedNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!cat) return;
+    const gone = s.lines.filter((l) => { const p = byId.get(l.product_id); return !p || p.out_of_stock; });
+    if (!gone.length) return;
+    const names = [...new Set(gone.map((l) => byId.get(l.product_id)?.name).filter(Boolean))];
+    setS((x) => ({ ...x, lines: x.lines.filter((l) => !gone.some((g) => g.key === l.key)) }));
+    setRemovedNote(`${names.length ? names.join(', ') : 'Something in your saved order'} ${names.length > 1 ? 'are' : 'is'} out of stock at the moment, so we took ${names.length > 1 ? 'them' : 'it'} out of your order.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cat]);
   // Search: every word must appear in the product's name, section or description ("rib eye", "wors", "lamb chops")
   const words = q.toLowerCase().replace(/[^a-z0-9: ]+/g, ' ').split(' ').filter(Boolean);
   const matches = (p: CatProduct) => {
@@ -175,6 +187,12 @@ export default function PublicOrder() {
           <h1 className="font-display text-[30px] font-semibold leading-tight">What would you like?</h1>
           <p className="mt-2 max-w-xl text-[15.5px] text-ink-2">{info.form.intro}</p>
           <ChangeOrderLink phone={info.business.phone} email={info.business.email} className="mt-2 text-[14px] font-medium text-brand underline-offset-2 hover:underline" />
+          {removedNote && (
+            <div className="mt-4 flex items-start gap-3 rounded-xl bg-ochre-soft px-4 py-3 text-[14px] text-ochre-soft-ink" role="status">
+              <span className="min-w-0 flex-1">{removedNote}</span>
+              <button type="button" onClick={() => setRemovedNote(null)} className="shrink-0 rounded-lg p-1 hover:bg-black/5" aria-label="Dismiss"><X className="size-4" /></button>
+            </div>
+          )}
           <div className="relative mt-5">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4.5 -translate-y-1/2 text-ink-3" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search — e.g. rump, wors, lamb chops" className="h-12 pl-10 pr-10 text-[16px]" aria-label="Search products" />
@@ -197,6 +215,18 @@ export default function PublicOrder() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {visible.filter((p) => p.category === group).map((p) => {
               const inCart = s.lines.filter((l) => l.product_id === p.id);
+              if (p.out_of_stock)
+                return (
+                  <div key={p.id} className="flex items-start gap-3 rounded-2xl border border-dashed border-line-strong bg-surface-2 p-4" aria-disabled="true">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[16px] font-semibold text-ink-2">{p.name}</div>
+                      {p.description && <div className="mt-0.5 text-[13.5px] text-ink-3">{p.description}</div>}
+                      {p.price_cents != null && <div className="mt-1.5 text-[13px] text-ink-3">{formatMoney(p.price_cents, info.currency)}/{p.price_unit}</div>}
+                      <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-ochre-soft px-2.5 py-1 text-[12.5px] font-semibold text-ochre-soft-ink">Out of stock</div>
+                      <div className="mt-1.5 text-[13px] text-ink-3">Not available to order right now. Check back soon, or ask us under Special requests.</div>
+                    </div>
+                  </div>
+                );
               return (
                 <button key={p.id} onClick={() => setAdding({ p })} className={cx('flex items-start gap-3 rounded-2xl border bg-surface p-4 text-left shadow-card transition hover:shadow-float active:scale-[0.99]', inCart.length ? 'border-brand/50' : 'border-line')}>
                   <div className="min-w-0 flex-1">

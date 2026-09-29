@@ -59,7 +59,7 @@ export function AddDevice() {
   }, [url]);
   const s = STEPS[kind];
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[260px_1fr]">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
       <Card className="flex flex-col items-center p-5 text-center">
         <div className="size-[220px] overflow-hidden rounded-xl bg-white p-1" aria-label={`QR code for ${url}`} dangerouslySetInnerHTML={{ __html: qr }} />
         <p className="mt-3 text-[13px] text-ink-3">Scan with a phone camera</p>

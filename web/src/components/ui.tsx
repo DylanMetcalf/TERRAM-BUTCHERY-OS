@@ -1,7 +1,9 @@
 import { clsx } from 'clsx';
 import { Check, Loader2, X } from 'lucide-react';
 import {
+  cloneElement,
   createContext,
+  isValidElement,
   forwardRef,
   useCallback,
   useContext,
@@ -152,6 +154,13 @@ export function CountBubble({ n, tone = 'brand' }: { n: number; tone?: 'brand' |
 
 // ── Form fields ────────────────────────────────────────────
 export function Field({ label, hint, error, children, className, htmlFor, optional }: { label?: ReactNode; hint?: ReactNode; error?: ReactNode; children: ReactNode; className?: string; htmlFor?: string; optional?: boolean }) {
+  // Link the label to a lone input, select or textarea, so tapping the label focuses it and screen readers read it
+  const autoId = useId();
+  if (!htmlFor && label && isValidElement(children) && [Input, Select, Textarea, 'input', 'select', 'textarea'].includes(children.type as any)) {
+    const own = (children.props as any).id as string | undefined;
+    htmlFor = own ?? autoId;
+    if (!own) children = cloneElement(children as any, { id: autoId });
+  }
   return (
     <div className={cx('flex flex-col gap-1.5', className)}>
       {label && (

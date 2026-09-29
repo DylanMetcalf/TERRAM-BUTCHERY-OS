@@ -388,4 +388,97 @@ ALTER TABLE orders ADD COLUMN delivery_km REAL;
 ALTER TABLE orders ADD COLUMN delivery_fee_cents INTEGER;
 `,
   },
+  {
+    id: 6,
+    name: 'stock-suppliers-purchases',
+    sql: `
+CREATE TABLE suppliers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  contact_name TEXT,
+  phone TEXT,
+  email TEXT COLLATE NOCASE,
+  supplies TEXT,                  -- what we buy from them, in words
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Anything we keep and count: carcasses/quarters, frozen cuts, spices, casings, packaging
+CREATE TABLE stock_items (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('carcass','cut','ingredient','packaging','other')),
+  unit TEXT NOT NULL CHECK (unit IN ('kg','each','pack')),
+  on_hand REAL NOT NULL DEFAULT 0,
+  reorder_level REAL,
+  avg_weight_kg REAL,             -- for things counted per piece: a typical piece's weight
+  cost_cents INTEGER,             -- latest cost per unit
+  supplier_id TEXT REFERENCES suppliers(id) ON DELETE SET NULL,
+  product_id TEXT REFERENCES products(id) ON DELETE SET NULL,  -- the product this stock is (e.g. frozen rump)
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Every change to what's on hand, with the balance after it
+CREATE TABLE stock_movements (
+  id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('received','used','count','waste','adjust')),
+  qty REAL NOT NULL,
+  balance REAL NOT NULL,
+  note TEXT,
+  purchase_id TEXT,
+  created_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_movements_item ON stock_movements(item_id, created_at);
+
+-- Stock orders and other expenses
+CREATE TABLE purchases (
+  id TEXT PRIMARY KEY,
+  supplier_id TEXT REFERENCES suppliers(id) ON DELETE SET NULL,
+  status TEXT NOT NULL CHECK (status IN ('ordered','received','cancelled')),
+  ordered_on TEXT NOT NULL,
+  received_on TEXT,
+  reference TEXT,
+  notes TEXT,
+  total_cents INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_purchases_date ON purchases(ordered_on);
+
+CREATE TABLE purchase_lines (
+  id TEXT PRIMARY KEY,
+  purchase_id TEXT NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+  item_id TEXT REFERENCES stock_items(id) ON DELETE SET NULL,
+  description TEXT NOT NULL,
+  category TEXT NOT NULL,
+  qty REAL NOT NULL,
+  weight_kg REAL,
+  cost_per TEXT NOT NULL DEFAULT 'unit' CHECK (cost_per IN ('unit','kg')),
+  unit_cost_cents INTEGER NOT NULL,
+  total_cents INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_purchase_lines ON purchase_lines(purchase_id);
+
+-- How a carcass or quarter is usually cut: % of its weight that becomes each product
+CREATE TABLE stock_yields (
+  id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  pct REAL NOT NULL,
+  part TEXT,                      -- cuts from the same part (the rib as rib-eye or tomahawk) share its %
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (item_id, product_id)
+);
+`,
+  },
 ];

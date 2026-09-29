@@ -253,7 +253,7 @@ export default function OrderDetail() {
         </section>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-6">
           {/* Items */}
           <section>

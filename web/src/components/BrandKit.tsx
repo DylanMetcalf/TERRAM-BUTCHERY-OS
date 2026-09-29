@@ -220,7 +220,7 @@ export function BrandKit({ initial }: { initial: BrandValue }) {
 
       <Card className="overflow-hidden">
         <div className="border-b border-line px-5 py-3 text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-3">Preview</div>
-        <div className="grid gap-6 p-5 md:grid-cols-[1fr_auto]">
+        <div className="grid gap-6 p-5 md:grid-cols-[minmax(0,1fr)_auto]">
           <div className="space-y-4">
             <div className="flex items-center gap-3">
               {v.logo ? <img src={v.logo} alt="" className="h-10 w-auto max-w-[160px] object-contain" /> : <Logo />}

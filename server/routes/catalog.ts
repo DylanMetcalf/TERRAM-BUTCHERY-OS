@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { db, json } from '../db/db.js';
 import { formatQty } from '../../shared/quantity.js';
-import { createCustomer, matchCustomer, requireCustomer, updateCustomer, type Customer } from '../domain/customers.js';
+import { createCustomer, deleteCustomer, matchCustomer, requireCustomer, updateCustomer, type Customer } from '../domain/customers.js';
 import { addAlias, createProduct, listProducts, requireProduct, updateProduct } from '../domain/products.js';
 import { getOrderSummary } from '../domain/orders.js';
 import { applyPrices, previewPrices } from '../domain/prices.js';
@@ -94,6 +94,16 @@ customers.get('/:id', requirePerm('customers.read'), (c) => {
 customers.patch('/:id', requirePerm('customers.write'), async (c) => {
   const input = await body(c, CustomerSchema.partial().extend({ archived: z.boolean().optional() }));
   return c.json({ customer: updateCustomer(c.req.param('id'), { ...input, email: input.email === '' ? null : input.email } as any, actorOf(c)) });
+});
+
+customers.delete('/:id', requirePerm('customers.delete'), (c) => c.json({ ok: true, ...deleteCustomer(c.req.param('id'), actorOf(c)) }));
+
+/** Several at once, e.g. clearing out test customers. */
+customers.post('/delete', requirePerm('customers.delete'), async (c) => {
+  const { ids } = await body(c, z.object({ ids: z.array(z.string().min(1).max(64)).min(1).max(200) }));
+  let orders = 0;
+  for (const cid of [...new Set(ids)]) orders += deleteCustomer(cid, actorOf(c)).orders;
+  return c.json({ ok: true, customers: new Set(ids).size, orders });
 });
 
 // ── Products ───────────────────────────────────────────────

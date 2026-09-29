@@ -24,9 +24,15 @@ export default function PrintView() {
   );
 }
 
-function Page({ title, subtitle, children, ready }: { title: string; subtitle?: string; children: ReactNode; ready: boolean }) {
-  const me = useMe();
+/** The farm's logo for paper: the uploaded one if there is one, otherwise Terram's own. */
+function PrintLogo({ className }: { className?: string }) {
   const { data: brand } = useBrand();
+  if (!brand) return null;
+  return <img src={brand.hasLogo ? `/brand/logo?v=${brand.version}` : '/brand/terram-logo.png'} alt="" className={className ?? 'h-12 w-auto max-w-[120px] object-contain'} />;
+}
+
+function Page({ title, subtitle, children, ready, bare, tools }: { title: string; subtitle?: string; children: ReactNode; ready: boolean; bare?: boolean; tools?: ReactNode }) {
+  const me = useMe();
   useEffect(() => {
     document.title = `${title} — ${me.business.name}`;
     if (ready) {
@@ -36,26 +42,29 @@ function Page({ title, subtitle, children, ready }: { title: string; subtitle?: 
   }, [ready, title, me.business.name]);
   return (
     <div className="min-h-dvh bg-white text-black">
-      <style>{`@page { size: A4; margin: 12mm; } @media print { .no-print { display: none !important; } .break { break-after: page; } .avoid { break-inside: avoid; } }`}</style>
-      <div className="no-print sticky top-0 flex items-center justify-between gap-3 border-b border-neutral-200 bg-neutral-50 px-6 py-3 text-[14px]">
+      <style>{`@page { size: A4; margin: 11mm; } html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } @media print { .no-print { display: none !important; } .break { break-after: page; } .avoid { break-inside: avoid; } }`}</style>
+      <div className="no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 bg-neutral-50 px-6 py-3 text-[14px]">
         <span className="text-neutral-600">Print preview</span>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {tools}
           <button onClick={() => window.close()} className="rounded-lg border border-neutral-300 px-3 py-1.5">Close</button>
           <button onClick={() => window.print()} className="rounded-lg bg-black px-4 py-1.5 font-medium text-white">Print</button>
         </div>
       </div>
       <div className="mx-auto max-w-[780px] px-6 py-6 print:max-w-none print:p-0">
-        <header className="mb-5 flex items-end justify-between border-b-2 border-black pb-2">
-          <div className="flex items-end gap-3">
-            {brand?.hasLogo && <img src={`/brand/logo?v=${brand.version}`} alt="" className="h-12 w-auto max-w-[120px] object-contain" />}
-            <div>
-            <div className="text-[11px] font-semibold tracking-[0.04em]">{me.business.name} · Butchery</div>
-            <h1 className="font-display text-[20px] font-bold leading-tight">{title}</h1>
-            {subtitle && <div className="text-[13px]">{subtitle}</div>}
+        {!bare && (
+          <header className="mb-5 flex items-end justify-between border-b-2 border-black pb-2">
+            <div className="flex items-end gap-3">
+              <PrintLogo />
+              <div>
+                <div className="text-[11px] font-semibold tracking-[0.04em]">{me.business.name} · Butchery</div>
+                <h1 className="font-display text-[20px] font-bold leading-tight">{title}</h1>
+                {subtitle && <div className="text-[13px]">{subtitle}</div>}
+              </div>
             </div>
-          </div>
-          <div className="text-right text-[11px]">Printed {dateTime(new Date().toISOString())}<br />by {me.user?.name}</div>
-        </header>
+            <div className="text-right text-[11px]">Printed {dateTime(new Date().toISOString())}<br />by {me.user?.name}</div>
+          </header>
+        )}
         {!ready ? <p>Loading…</p> : children}
       </div>
     </div>
@@ -122,61 +131,179 @@ function CuttingPrint() {
   );
 }
 
-function PackSlip({ o, items, notes }: { o: OrderSummary; items: OrderItem[]; notes?: string | null }) {
+const cell = 'border border-neutral-400 px-2 py-1.5 align-top';
+const head = 'border border-neutral-400 bg-neutral-100 px-2 py-1 text-left text-[9.5px] font-bold uppercase tracking-[0.06em] text-neutral-700';
+
+function Box({ done }: { done?: boolean }) {
+  return <span className={`inline-flex size-[15px] items-center justify-center border-[1.5px] border-black text-[11px] font-bold leading-none ${done ? 'bg-black text-white' : ''}`}>{done ? '✓' : ''}</span>;
+}
+
+function Lines({ n, className }: { n: number; className?: string }) {
+  return <div className={className}>{Array.from({ length: n }).map((_, i) => <div key={i} className="h-[22px] border-b border-neutral-400" />)}</div>;
+}
+
+/**
+ * The order docket: one per order, for the blockman to work from and write on. Logo and order
+ * details up top; a line per item with the customer's instructions, tick boxes for cut and packed,
+ * a space for the actual weight and the blockman's own notes; notes and sign-off at the bottom.
+ */
+function Docket({ o, items, notes, business, onePerPage }: { o: OrderSummary; items: OrderItem[]; notes?: string | null; business?: any; onePerPage?: boolean }) {
   const today = todayYmd();
+  const me = useMe();
+  const how = o.fulfilment_type === 'delivery' ? 'Delivery' : o.fulfilment_type === 'collection' ? 'Collection' : 'Collection or delivery';
+  const address = o.fulfilment_type !== 'collection' ? o.delivery_address : null;
+  const phone = o.contact_phone ?? o.customer_phone;
   return (
-    <div className="avoid mb-4 border-2 border-black p-3">
-      <div className="flex items-start justify-between border-b border-black pb-1.5">
-        <div className="text-[22px] font-bold uppercase leading-tight">{o.customer_name}</div>
-        <div className="text-right text-[12px]"><b className="text-[15px]">#{o.order_number}</b><br />{o.fulfilment_type === 'delivery' ? 'DELIVERY' : 'COLLECTION'} · {friendlyDate(o.requested_date, today)}{o.time_window ? ` · ${o.time_window}` : ''}</div>
-      </div>
-      <table className="mt-1.5 w-full text-[15px]">
-        <tbody>
-          {items.map((i) => (
-            <tr key={i.id} className="border-b border-dotted border-neutral-500 align-top last:border-0">
-              <td className="w-7 py-1.5"><span className="inline-block size-5 border-2 border-black" /></td>
-              <td className="w-24 py-1.5 font-bold">{qtyBeforeName(i.qty)}</td>
-              <td className="py-1.5">
-                <b>{i.product_name}</b>{i.preparation_label ? ` — ${i.preparation_label}` : ''}
-                {i.special_instructions && <div className="text-[13px] font-bold">⚑ {i.special_instructions}</div>}
-              </td>
-              <td className="w-20 py-1.5 text-right text-[11px]">____ kg</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {(o as any).special_request && <div className="mt-1.5 border border-black px-1.5 py-1 text-[12.5px]"><b>Special request:</b> {(o as any).special_request}</div>}
-      {(notes || o.delivery_address) && (
-        <div className="mt-1.5 border-t border-black pt-1 text-[12.5px]">
-          {o.fulfilment_type === 'delivery' && o.delivery_address && <div><b>Address:</b> {o.delivery_address}{o.contact_phone ? ` · ${o.contact_phone}` : ''}</div>}
-          {notes && <div><b>Note:</b> {notes}</div>}
+    <article className={`avoid mb-6 border-2 border-black text-[12px] leading-snug ${onePerPage ? 'break' : ''}`}>
+      {/* Header */}
+      <header className="flex items-stretch justify-between gap-4 border-b-2 border-black">
+        <div className="flex min-w-0 items-center gap-3 px-3 py-2.5">
+          <PrintLogo className="h-11 w-auto max-w-[110px] object-contain" />
+          <div className="min-w-0">
+            <div className="font-display text-[16px] font-bold leading-tight">{business?.name ?? me.business.name}</div>
+            <div className="text-[10.5px] text-neutral-700">{[business?.phone, business?.email].filter(Boolean).join(' · ') || 'Butchery'}</div>
+          </div>
         </div>
-      )}
-      <div className="mt-2 flex justify-between text-[11px]"><span>Packed by: ____________</span><span>Checked: ____</span></div>
-    </div>
+        <div className="flex shrink-0 flex-col items-end justify-center bg-[var(--brand,#446041)] px-4 py-2 text-white">
+          <div className="text-[9.5px] font-bold uppercase tracking-[0.14em] opacity-90">Order docket</div>
+          <div className="font-display text-[26px] font-extrabold leading-none">#{o.order_number}</div>
+        </div>
+      </header>
+
+      {/* Who, how, when */}
+      <div className="grid grid-cols-[1.3fr_1.3fr_1fr_0.9fr] border-b border-black">
+        <div className="border-r border-neutral-400 px-3 py-2">
+          <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-neutral-600">Customer</div>
+          <div className="text-[15px] font-bold leading-tight">{o.customer_name}</div>
+          {phone && <div>{phone}</div>}
+        </div>
+        <div className="border-r border-neutral-400 px-3 py-2">
+          <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-neutral-600">{how}</div>
+          {address ? <div className="whitespace-pre-line">{address}</div> : <div>{o.fulfilment_type === 'collection' ? 'Collecting from the shop' : 'To be arranged'}</div>}
+          {o.delivery_km != null && <div className="text-[11px] text-neutral-700">{o.delivery_km} km</div>}
+        </div>
+        <div className="border-r border-neutral-400 px-3 py-2">
+          <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-neutral-600">Wanted</div>
+          <div className="text-[14px] font-bold leading-tight">{o.requested_date ? longDate(o.requested_date) : 'No date'}</div>
+          <div className="text-[11px]">{o.requested_date ? friendlyDate(o.requested_date, today) : ''}{o.time_window ? ` · ${o.time_window}` : ''}</div>
+        </div>
+        <div className="px-3 py-2">
+          <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-neutral-600">Order</div>
+          <div className="font-semibold">{STATUS_LABEL[o.status]}</div>
+          <div className="text-[11px] text-neutral-700">{SOURCE_LABEL[o.source]} · {dateTime(o.created_at)}</div>
+        </div>
+      </div>
+
+      {/* Items */}
+      <div className="p-2.5">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr>
+              <th className={`${head} w-[34px] text-center`}>Cut</th>
+              <th className={`${head} w-[80px]`}>Qty</th>
+              <th className={head}>Product &amp; preparation</th>
+              <th className={`${head} w-[26%]`}>Customer’s instructions</th>
+              <th className={`${head} w-[62px] text-center`}>Weight kg</th>
+              <th className={`${head} w-[38px] text-center`}>Packed</th>
+              <th className={`${head} w-[22%]`}>Blockman notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((i) => (
+              <tr key={i.id} className="avoid">
+                <td className={`${cell} text-center`}><Box done={!!i.cut_at} /></td>
+                <td className={`${cell} whitespace-nowrap text-[13.5px] font-bold`}>{qtyBeforeName(i.qty)}</td>
+                <td className={cell}>
+                  <div className="text-[13px] font-bold leading-tight">{i.product_name}</div>
+                  {i.preparation_label && <div className="text-[11.5px]">{i.preparation_label}</div>}
+                </td>
+                <td className={`${cell} text-[11.5px]`}>{i.special_instructions ? <b>{i.special_instructions}</b> : <span className="text-neutral-400">—</span>}</td>
+                <td className={`${cell} text-center text-[12px] font-semibold`}>{i.packed_weight_g ? (i.packed_weight_g / 1000).toFixed(2) : ''}</td>
+                <td className={`${cell} text-center`}><Box done={!!i.packed_at} /></td>
+                <td className={cell} />
+              </tr>
+            ))}
+            {items.length === 0 && (
+              <tr><td colSpan={7} className={`${cell} text-neutral-600`}>No items yet{o.special_request ? ' — see the special request below.' : '.'}</td></tr>
+            )}
+            {/* Spare lines for anything added at the counter */}
+            {Array.from({ length: items.length < 6 ? 2 : 1 }).map((_, k) => (
+              <tr key={`spare${k}`}>
+                <td className={`${cell} h-[26px] text-center`}><Box /></td>
+                <td className={cell} /><td className={cell} /><td className={cell} /><td className={cell} />
+                <td className={`${cell} text-center`}><Box /></td>
+                <td className={cell} />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {(o.special_request || notes || o.delivery_notes) && (
+          <div className="mt-2.5 space-y-1.5">
+            {o.special_request && <div className="border-l-4 border-black bg-neutral-100 px-2.5 py-1.5"><b>Special request:</b> {o.special_request}</div>}
+            {notes && <div className="border-l-4 border-black bg-neutral-100 px-2.5 py-1.5"><b>Customer’s note:</b> {notes}</div>}
+            {o.delivery_notes && <div className="border-l-4 border-neutral-500 bg-neutral-100 px-2.5 py-1.5"><b>Delivery note:</b> {o.delivery_notes}</div>}
+          </div>
+        )}
+
+        <div className="mt-3 grid grid-cols-[1fr_210px] gap-4">
+          <div>
+            <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-neutral-600">Notes · extra stock needed</div>
+            <Lines n={3} />
+          </div>
+          <div className="space-y-2.5 text-[11.5px]">
+            <div className="flex items-end justify-between gap-2"><span>Total weight</span><span className="w-24 border-b border-black text-right">kg</span></div>
+            <div className="flex items-end justify-between gap-2"><span>Cut by</span><span className="w-32 border-b border-black" /></div>
+            <div className="flex items-end justify-between gap-2"><span>Packed by</span><span className="w-32 border-b border-black" /></div>
+            <div className="flex items-end justify-between gap-2"><span>Checked</span><span className="w-32 border-b border-black" /></div>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function useBusiness() {
+  return useQuery({ queryKey: ['public-info'], queryFn: () => api.get<any>('/api/public/info'), select: (d) => d.business, staleTime: 5 * 60_000 }).data;
+}
+
+function OnePerPageToggle() {
+  const loc = useLocation();
+  const params = new URLSearchParams(loc.search);
+  const on = params.get('per') === 'page';
+  if (on) params.delete('per');
+  else params.set('per', 'page');
+  return (
+    <a href={`${loc.pathname}?${params}`} className="rounded-lg border border-neutral-300 px-3 py-1.5">
+      {on ? 'Several per page' : 'One per page'}
+    </a>
   );
 }
 
 function PackingPrint() {
+  const loc = useLocation();
+  const onePerPage = new URLSearchParams(loc.search).get('per') === 'page';
+  const business = useBusiness();
   const { data } = useQuery({ queryKey: ['packing', 'print'], queryFn: () => api.get<any>('/api/production/packing') });
   return (
-    <Page title="Packing slips" subtitle={data ? `${data.ready_to_pack.length} orders ready to pack` : ''} ready={!!data}>
+    <Page title="Packing slips" subtitle={data ? `${data.ready_to_pack.length} orders ready to pack` : ''} ready={!!data} bare tools={<OnePerPageToggle />}>
       {data && !data.ready_to_pack.length && <p>Nothing to pack.</p>}
-      {data?.ready_to_pack.map((o: any) => <PackSlip key={o.id} o={o} items={o.items} notes={o.notes} />)}
+      {data?.ready_to_pack.map((o: any) => <Docket key={o.id} o={o} items={o.items} notes={o.notes} business={business} onePerPage={onePerPage} />)}
     </Page>
   );
 }
 
 function DocketsPrint() {
   const loc = useLocation();
-  const date = new URLSearchParams(loc.search).get('date');
+  const params = new URLSearchParams(loc.search);
+  const date = params.get('date');
+  const onePerPage = params.get('per') === 'page';
+  const business = useBusiness();
   const { data } = useQuery({ queryKey: ['dockets', date], queryFn: () => api.get<any>(`/api/production/dockets${qs({ date })}`) });
   return (
-    <Page title="Order dockets" subtitle={data ? `${date ? longDate(date) : 'All open orders'} · ${data.orders.length} orders` : ''} ready={!!data}>
+    <Page title="Order dockets" subtitle={data ? `${date ? longDate(date) : 'All open orders'} · ${data.orders.length} orders` : ''} ready={!!data} bare tools={<OnePerPageToggle />}>
       {data && !data.orders.length && <p>No confirmed orders for this day.</p>}
-      <div className="grid grid-cols-2 gap-x-4 print:grid-cols-2">
-        {data?.orders.map((o: any) => <PackSlip key={o.id} o={o} items={o.items} notes={o.notes} />)}
-      </div>
+      {data?.orders.map((o: any) => <Docket key={o.id} o={o} items={o.items.filter((i: any) => i.status === 'active')} notes={o.notes} business={business} onePerPage={onePerPage} />)}
     </Page>
   );
 }
@@ -211,17 +338,15 @@ function ReadyPrint() {
 
 function OrderPrint() {
   const { id } = useParams();
+  const business = useBusiness();
   const { data } = useQuery({ queryKey: ['order', id, 'print'], queryFn: () => api.get<any>(`/api/orders/${id}`) });
   const o = data?.order as OrderSummary | undefined;
   return (
-    <Page title={o ? `Order #${o.order_number}` : 'Order'} subtitle={o ? `${STATUS_LABEL[o.status]} · ${SOURCE_LABEL[o.source]}` : ''} ready={!!data}>
+    <Page title={o ? `Order #${o.order_number}` : 'Order'} ready={!!data} bare>
       {o && (
         <>
-          <PackSlip o={o} items={data.items.filter((i: any) => i.status === 'active')} notes={o.notes} />
-          <div className="mt-4 grid grid-cols-2 gap-4 text-[13px]">
-            <div><b>Customer</b><br />{data.customer.name}<br />{data.customer.phone ?? ''}<br />{data.customer.email ?? ''}</div>
-            <div><b>Payment</b><br />{o.payment_status}{o.accounting_ref ? ` · ${o.accounting_ref}` : ''}</div>
-          </div>
+          <Docket o={o} items={data.items.filter((i: any) => i.status === 'active')} notes={o.notes} business={business} />
+          <div className="text-right text-[10.5px] text-neutral-600">Printed {dateTime(new Date().toISOString())}</div>
         </>
       )}
     </Page>
