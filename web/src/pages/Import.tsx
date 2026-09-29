@@ -94,7 +94,7 @@ function Paste() {
   return (
     <div className="animate-rise">
       <PageHeader title="Paste orders" subtitle="We’ll separate the orders, match the products and show you what we understood before anything is saved." />
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div>
           <Card className="overflow-hidden">
             <Textarea

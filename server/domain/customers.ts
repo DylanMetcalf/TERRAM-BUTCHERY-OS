@@ -1,8 +1,9 @@
-import { db, id, now } from '../db/db.js';
+import { db, id, now, tx } from '../db/db.js';
 import { fuzzyWordEqual, normalise, normalisePhone } from '../../shared/text.js';
 import { audit, type Actor } from '../services/audit.js';
 import { publish } from '../services/realtime.js';
 import { badRequest, notFound } from '../lib/errors.js';
+import { deleteOrder } from './orders.js';
 
 export interface Customer {
   id: string;
@@ -131,4 +132,36 @@ export function matchCustomer(q: { name?: string | null; phone?: string | null; 
   if (similar.length === 1) return { status: 'probable', via: 'similar_name', customer: similar[0] };
   if (similar.length > 1) return { status: 'ambiguous', candidates: similar };
   return { status: 'new' };
+}
+
+/**
+ * Deletes a customer for good, with their orders and the messages they sent (test data, duplicates,
+ * or a customer asking to be forgotten under POPIA). A record of what was deleted stays in the audit log.
+ */
+export function deleteCustomer(customerId: string, actor: Actor): { name: string; orders: number } {
+  const c = requireCustomer(customerId);
+  const orderIds = (db().prepare('SELECT id FROM orders WHERE customer_id = ?').all(customerId) as { id: string }[]).map((o) => o.id);
+  const msgIds = (
+    db()
+      .prepare(`SELECT id FROM messages WHERE customer_id = ? OR order_id IN (SELECT id FROM orders WHERE customer_id = ?)`)
+      .all(customerId, customerId) as { id: string }[]
+  ).map((m) => m.id);
+  tx(() => {
+    for (const oid of orderIds) deleteOrder(oid, actor);
+    const del = (sql: string) => {
+      const st = db().prepare(sql);
+      for (const m of msgIds) st.run(m);
+    };
+    del('DELETE FROM exceptions WHERE message_id = ?');
+    del('DELETE FROM interpretations WHERE message_id = ?');
+    del('UPDATE order_events SET message_id = NULL WHERE message_id = ?');
+    del('DELETE FROM messages WHERE id = ?');
+    db().prepare('DELETE FROM exceptions WHERE customer_id = ?').run(customerId);
+    db().prepare('DELETE FROM notifications WHERE customer_id = ?').run(customerId);
+    db().prepare('UPDATE conversations SET customer_id = NULL WHERE customer_id = ?').run(customerId);
+    db().prepare('DELETE FROM customers WHERE id = ?').run(customerId);
+    audit(actor, 'customer.deleted', 'customer', customerId, `Deleted customer ${c.name}${orderIds.length ? ` and ${orderIds.length} order${orderIds.length === 1 ? '' : 's'}` : ''}`, { name: c.name, orders: orderIds.length, messages: msgIds.length });
+  });
+  publish(['customers', 'orders', 'exceptions']);
+  return { name: c.name, orders: orderIds.length };
 }

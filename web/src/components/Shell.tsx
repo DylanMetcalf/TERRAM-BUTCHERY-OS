@@ -3,6 +3,7 @@ import {
   AlertCircle,
   BarChart3,
   Beef,
+  Boxes,
   ClipboardList,
   Home,
   LogOut,
@@ -49,6 +50,7 @@ const PRIMARY: NavItem[] = [
 const SECONDARY: NavItem[] = [
   { to: '/customers', label: 'Customers', icon: Users, perm: 'customers.read' },
   { to: '/products', label: 'Products', icon: Beef, perm: 'products.read' },
+  { to: '/stock', label: 'Stock', icon: Boxes, perm: 'stock.read' },
 ];
 const TERTIARY: NavItem[] = [
   { to: '/exceptions', label: 'Needs attention', icon: AlertCircle, badge: 'attention' },
@@ -222,7 +224,7 @@ export function Shell({ children }: { children: ReactNode }) {
             )}
           </div>
           <BottomLink to="/exceptions" icon={AlertCircle} label="Attention" count={counts?.attention} />
-          <button onClick={() => setMoreOpen(true)} className={cx('flex flex-col items-center gap-1 py-1 text-[11px] font-medium', ['/cutting', '/packing', '/fulfilment', '/customers', '/products', '/intelligence', '/reports', '/settings'].some((p) => loc.pathname.startsWith(p)) ? 'text-brand' : 'text-ink-3')}>
+          <button onClick={() => setMoreOpen(true)} className={cx('flex flex-col items-center gap-1 py-1 text-[11px] font-medium', ['/cutting', '/packing', '/fulfilment', '/customers', '/products', '/stock', '/intelligence', '/reports', '/settings'].some((p) => loc.pathname.startsWith(p)) ? 'text-brand' : 'text-ink-3')}>
             <Menu className="size-[22px]" />
             More
           </button>

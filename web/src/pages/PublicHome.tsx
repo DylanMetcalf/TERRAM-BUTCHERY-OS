@@ -12,7 +12,7 @@ import { api } from '../lib/api';
  * "Staff sign in" (/login). Built from live settings and products, so it stays current.
  * This is the page the wider farm website can grow from.
  */
-interface CatProduct { id: string; name: string; category: string; description: string | null }
+interface CatProduct { id: string; name: string; category: string; description: string | null; out_of_stock?: boolean }
 
 const topLevel = (c: string) => c.split(/\s+[–-]\s+/)[0];
 
@@ -30,8 +30,9 @@ export default function PublicHome() {
   }, [name]);
 
   // One card per range (Beef, Lamb, Eggs…) with a few of its products
-  const groups = [...new Set((cat?.products ?? []).map((p) => topLevel(p.category)))].map((g) => {
-    const items = (cat?.products ?? []).filter((p) => topLevel(p.category) === g);
+  const offered = (cat?.products ?? []).filter((p) => !p.out_of_stock);
+  const groups = [...new Set(offered.map((p) => topLevel(p.category)))].map((g) => {
+    const items = offered.filter((p) => topLevel(p.category) === g);
     const text = items.length === 1 && items[0].description ? items[0].description : `${items.slice(0, 4).map((p) => p.name).join(', ')}${items.length > 4 ? ` and ${items.length - 4} more` : ''}.`;
     return { group: g, count: items.length, text };
   });

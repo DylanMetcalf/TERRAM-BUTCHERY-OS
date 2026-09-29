@@ -10,6 +10,7 @@ import { recordSystemEvent } from './services/health.js';
 import { buildApp } from './app.js';
 import { startJobs } from './services/jobs.js';
 import { refreshDefaultWording } from './services/settings.js';
+import { seedStockOnce } from './domain/stock.js';
 
 // Minimal .env loader (no dependency)
 const envFile = path.resolve('.env');
@@ -25,6 +26,7 @@ openDatabase(dbPath);
 seedCatalogue();
 upgradeCatalogue();
 refreshDefaultWording();
+seedStockOnce();
 const admin = ensureInitialAdmin();
 if (admin) console.log(`[terram] Created initial admin ${admin.email}`);
 

@@ -15,13 +15,14 @@ const setState = (s: ConnState) => {
 };
 
 const TOPIC_KEYS: Record<string, string[][]> = {
-  orders: [['orders'], ['order'], ['dashboard'], ['cutting'], ['packing'], ['fulfilment'], ['customer'], ['reports']],
+  orders: [['orders'], ['order'], ['dashboard'], ['cutting'], ['packing'], ['fulfilment'], ['customer'], ['reports'], ['stock', 'plan']],
   exceptions: [['exceptions'], ['dashboard'], ['order'], ['intelligence']],
   customers: [['customers'], ['customer']],
-  products: [['products'], ['catalogue']],
+  products: [['products'], ['catalogue'], ['stock']],
   imports: [['imports'], ['import']],
   settings: [['settings'], ['me']],
   intelligence: [['intelligence']],
+  stock: [['stock']],
 };
 
 export function startRealtime(qc: QueryClient): () => void {

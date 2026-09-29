@@ -40,9 +40,11 @@ r.get('/brand', (c) => {
 r.get('/catalogue', (c) => {
   const show = getSettings().customerForm.showPrices;
   const products = listProducts()
-    .filter((p) => p.active && p.customer_visible)
+    // Products switched off but still "shown on the form" stay listed as out of stock, so customers see them
+    .filter((p) => p.customer_visible)
     .map((p) => ({
       id: p.id,
+      out_of_stock: !p.active,
       name: p.customer_name,
       category: p.category,
       description: p.description,
@@ -89,7 +91,8 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   if (!input.items.length && !special) throw badRequest('Please choose at least one product, or describe what you need under Special requests.');
   for (const it of input.items) {
     const p = requireProduct(it.product_id);
-    if (!p.active || !p.customer_visible) throw badRequest('One of the products is no longer available. Please refresh the page.');
+    if (!p.customer_visible) throw badRequest('One of the products is no longer available. Please refresh the page.');
+    if (!p.active) throw badRequest(`Sorry, ${p.customer_name} is out of stock at the moment. Please remove it from your order.`);
     if (p.pack_size && (it.qty.kind !== 'count' || (it.qty.count ?? 0) % p.pack_size !== 0)) throw badRequest(`${p.customer_name} are sold in lots of ${p.pack_size}. Please choose ${p.pack_size}, ${p.pack_size * 2}, ${p.pack_size * 3}…`);
     for (const [g, v] of Object.entries(it.preparation ?? {})) {
       const opt = p.preparations.find((o) => o.group_name === g && o.name === v);

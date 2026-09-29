@@ -34,6 +34,8 @@ export interface BusinessSettings {
     learningThreshold: number; // corrections before an alias is suggested
   };
   printing: { showPrices: boolean; paper: 'A4' | 'Letter' };
+  /** Stock section housekeeping (starter items are added once). */
+  stock: { seeded: boolean };
   customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean; terms: string; /** Shown when choosing a date. */ noticeNote: string; /** Who gets an email for every online order. */ notifyEmails: string[]; /** Email the customer a copy of their order when they give an address. */ emailCustomer: boolean };
   /** Brand kit: logo (data URL), generated square app icons, and the main brand colour. */
   brand: { logo: string | null; icon192: string | null; icon512: string | null; primary: string; showName: boolean; version: number };
@@ -74,6 +76,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   },
   ai: { enabled: true, model: 'claude-opus-5', effort: 'low', learningThreshold: 2 },
   printing: { showPrices: false, paper: 'A4' },
+  stock: { seeded: false },
   customerForm: {
     enabled: true,
     intro: 'Farm-raised Beef and Lamb. Orders are subject to processing time and stock availability. Your order is confirmed once Terram Farm accepts it.',

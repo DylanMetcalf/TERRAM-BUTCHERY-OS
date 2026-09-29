@@ -32,7 +32,7 @@ export default function Settings() {
   return (
     <div className="animate-rise">
       <PageHeader title="Settings" subtitle={can('settings.write') ? 'Changes apply to everyone and are recorded in the audit log.' : 'Only admins can change settings.'} />
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_1fr]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
         <nav className="-mx-4 flex gap-1 overflow-x-auto px-4 scrollbar-none lg:mx-0 lg:flex-col lg:px-0" aria-label="Settings sections">
           {tabs.map((t) => (
             <button key={t.value} onClick={() => setParams({ tab: t.value })} className={cx('shrink-0 rounded-xl px-3.5 py-2.5 text-left text-[14.5px] font-medium transition', tab === t.value ? 'bg-surface text-ink shadow-card' : 'text-ink-2 hover:bg-surface/60')}>

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronDown, Printer, Scissors, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { StockNeedsCard } from '../components/StockNeeds';
 import { BigCheck, Button, Card, cx, EmptyState, ErrorState, LoadingBlock, PageHeader, Segmented, useToast } from '../components/ui';
 import { api, ApiError, qs } from '../lib/api';
 import { useCan } from '../lib/auth';
@@ -122,6 +123,7 @@ export default function Cutting() {
         </EmptyState>
       ) : (
         <div className="space-y-7">
+          {(range === 'week' || range === 'all') && <StockNeedsCard range={range} />}
           {cats.map((cat) => (
             <section key={cat}>
               <h2 className="mb-2 font-display text-[17px] font-semibold">{cat}</h2>
