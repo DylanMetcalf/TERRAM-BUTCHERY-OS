@@ -11,6 +11,7 @@ import type { OrderSummary } from '../lib/types';
 interface Dash {
   today: string;
   counts: Record<string, number>;
+  queues?: Record<string, number>;
   exceptions: { total: number; blocking: number };
   due_today: OrderSummary[];
   overdue: OrderSummary[];
@@ -103,6 +104,8 @@ export default function Today() {
           </div>
         </Card>
       )}
+
+      {data.queues && <Queues q={data.queues} canPay={can('payments.write')} canHealth={can('system.health')} />}
 
       {/* The flow of the day */}
       <section>
@@ -213,5 +216,34 @@ function Pill({ icon, label }: { icon: React.ReactNode; label: string }) {
       {icon}
       {label}
     </span>
+  );
+}
+
+/** Customer-platform work queues: only shown when something is waiting. */
+function Queues({ q, canPay, canHealth }: { q: Record<string, number>; canPay: boolean; canHealth: boolean }) {
+  const rows = [
+    { n: q.awaiting_confirmation, label: 'Awaiting confirmation', to: '/orders?view=review', show: true },
+    { n: q.proofs_to_verify, label: 'Proofs of payment to check', to: '/orders?view=proofs', show: true, urgent: true },
+    { n: q.awaiting_payment, label: 'Awaiting payment', to: '/orders?view=awaiting_payment', show: true },
+    { n: q.awaiting_customer, label: 'Waiting for the customer to answer', to: '/orders?view=awaiting_customer', show: true },
+    { n: q.invoices_outstanding, label: 'Invoices to prepare', to: '/invoices', show: canPay },
+    { n: q.failed_notifications, label: 'Emails that didn’t send', to: '/settings?tab=messages', show: canHealth, urgent: true },
+  ].filter((r) => r.show && r.n > 0);
+  if (!rows.length) return null;
+  return (
+    <section>
+      <SectionTitle>Waiting on us</SectionTitle>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {rows.map((r) => (
+          <Link key={r.label} to={r.to} className="group">
+            <Card className="flex items-center gap-3 p-3.5 transition group-hover:shadow-float">
+              <span className={cx('flex size-10 shrink-0 items-center justify-center rounded-xl font-display text-[18px] font-semibold tabular', r.urgent ? 'bg-ochre-soft text-ochre-soft-ink' : 'bg-sunken text-ink')}>{r.n}</span>
+              <span className="min-w-0 flex-1 text-[14.5px] font-medium">{r.label}</span>
+              <ArrowRight className="size-4 shrink-0 text-ink-3" />
+            </Card>
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }

@@ -19,8 +19,7 @@ import {
   Sparkles,
   Truck,
   Users,
-  WifiOff,
-} from 'lucide-react';
+  WifiOff, Receipt } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -51,6 +50,7 @@ const SECONDARY: NavItem[] = [
   { to: '/customers', label: 'Customers', icon: Users, perm: 'customers.read' },
   { to: '/products', label: 'Products', icon: Beef, perm: 'products.read' },
   { to: '/stock', label: 'Stock', icon: Boxes, perm: 'stock.read' },
+  { to: '/invoices', label: 'Invoices', icon: Receipt, perm: 'payments.write' },
 ];
 const TERTIARY: NavItem[] = [
   { to: '/exceptions', label: 'Needs attention', icon: AlertCircle, badge: 'attention' },

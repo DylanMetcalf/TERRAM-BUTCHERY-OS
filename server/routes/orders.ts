@@ -63,6 +63,9 @@ r.get('/', requirePerm('orders.read'), (c) => {
   else if (view === 'undated') where.push("o.requested_date IS NULL AND o.status NOT IN ('completed','cancelled')");
   else if (view === 'completed') where.push("o.status = 'completed'");
   else if (view === 'cancelled') where.push("o.status = 'cancelled'");
+  else if (view === 'awaiting_payment') where.push("o.payment_state IN ('requested','pending','partially_paid','failed') AND o.status != 'cancelled'");
+  else if (view === 'proofs') where.push("EXISTS (SELECT 1 FROM payment_proofs p WHERE p.order_id = o.id AND p.status = 'submitted')");
+  else if (view === 'awaiting_customer') where.push("EXISTS (SELECT 1 FROM order_amendments a WHERE a.order_id = o.id AND a.status = 'proposed' AND a.requires_approval = 1)");
   if (q.status && (ORDER_STATUSES as readonly string[]).includes(q.status)) where.push('o.status = ?'), vals.push(q.status);
   const from = ymdParam(q.from);
   const to = ymdParam(q.to);

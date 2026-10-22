@@ -44,6 +44,7 @@ const Intelligence = lazy(() => import('./pages/Intelligence'));
 const Reports = lazy(() => import('./pages/Reports'));
 const Stock = lazy(() => import('./pages/Stock'));
 const Settings = lazy(() => import('./pages/Settings'));
+const Invoices = lazy(() => import('./pages/Invoices'));
 const PrintView = lazy(() => import('./print/Print'));
 const Devices = lazy(() => import('./pages/Devices'));
 const PublicOrder = lazy(() => import('./pages/PublicOrder'));
@@ -153,6 +154,7 @@ function InternalApp() {
                   <Route path="/reports" element={<Reports />} />
                   <Route path="/stock" element={<Stock />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/invoices" element={<Invoices />} />
                   <Route path="/devices" element={<Devices />} />
                   <Route path="/login" element={<Navigate to="/" replace />} />
                   <Route path="*" element={<NotFound />} />

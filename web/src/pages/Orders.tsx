@@ -18,6 +18,9 @@ const VIEWS = [
   { value: 'overdue', label: 'Overdue' },
   { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: 'Cancelled' },
+  { value: 'awaiting_payment', label: 'Awaiting payment' },
+  { value: 'proofs', label: 'Proofs to check' },
+  { value: 'awaiting_customer', label: 'Waiting on customer' },
 ] as const;
 
 const EMPTY: Record<string, { title: string; body: string }> = {
@@ -29,6 +32,9 @@ const EMPTY: Record<string, { title: string; body: string }> = {
   overdue: { title: 'Nothing overdue', body: 'Every order is on time.' },
   completed: { title: 'No completed orders', body: 'Collected and delivered orders will be listed here.' },
   cancelled: { title: 'No cancelled orders', body: 'Good news.' },
+  awaiting_payment: { title: 'Nothing awaiting payment', body: 'Orders with an open payment request show up here.' },
+  proofs: { title: 'No proofs to check', body: 'EFT proofs uploaded by customers show up here until they are verified or rejected.' },
+  awaiting_customer: { title: 'Not waiting on anyone', body: 'Orders with a suggested change the customer hasn’t answered show up here.' },
   undated: { title: 'All orders have dates', body: 'Nothing is missing a collection or delivery date.' },
 };
 
@@ -76,7 +82,7 @@ export default function Orders() {
         }
       />
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
-        <div className="-mx-4 overflow-x-auto px-4 scrollbar-none sm:mx-0 sm:px-0">
+        <div className="-mx-4 min-w-0 overflow-x-auto px-4 scrollbar-none sm:mx-0 sm:px-0">
           <Segmented value={view} onChange={setView} options={VIEWS.map((v) => ({ value: v.value, label: v.label, count: counts[v.value] }))} />
         </div>
         <div className="relative lg:ml-auto lg:w-72">

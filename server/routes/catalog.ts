@@ -116,7 +116,9 @@ const PrepInput = z.object({
   is_default: z.boolean().optional(),
   customer_visible: z.boolean().optional(),
   active: z.boolean().optional(),
+  surcharge_pct: z.number().min(0).max(200).optional(),
 });
+const SaleOptionInput = z.object({ id: z.string().trim().min(1).max(40), label: z.string().trim().min(1).max(40), kind: z.enum(['pack', 'piece']), grams: z.number().int().positive().max(100000).nullable().optional() });
 const ProductInput = z.object({
   canonical_name: z.string().trim().min(1, 'Enter the product name').max(120),
   customer_name: z.string().trim().max(120).nullable().optional(),
@@ -135,6 +137,13 @@ const ProductInput = z.object({
   internal_notes: z.string().max(2000).nullable().optional(),
   aliases: z.array(z.string().max(80)).max(100).optional(),
   preparations: z.array(PrepInput).max(60).optional(),
+  sale_options: z.array(SaleOptionInput).max(12).nullable().optional(),
+  min_qty: z.number().int().positive().max(100000).nullable().optional(),
+  max_qty: z.number().int().positive().max(100000).nullable().optional(),
+  variant_of: z.string().max(64).nullable().optional(),
+  variant_label: z.string().max(60).nullable().optional(),
+  unavailable_reason: z.string().max(200).nullable().optional(),
+  image: z.string().max(400_000).nullable().optional(),
 });
 
 products.get('/', requirePerm('products.read'), (c) => {

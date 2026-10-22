@@ -20,6 +20,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { primaryNextStep, SOURCE_LABEL, STATUS_LABEL, PAYMENT_LABEL, type OrderStatus } from '../../../shared/workflow';
 import { ExceptionCard } from '../components/ExceptionCard';
+import { AmendmentsPanel, ConfirmSheet, CustomerLinkCard, ExpectedRow, InvoicePanel, NotificationList, PaymentPanel, TimeframeSheet, WeightButton } from '../components/OrderPlatform';
 import { ItemEditor, type ItemDraft } from '../components/ItemEditor';
 import { FulfilmentLabel, SourceIcon, StageTrack, StatusPill } from '../components/order-bits';
 import { Badge, Button, Card, cx, ErrorState, Field, Input, KeyValue, LoadingBlock, SectionTitle, Segmented, Sheet, Textarea, useConfirm, useToast } from '../components/ui';
@@ -39,6 +40,13 @@ interface Detail {
   transitions: OrderStatus[];
   customer: { id: string; name: string; phone: string | null; email: string | null; address: string | null; notes: string | null };
   replies: { id: string; body: string; created_at: string }[];
+  money: any;
+  payment: any;
+  amendments: any[];
+  invoice: any;
+  notifications: any[];
+  confirmation_problems: string[];
+  feedback: { rating: number | null; comment: string | null; created_at: string } | null;
 }
 
 const SECONDARY_LABEL: Partial<Record<OrderStatus, string>> = {
@@ -68,6 +76,8 @@ export default function OrderDetail() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [note, setNote] = useState('');
   const [showRaw, setShowRaw] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [timeframe, setTimeframe] = useState(false);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['order', id] });
@@ -137,8 +147,8 @@ export default function OrderDetail() {
   const blocked = openEx.some((e) => e.severity === 'blocking');
   const secondary = data.transitions.filter((t) => t !== next?.to);
   const today = todayYmd();
-  const total = active.reduce<number | null>((sum, i) => {
-    const p = estimateLinePrice(i.qty, i.price_cents, i.price_unit);
+  const total: number | null = data.money?.final_cents != null ? data.money.final_cents - (data.money.delivery_fee_cents ?? 0) : active.reduce<number | null>((sum, i) => {
+    const p = i.final_cents ?? i.est_cents ?? estimateLinePrice(i.qty, i.price_cents, i.price_unit);
     return sum == null || p == null ? null : sum + p;
   }, 0);
 
@@ -163,6 +173,10 @@ export default function OrderDetail() {
 
   const doMove = async (to: OrderStatus) => {
     setMoreOpen(false);
+    if (to === 'confirmed' && !o.confirmed_at) {
+      setConfirming(true);
+      return;
+    }
     if (to === 'cancelled') {
       const ok = await ask({ title: `Cancel order #${o.order_number}?`, body: 'The order will be removed from cutting and packing. It stays in the history and can be reopened by a manager.', confirm: 'Cancel order', tone: 'danger' });
       if (!ok) return;
@@ -231,7 +245,7 @@ export default function OrderDetail() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
             <div className="flex-1"><StageTrack status={o.status} /></div>
             {next && nextAllowed && (
-              <Button variant={o.status === 'ready' || o.status === 'out_for_delivery' ? 'success' : 'primary'} size="lg" loading={move.isPending} disabled={blocked && ['confirmed', 'cutting'].includes(next.to)} onClick={() => (o.status === 'packing' || o.status === 'cut' ? navigate('/packing') : move.mutate({ to: next.to }))} icon={<Check className="size-5" />} className="sm:min-w-52">
+              <Button variant={o.status === 'ready' || o.status === 'out_for_delivery' ? 'success' : 'primary'} size="lg" loading={move.isPending} disabled={blocked && ['confirmed', 'cutting'].includes(next.to)} onClick={() => (o.status === 'packing' || o.status === 'cut' ? navigate('/packing') : next.to === 'confirmed' && !o.confirmed_at ? setConfirming(true) : move.mutate({ to: next.to }))} icon={<Check className="size-5" />} className="sm:min-w-52">
                 {o.status === 'packing' || o.status === 'cut' ? 'Go to packing' : next.label}
               </Button>
             )}
@@ -278,7 +292,12 @@ export default function OrderDetail() {
                   </div>
                   <div className="shrink-0 text-right">
                     <div className="font-display text-[20px] font-semibold tabular">{i.qty_label}</div>
-                    {estimateLinePrice(i.qty, i.price_cents, i.price_unit) != null && <div className="text-[12px] text-ink-3">≈ {formatMoney(estimateLinePrice(i.qty, i.price_cents, i.price_unit))}</div>}
+                    {i.final_cents != null ? (
+                      <div className="text-[12px] font-semibold text-ink-2">{formatMoney(i.final_cents)}</div>
+                    ) : (i.est_cents ?? estimateLinePrice(i.qty, i.price_cents, i.price_unit)) != null ? (
+                      <div className="text-[12px] text-ink-3">{i.pricing === 'exact' ? '' : '≈ '}{formatMoney((i.est_cents ?? estimateLinePrice(i.qty, i.price_cents, i.price_unit))!)}</div>
+                    ) : null}
+                    {canProduce && !['cancelled'].includes(o.status) && <div className="mt-1"><WeightButton item={i} orderId={o.id} /></div>}
                   </div>
                   {canWrite && !['completed', 'cancelled'].includes(o.status) && (
                     <div className="flex shrink-0 flex-col gap-1 sm:flex-row">
@@ -303,7 +322,7 @@ export default function OrderDetail() {
               )}
               {total != null && total > 0 && (
                 <div className="flex items-center justify-between border-t border-line bg-surface-2 px-5 py-3 text-[14px]">
-                  <span className="text-ink-3">Estimated value</span>
+                  <span className="text-ink-3">{data.money?.final_cents != null ? 'Final value' : data.money?.estimate_is_exact ? 'Value' : 'Estimated value'}</span>
                   <span className="font-semibold tabular">{formatMoney(total)}</span>
                 </div>
               )}
@@ -315,6 +334,8 @@ export default function OrderDetail() {
               )}
             </Card>
           </section>
+
+          <AmendmentsPanel order={o} amendments={data.amendments ?? []} items={items} canWrite={canWrite} />
 
           {/* History */}
           <section>
@@ -339,6 +360,13 @@ export default function OrderDetail() {
               )}
             </Card>
           </section>
+
+          <section>
+            <SectionTitle>Emails about this order</SectionTitle>
+            <Card className="overflow-hidden">
+              <NotificationList rows={data.notifications ?? []} canRetry={can('system.health')} compact />
+            </Card>
+          </section>
         </div>
 
         <aside className="space-y-6">
@@ -349,7 +377,8 @@ export default function OrderDetail() {
             <Card className="px-4 py-1.5">
               <dl className="divide-y divide-line">
                 <KeyValue label="Type">{o.fulfilment_type === 'delivery' ? 'Delivery' : o.fulfilment_type === 'collection' ? 'Collection' : <span className="text-ochre">Not set</span>}</KeyValue>
-                <KeyValue label="Date">{o.requested_date ? longDate(o.requested_date) : <span className="text-ochre">Not set</span>}</KeyValue>
+                <KeyValue label={o.confirmed_at ? 'Date' : 'Preferred date'}>{o.requested_date ? longDate(o.requested_date) : <span className={o.confirmed_at ? 'text-ochre' : 'text-ink-3'}>{o.confirmed_at ? 'Not set' : 'No preference'}</span>}</KeyValue>
+                <ExpectedRow order={o} canWrite={canWrite} onChange={() => setTimeframe(true)} />
                 {o.time_window && <KeyValue label="Time">{o.time_window}</KeyValue>}
                 {o.fulfilment_type === 'delivery' && <KeyValue label="Address">{o.delivery_address ?? <span className="text-danger">Missing</span>}</KeyValue>}
                 {!o.fulfilment_type && o.delivery_address && <KeyValue label="Customer’s address">{o.delivery_address}</KeyValue>}
@@ -396,7 +425,9 @@ export default function OrderDetail() {
                   <a href={waLink(o.contact_phone ?? data.customer.phone) ?? '#'} target="_blank" rel="noreferrer" className="flex-1"><Button full size="sm" icon={<MessageCircle className="size-3.5" />}>WhatsApp</Button></a>
                 </div>
               )}
+              {(o.customer_email || data.customer.email) && <p className="mt-2 break-all text-[13.5px] text-ink-2">{o.customer_email || data.customer.email}</p>}
               {data.customer.notes && <p className="mt-3 rounded-xl bg-ochre-soft px-3 py-2 text-[13.5px] text-ochre-soft-ink">{data.customer.notes}</p>}
+              {canWrite && <div className="mt-3 border-t border-line pt-3"><CustomerLinkCard orderId={o.id} /></div>}
             </Card>
           </section>
 
@@ -414,22 +445,22 @@ export default function OrderDetail() {
             </section>
           )}
 
-          {can('payments.write') || o.payment_status !== 'unpaid' ? (
+          <PaymentPanel orderId={o.id} payment={data.payment} canWrite={canWrite} canPay={can('payments.write')} />
+          <InvoicePanel orderId={o.id} invoice={data.invoice} canWrite={canWrite} canPay={can('payments.write')} />
+          {can('payments.write') && (
+            <Card className="p-4">
+              <AccountingRef value={o.accounting_ref} onSave={(v) => patch.mutate({ accounting_ref: v })} />
+            </Card>
+          )}
+          {data.feedback && (
             <section>
-              <SectionTitle>Payment</SectionTitle>
-              <Card className="space-y-3 p-4">
-                {can('payments.write') ? (
-                  <>
-                    <Segmented full size="sm" value={o.payment_status} onChange={(v) => patch.mutate({ payment_status: v })} options={(['unpaid', 'pending', 'paid'] as const).map((v) => ({ value: v, label: PAYMENT_LABEL[v] }))} />
-                    <AccountingRef value={o.accounting_ref} onSave={(v) => patch.mutate({ accounting_ref: v })} />
-                  </>
-                ) : (
-                  <Badge tone={o.payment_status === 'paid' ? 'field' : 'neutral'}>{PAYMENT_LABEL[o.payment_status]}</Badge>
-                )}
-                <p className="text-[12px] text-ink-3">Invoicing stays in your accounting software.</p>
+              <SectionTitle>Customer feedback</SectionTitle>
+              <Card className="p-4 text-[14.5px]">
+                {data.feedback.rating && <div className="font-semibold">{'★'.repeat(data.feedback.rating)}{'☆'.repeat(5 - data.feedback.rating)} <span className="text-ink-3">{data.feedback.rating}/5</span></div>}
+                {data.feedback.comment && <p className="mt-1 whitespace-pre-line text-ink-2">“{data.feedback.comment}”</p>}
               </Card>
             </section>
-          ) : null}
+          )}
 
           {(messages.length > 0 || data.interpretations.length > 0) && (
             <section>
@@ -471,6 +502,8 @@ export default function OrderDetail() {
 
       <ItemEditor open={!!editing} onClose={() => setEditing(null)} initial={editing ? { product_id: editing.product_id, qty: editing.qty, preparation: editing.preparation, special_instructions: editing.special_instructions } : null} saving={saveItem.isPending} onSave={(d) => editing && saveItem.mutate({ itemId: editing.id, d })} title={editing?.product_name} />
       <ItemEditor open={adding} onClose={() => setAdding(false)} saving={saveItem.isPending} onSave={(d) => saveItem.mutate({ d })} title="Add item" />
+      {confirming && <ConfirmSheet order={o} problems={data.confirmation_problems ?? []} open onClose={() => setConfirming(false)} />}
+      {timeframe && <TimeframeSheet order={o} open onClose={() => setTimeframe(false)} />}
       <FulfilmentSheet open={fulfilOpen} onClose={() => setFulfilOpen(false)} order={o} saving={patch.isPending} onSave={(v) => patch.mutate(v)} />
     </div>
   );

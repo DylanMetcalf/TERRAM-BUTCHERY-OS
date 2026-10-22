@@ -94,7 +94,9 @@ export default function Products() {
   );
 }
 
-interface PrepRow { group_name: string; name: string; keywords: string; is_default: boolean; customer_visible: boolean; active: boolean }
+interface PrepRow { group_name: string; name: string; keywords: string; is_default: boolean; customer_visible: boolean; active: boolean; surcharge_pct: number }
+interface OptRow { id: string; label: string; kind: 'pack' | 'piece'; grams: string }
+const slugId = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40)
 
 function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; onClose: () => void; product: Product | null; readOnly: boolean }) {
   const qc = useQueryClient();
@@ -103,6 +105,7 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
   const [aliases, setAliases] = useState<string[]>([]);
   const [aliasInput, setAliasInput] = useState('');
   const [preps, setPreps] = useState<PrepRow[]>([]);
+  const [opts, setOpts] = useState<OptRow[]>([]);
   const { data: allProducts } = useProducts();
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -125,9 +128,15 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
       active: p?.active ?? true,
       customer_visible: p?.customer_visible ?? true,
       internal_notes: p?.internal_notes ?? '',
+      min_qty: p?.min_qty ?? '',
+      max_qty: p?.max_qty ?? '',
+      variant_of: p?.variant_of ?? '',
+      variant_label: p?.variant_label ?? '',
+      unavailable_reason: p?.unavailable_reason ?? '',
     });
+    setOpts((p?.sale_options ?? []).map((o) => ({ id: o.id, label: o.label, kind: o.kind, grams: o.grams ? String(o.grams) : '' })));
     setAliases((p?.aliases ?? []).map((a) => a.alias).filter((a) => a !== normalise(p?.canonical_name ?? '')));
-    setPreps((p?.preparations ?? []).map((o) => ({ group_name: o.group_name, name: o.name, keywords: o.keywords.join(', '), is_default: o.is_default, customer_visible: o.customer_visible, active: o.active })));
+    setPreps((p?.preparations ?? []).map((o) => ({ group_name: o.group_name, name: o.name, keywords: o.keywords.join(', '), is_default: o.is_default, customer_visible: o.customer_visible, active: o.active, surcharge_pct: o.surcharge_pct ?? 0 })));
   }, [open, product]);
   const save = useMutation({
     mutationFn: () => {
@@ -146,6 +155,16 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
         active: v.active,
         customer_visible: v.customer_visible,
         internal_notes: v.internal_notes || null,
+        min_qty: v.min_qty ? Number(v.min_qty) : null,
+        max_qty: v.max_qty ? Number(v.max_qty) : null,
+        variant_of: v.variant_of || null,
+        variant_label: v.variant_label?.trim() || null,
+        unavailable_reason: v.unavailable_reason?.trim() || null,
+        sale_options: opts.filter((o) => o.label.trim()).map((o, i, all) => {
+          let id = o.id || slugId(o.label) || `opt_${i + 1}`;
+          if (all.slice(0, i).some((x) => (x.id || slugId(x.label)) === id)) id = `${id}_${i + 1}`;
+          return { id, label: o.label.trim(), kind: o.kind, grams: o.grams ? Number(o.grams) : null };
+        }),
         aliases,
         preparations: preps.filter((p) => p.group_name.trim() && p.name.trim()).map((p) => ({ ...p, keywords: p.keywords.split(',').map((k) => k.trim()).filter(Boolean) })),
       };
@@ -203,6 +222,38 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
         </section>
 
         <section>
+          <SectionTitle>Sizes customers choose</SectionTitle>
+          <p className="-mt-1 mb-3 text-[13.5px] text-ink-3">Optional. When set, customers must pick one of these, e.g. 500g / 1kg packs for mince, or Whole / Half for fillet. Fixed packs are priced exactly; pieces are priced on their weight once cut.</p>
+          <div className="space-y-2">
+            {opts.map((o, i) => (
+              <div key={i} className="grid grid-cols-[1fr_auto] gap-2 rounded-xl bg-surface-2 p-2 sm:grid-cols-[1.3fr_9rem_7rem_auto]">
+                <Input value={o.label} onChange={(e) => setOpts(opts.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} placeholder="e.g. 1kg pack" className="h-9" aria-label="Size name" />
+                <Select value={o.kind} onChange={(e) => setOpts(opts.map((x, j) => (j === i ? { ...x, kind: e.target.value as any } : x)))} className="h-9" aria-label="Kind"><option value="pack">Fixed pack</option><option value="piece">Piece (weighed)</option></Select>
+                <div className="relative">
+                  <Input inputMode="numeric" value={o.grams} onChange={(e) => setOpts(opts.map((x, j) => (j === i ? { ...x, grams: e.target.value.replace(/\D/g, '') } : x)))} placeholder={o.kind === 'pack' ? 'grams' : 'about g'} className="h-9 pr-6" aria-label="Grams" />
+                  <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[12.5px] text-ink-3">g</span>
+                </div>
+                {!readOnly && <button type="button" onClick={() => setOpts(opts.filter((_, j) => j !== i))} className="rounded-lg p-2 text-ink-3 hover:bg-sunken" aria-label="Remove size"><X className="size-4" /></button>}
+              </div>
+            ))}
+            {!readOnly && <button type="button" onClick={() => setOpts([...opts, { id: '', label: '', kind: 'pack', grams: '' }])} className="text-[13.5px] font-medium text-brand hover:underline">+ Add size</button>}
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field label="Minimum per order" optional><Input inputMode="numeric" value={v.min_qty ?? ''} onChange={(e) => set('min_qty', e.target.value.replace(/\D/g, ''))} /></Field>
+            <Field label="Maximum per order" optional><Input inputMode="numeric" value={v.max_qty ?? ''} onChange={(e) => set('max_qty', e.target.value.replace(/\D/g, ''))} /></Field>
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field label="Show as an option of" optional hint="e.g. Rib-Eye on the bone appears inside the Rib-Eye card.">
+              <Select value={v.variant_of ?? ''} onChange={(e) => set('variant_of', e.target.value)}>
+                <option value="">— its own product —</option>
+                {(allProducts?.products ?? []).filter((x) => x.id !== product?.id && !x.variant_of).map((x) => <option key={x.id} value={x.id}>{x.canonical_name}</option>)}
+              </Select>
+            </Field>
+            <Field label="Option label" optional hint="e.g. On the bone"><Input value={v.variant_label ?? ''} onChange={(e) => set('variant_label', e.target.value)} /></Field>
+          </div>
+        </section>
+
+        <section>
           <SectionTitle>Other names customers use</SectionTitle>
           <p className="-mt-1 mb-3 text-[13.5px] text-ink-3">Messages using these words are matched to this product automatically. Spelling, plurals and capitals don’t matter.</p>
           <div className="flex flex-wrap gap-1.5">
@@ -233,9 +284,13 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
                 </div>
                 <div className="space-y-2">
                   {preps.map((p, i) => p.group_name === g && (
-                    <div key={i} className="grid gap-2 rounded-xl bg-surface-2 p-2 sm:grid-cols-[1fr_1.4fr_auto]">
+                    <div key={i} className="grid gap-2 rounded-xl bg-surface-2 p-2 sm:grid-cols-[1fr_1.4fr_5.5rem_auto]">
                       <Input value={p.name} onChange={(e) => setPreps(preps.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} placeholder="Option" className="h-9" aria-label="Option name" />
                       <Input value={p.keywords} onChange={(e) => setPreps(preps.map((x, j) => (j === i ? { ...x, keywords: e.target.value } : x)))} placeholder="keywords, comma separated" className="h-9" aria-label="Keywords" />
+                      <div className="relative" title="Extra charge on the price per kg, e.g. 25 for dry-aged">
+                        <Input inputMode="numeric" value={p.surcharge_pct || ''} onChange={(e) => setPreps(preps.map((x, j) => (j === i ? { ...x, surcharge_pct: Math.min(200, Number(e.target.value.replace(/\D/g, '')) || 0) } : x)))} placeholder="+0" className="h-9 pr-7" aria-label="Surcharge percent" />
+                        <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[12.5px] text-ink-3">%</span>
+                      </div>
                       <div className="flex items-center gap-1">
                         <button type="button" onClick={() => setPreps(preps.map((x, j) => (x.group_name === g ? { ...x, is_default: j === i } : x)))} className={cx('h-9 rounded-lg px-2.5 text-[12.5px] font-medium', p.is_default ? 'bg-field-soft text-field-soft-ink' : 'text-ink-3 hover:bg-sunken')}>{p.is_default ? 'Default' : 'Make default'}</button>
                         <button type="button" onClick={() => setPreps(preps.map((x, j) => (j === i ? { ...x, customer_visible: !x.customer_visible } : x)))} className={cx('h-9 rounded-lg px-2 text-[12.5px]', p.customer_visible ? 'text-ink-3' : 'bg-slate-soft text-slate-soft-ink')} title="Visible on the customer order form">{p.customer_visible ? 'Public' : 'Internal'}</button>
@@ -243,17 +298,18 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
                       </div>
                     </div>
                   ))}
-                  {!readOnly && <button type="button" onClick={() => setPreps([...preps, { group_name: g, name: '', keywords: '', is_default: false, customer_visible: true, active: true }])} className="text-[13.5px] font-medium text-brand hover:underline">+ Add option</button>}
+                  {!readOnly && <button type="button" onClick={() => setPreps([...preps, { group_name: g, name: '', keywords: '', is_default: false, customer_visible: true, active: true, surcharge_pct: 0 }])} className="text-[13.5px] font-medium text-brand hover:underline">+ Add option</button>}
                 </div>
               </Card>
             ))}
-            {!readOnly && <Button type="button" icon={<Plus className="size-4" />} onClick={() => setPreps([...preps, { group_name: groups.includes('Preparation') ? `Group ${groups.length + 1}` : 'Preparation', name: '', keywords: '', is_default: true, customer_visible: true, active: true }])}>Add option group</Button>}
+            {!readOnly && <Button type="button" icon={<Plus className="size-4" />} onClick={() => setPreps([...preps, { group_name: groups.includes('Preparation') ? `Group ${groups.length + 1}` : 'Preparation', name: '', keywords: '', is_default: true, customer_visible: true, active: true, surcharge_pct: 0 }])}>Add option group</Button>}
           </div>
         </section>
 
         <section className="space-y-1">
           <SectionTitle>Availability</SectionTitle>
           <Switch checked={!!v.active} onChange={(x) => set('active', x)} label="In stock" description="Switch off when you’ve run out. It can’t be added to new orders, and the order form shows it as “Out of stock” instead of hiding it." />
+          {!v.active && <Field label="Message when out of stock" optional className="pb-2"><Input value={v.unavailable_reason ?? ''} onChange={(e) => set('unavailable_reason', e.target.value)} placeholder="e.g. Back in mid-November" /></Field>}
           <Switch checked={!!v.customer_visible} onChange={(x) => set('customer_visible', x)} label="Show on the customer order form" description="Switch off to hide it from customers completely (e.g. internal or discontinued products)." />
           <Field label="Internal notes" optional className="pt-3"><Textarea rows={2} value={v.internal_notes ?? ''} onChange={(e) => set('internal_notes', e.target.value)} /></Field>
         </section>

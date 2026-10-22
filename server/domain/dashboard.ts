@@ -3,6 +3,7 @@ import { addDays, localDate } from '../lib/time.js';
 import { businessTz } from '../services/settings.js';
 import { openExceptionCount } from './exceptions.js';
 import { getOrderSummary } from './orders.js';
+import { notificationProblemCount } from '../services/notify.js';
 
 /** "What needs attention today?" — answered in one query batch. */
 export function dashboard() {
@@ -25,6 +26,15 @@ export function dashboard() {
     completed_today: count("SELECT COUNT(*) n FROM orders WHERE status = 'completed' AND completed_at >= ?", `${today}T00:00:00`),
     received_today: count('SELECT COUNT(*) n FROM orders WHERE created_at >= ?', `${today}T00:00:00`),
     open_total: count(`SELECT COUNT(*) n FROM orders WHERE ${open}`),
+  };
+  /** Work queues for the customer platform: each count links to the list that clears it. */
+  const queues = {
+    awaiting_confirmation: counts.to_review,
+    proofs_to_verify: count("SELECT COUNT(DISTINCT order_id) n FROM payment_proofs WHERE status = 'submitted'"),
+    awaiting_payment: count("SELECT COUNT(*) n FROM orders WHERE payment_state IN ('requested','pending','partially_paid','failed') AND status != 'cancelled'"),
+    awaiting_customer: count("SELECT COUNT(DISTINCT order_id) n FROM order_amendments WHERE status = 'proposed' AND requires_approval = 1"),
+    invoices_outstanding: count("SELECT COUNT(*) n FROM orders WHERE invoice_status IN ('requested','in_progress')"),
+    failed_notifications: notificationProblemCount(),
   };
   const exceptions = openExceptionCount();
   const ids = (sql: string, ...args: unknown[]) => (db().prepare(sql).all(...args) as { id: string }[]).map((r) => getOrderSummary(r.id)!);
@@ -57,5 +67,5 @@ export function dashboard() {
     ...e,
     payload: json(e.payload, {}),
   }));
-  return { today, counts, exceptions, due_today: dueToday, overdue, to_review: toReview, week, undated, activity, top_exceptions: topExceptions };
+  return { today, counts, queues, exceptions, due_today: dueToday, overdue, to_review: toReview, week, undated, activity, top_exceptions: topExceptions };
 }

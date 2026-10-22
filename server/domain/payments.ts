@@ -243,7 +243,7 @@ export function paymentSummary(orderId: string, opts: { forCustomer?: boolean } 
   const m = orderMoney(orderId);
   const req = openRequest(orderId);
   const payments = db().prepare("SELECT id, method, amount_cents, status, receipt_number, provider_ref, note, verified_by_kind, created_at FROM payments WHERE order_id = ? ORDER BY created_at").all(orderId) as any[];
-  const proofs = db().prepare('SELECT p.id, p.amount_claimed_cents, p.note, p.status, p.review_note, p.created_at, f.filename, f.mime, f.size FROM payment_proofs p JOIN files f ON f.id = p.file_id WHERE p.order_id = ? ORDER BY p.created_at').all(orderId) as any[];
+  const proofs = db().prepare('SELECT p.id, p.file_id, p.amount_claimed_cents, p.note, p.status, p.review_note, p.created_at, f.filename, f.mime, f.size FROM payment_proofs p JOIN files f ON f.id = p.file_id WHERE p.order_id = ? ORDER BY p.created_at').all(orderId) as any[];
   const methods = paymentMethods();
   return {
     state: o.payment_state,
@@ -256,7 +256,7 @@ export function paymentSummary(orderId: string, opts: { forCustomer?: boolean } 
     payments: payments
       .filter((p) => !opts.forCustomer || p.status === 'verified')
       .map((p) => ({ ...p, note: opts.forCustomer ? null : p.note, method_label: METHOD_LABEL[p.method as PaymentMethod] })),
-    proofs: proofs.map((p) => ({ ...p, review_note: p.status === 'rejected' || !opts.forCustomer ? p.review_note : null })),
+    proofs: proofs.map((p) => ({ ...p, file_id: opts.forCustomer ? undefined : p.file_id, review_note: p.status === 'rejected' || !opts.forCustomer ? p.review_note : null })),
   };
 }
 

@@ -9,6 +9,7 @@ import { dateTime, timeAgo } from '../lib/format';
 import { ROLES, ROLE_DESCRIPTION, ROLE_LABEL, type Role } from '../../../shared/permissions';
 import { BrandKit } from '../components/BrandKit';
 import QRCode from 'qrcode';
+import { NotificationList } from '../components/OrderPlatform';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -20,6 +21,8 @@ export default function Settings() {
     { value: 'brand', label: 'Branding' },
     { value: 'orders', label: 'Orders & fulfilment' },
     { value: 'form', label: 'Customer form' },
+    { value: 'payments', label: 'Payments & banking' },
+    ...(can('system.health') ? [{ value: 'messages', label: 'Emails & reminders' }] : []),
     { value: 'assistant', label: 'Assistant' },
     ...(can('users.manage') ? [{ value: 'team', label: 'Team' }] : []),
     ...(can('data.export') ? [{ value: 'data', label: 'Data & backup' }] : []),
@@ -47,6 +50,8 @@ export default function Settings() {
               {tab === 'brand' && <BrandKit initial={{ logo: data.settings.brand.logo, icon192: data.settings.brand.icon192, icon512: data.settings.brand.icon512, primary: data.settings.brand.primary, showName: data.settings.brand.showName }} />}
               {tab === 'orders' && <OrdersSettings s={data.settings} />}
               {tab === 'form' && <FormSettings s={data.settings} env={data.environment} />}
+              {tab === 'payments' && <PaymentsSettings s={data.settings} env={data.environment} />}
+              {tab === 'messages' && <MessagesSettings s={data.settings} />}
               {tab === 'assistant' && <Assistant s={data.settings} env={data.environment} />}
               {tab === 'team' && <Team />}
               {tab === 'data' && <DataBackup />}
@@ -98,6 +103,7 @@ function Business({ s }: { s: any }) {
         <Field label="Email"><Input value={v.email} onChange={(e) => setV({ ...v, email: e.target.value })} /></Field>
       </div>
       <Field label="Address"><Textarea rows={2} value={v.address} onChange={(e) => setV({ ...v, address: e.target.value })} /></Field>
+      <Field label="Public web address" hint="Used for every link in customer emails (order pages, payments). Must be the live https address, e.g. https://www.terramfarm.co.za."><Input value={v.siteUrl ?? ''} onChange={(e) => setV({ ...v, siteUrl: e.target.value })} placeholder="https://www.terramfarm.co.za" /></Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Time zone" hint="Decides what “today” and “Saturday” mean."><Input value={v.timezone} onChange={(e) => setV({ ...v, timezone: e.target.value })} /></Field>
         <Field label="Currency"><Select value={v.currency} onChange={(e) => setV({ ...v, currency: e.target.value })}><option value="ZAR">South African Rand (R)</option><option value="GBP">Pound (£)</option><option value="EUR">Euro (€)</option><option value="USD">Dollar ($)</option></Select></Field>
@@ -126,6 +132,7 @@ function OrdersSettings({ s }: { s: any }) {
   return (
     <div className="space-y-6">
       <Panel title="Order rules" footer={<Button variant="primary" loading={saveO.isPending} onClick={() => saveO.mutate(o)}>Save</Button>}>
+        <Field label="Lead time shown to customers" hint="On the order form and in emails."><Textarea rows={2} value={o.leadTimeText ?? ''} onChange={(e) => setO({ ...o, leadTimeText: e.target.value })} /></Field>
         <Switch checked={o.formOrdersRequireReview} onChange={(x) => setO({ ...o, formOrdersRequireReview: x })} label="Online orders need review" description="Customer form orders arrive as “To review” before they are confirmed." />
         <Switch checked={o.autoReadyAfterPacking} onChange={(x) => setO({ ...o, autoReadyAfterPacking: x })} label="Packed means ready" description="Marking an order packed also marks it ready for collection/delivery." />
         <div className="grid gap-4 sm:grid-cols-3">
@@ -536,5 +543,83 @@ function Audit() {
       ))}
       {!data.entries.length && <p className="px-4 py-8 text-center text-ink-3">Nothing recorded yet.</p>}
     </Card>
+  );
+}
+
+/** Banking details for EFT and the online payment switch. Nothing here is invented: blanks stay blank and EFT stays off until complete. */
+function PaymentsSettings({ s, env }: { s: any; env: any }) {
+  const can = useCan();
+  const [v, setV] = useState(s.payments);
+  const save = useSave('payments');
+  const set = (k: string) => (e: any) => setV({ ...v, [k]: e.target.value });
+  const required: [string, string][] = [['accountHolder', 'Account holder'], ['bankName', 'Bank'], ['accountNumber', 'Account number'], ['branchCode', 'Branch code']];
+  const missing = required.filter(([k]) => !String(v[k] ?? '').trim()).map(([, l]) => l);
+  const pf = env.payfast ?? {};
+  return (
+    <div className="space-y-6">
+      <Panel title="How customers pay" footer={<Button variant="primary" loading={save.isPending} onClick={() => save.mutate(v)}>Save</Button>}>
+        <Field label="When is the customer asked to pay?">
+          <Segmented full value={v.trigger} onChange={(x) => setV({ ...v, trigger: x })} options={[{ value: 'ready', label: 'Automatically when ready' }, { value: 'manual', label: 'Only when we send it' }]} />
+        </Field>
+        <p className="-mt-2 text-[13px] text-ink-3">A payment request is only sent once the final amount is known (weighed items packed), there are no unanswered changes, and at least one payment method below is available.</p>
+        <Switch checked={!!v.eftEnabled} onChange={(x) => setV({ ...v, eftEnabled: x })} label="Accept EFT (bank transfer)" description={missing.length ? `Needs: ${missing.join(', ')}.` : 'Customers see the banking details below on their order page and upload proof. Staff verify it against the bank.'} />
+        <Switch checked={!!v.onlineEnabled} onChange={(x) => setV({ ...v, onlineEnabled: x })} disabled={!pf.configured} label="Accept online payment (PayFast)" description={pf.configured ? `PayFast is set up on the server (${pf.mode === 'live' ? 'LIVE' : 'sandbox / test'}${pf.passphrase ? ', with passphrase' : ', no passphrase'}). Paid status comes only from PayFast’s server notice.` : 'Not available yet: the PayFast merchant details must be added to the server environment (PAYFAST_MERCHANT_ID, PAYFAST_MERCHANT_KEY, PAYFAST_PASSPHRASE, PAYFAST_MODE).'} />
+        <Field label="Payment guidance for customers" optional><Textarea rows={2} value={v.guidance ?? ''} onChange={set('guidance')} placeholder="e.g. Please pay before collection." /></Field>
+      </Panel>
+      <Panel title="Banking details for EFT" footer={<Button variant="primary" loading={save.isPending} onClick={() => save.mutate(v)}>Save</Button>}>
+        {!can('settings.write') && <Callout tone="slate">Only an admin can see the full account number or change these details.</Callout>}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Account holder"><Input value={v.accountHolder ?? ''} onChange={set('accountHolder')} autoComplete="off" /></Field>
+          <Field label="Bank"><Input value={v.bankName ?? ''} onChange={set('bankName')} autoComplete="off" /></Field>
+          <Field label="Account type" optional><Input value={v.accountType ?? ''} onChange={set('accountType')} placeholder="e.g. Cheque / Current" autoComplete="off" /></Field>
+          <Field label="Account number"><Input value={v.accountNumber ?? ''} onChange={set('accountNumber')} inputMode="numeric" autoComplete="off" /></Field>
+          <Field label="Branch code"><Input value={v.branchCode ?? ''} onChange={set('branchCode')} inputMode="numeric" autoComplete="off" /></Field>
+          <Field label="SWIFT / BIC" optional hint="Only for payments from abroad."><Input value={v.swift ?? ''} onChange={set('swift')} autoComplete="off" /></Field>
+        </div>
+        <Field label="Payment reference instructions" hint="The order number is always given as the reference."><Input value={v.referenceInstructions ?? ''} onChange={set('referenceInstructions')} placeholder="Use your order number as the payment reference." /></Field>
+        <Field label="Extra EFT instructions" optional><Textarea rows={2} value={v.eftInstructions ?? ''} onChange={set('eftInstructions')} /></Field>
+        <Field label="Payment queries contact" optional><Input value={v.paymentContact ?? ''} onChange={set('paymentContact')} /></Field>
+        <div className="rounded-xl border border-line bg-surface-2 p-4 text-[14px]">
+          <div className="mb-2 text-[12.5px] font-semibold uppercase tracking-wide text-ink-3">What the customer sees</div>
+          {missing.length ? <p className="text-ink-3">Fill in {missing.join(', ')} to preview.</p> : (
+            <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1">
+              {([['Account holder', v.accountHolder], ['Bank', v.bankName], ['Account type', v.accountType], ['Account number', v.accountNumber], ['Branch code', v.branchCode], ['SWIFT', v.swift], ['Reference', 'Order number, e.g. 1042']] as [string, string][]).filter(([, x]) => x).map(([k, x]) => (
+                <div key={k} className="contents"><dt className="text-ink-3">{k}</dt><dd className="break-all font-semibold">{x}</dd></div>
+              ))}
+            </dl>
+          )}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function MessagesSettings({ s }: { s: any }) {
+  const [n, setN] = useState({ ...s.notifications, staffEmails: (s.notifications.staffEmails ?? []).join(', ') });
+  const [r, setR] = useState(s.retention);
+  const saveN = useSave('notifications');
+  const saveR = useSave('retention');
+  const [filter, setFilter] = useState<'problems' | 'all'>('problems');
+  const { data } = useQuery({ queryKey: ['notifications', filter], queryFn: () => api.get<{ notifications: any[]; problems: number }>(`/api/notifications${filter === 'problems' ? '?status=problems' : ''}`) });
+  return (
+    <div className="space-y-6">
+      <Panel title="Staff emails" footer={<Button variant="primary" loading={saveN.isPending} onClick={() => saveN.mutate({ ...n, staffEmails: n.staffEmails.split(/[\s,;]+/).filter(Boolean) })}>Save</Button>}>
+        <Field label="Who gets staff alerts" hint="New orders, proofs of payment, declined changes. Separate addresses with commas. If empty, the order-form notification addresses are used."><Input value={n.staffEmails} onChange={(e) => setN({ ...n, staffEmails: e.target.value })} placeholder="orders@terramfarm.co.za" /></Field>
+        <Switch checked={!!n.notifyPreparation} onChange={(x) => setN({ ...n, notifyPreparation: x })} label="Email customers when preparation starts" />
+        <Switch checked={!!n.invoiceReadyEmail} onChange={(x) => setN({ ...n, invoiceReadyEmail: x })} label="Email customers when their invoice is ready" />
+      </Panel>
+      <Panel title="Reminders & feedback" footer={<Button variant="primary" loading={saveR.isPending} onClick={() => saveR.mutate(r)}>Save</Button>}>
+        <Switch checked={!!r.remindersEnabled} onChange={(x) => setR({ ...r, remindersEnabled: x })} label="Reorder reminders" description="Only for customers who ticked “send me reminders”. One email per completed order, with an unsubscribe link." />
+        {r.remindersEnabled && <Field label="Days after completion"><Input type="number" min={3} max={120} value={r.reminderDays} onChange={(e) => setR({ ...r, reminderDays: Number(e.target.value) })} className="w-28" /></Field>}
+        <Switch checked={!!r.feedbackEnabled} onChange={(x) => setR({ ...r, feedbackEnabled: x })} label="Ask for feedback after completion" description="Optional for the customer, on their order page." />
+      </Panel>
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+          <h2 className="font-display text-xl font-semibold">Message log</h2>
+          <Segmented size="sm" value={filter} onChange={setFilter} options={[{ value: 'problems', label: 'Problems', count: data?.problems }, { value: 'all', label: 'All' }]} />
+        </div>
+        {data ? <NotificationList rows={data.notifications} canRetry /> : <LoadingBlock rows={3} />}
+      </Card>
+    </div>
   );
 }

@@ -105,6 +105,22 @@ describe('product rules and prices', () => {
     expect((await send(form([{ product_id: productId('beef_rump'), qty: kg(1000), preparation: { Packing: 'Individually packed' } }]))).status).toBe(400);
   });
 
+  it('saving a product from the editor keeps its sizes, limits and surcharges', async () => {
+    const manager = await signedIn('manager');
+    const rump = (await manager.get(`/api/products/${productId('beef_rump')}`)).body.product;
+    const preparations = rump.preparations.map((o: any) => ({ group_name: o.group_name, name: o.name, keywords: o.keywords, is_default: o.is_default, customer_visible: o.customer_visible, active: o.active, surcharge_pct: o.surcharge_pct }));
+    expect((await manager.patch(`/api/products/${rump.id}`, { description: 'Edited', preparations })).status).toBe(200);
+    const after = (await manager.get(`/api/products/${rump.id}`)).body.product;
+    expect(after.preparations.find((o: any) => o.name === 'Dry-aged').surcharge_pct).toBe(25);
+    const mince = productId('beef_mince_lean');
+    const r = await manager.patch(`/api/products/${mince}`, { sale_options: [{ id: '500g', label: '500g pack', kind: 'pack', grams: 500 }, { id: '1kg', label: '1kg pack', kind: 'pack', grams: 1000 }, { id: '2kg', label: '2kg pack', kind: 'pack', grams: 2000 }], max_qty: 20 });
+    expect(r.status).toBe(200);
+    expect(r.body.product.sale_options.map((o: any) => o.id)).toEqual(['500g', '1kg', '2kg']);
+    expect(r.body.product.max_qty).toBe(20);
+    expect((await manager.patch(`/api/products/${mince}`, { sale_options: [{ id: 'x', label: 'Pack', kind: 'pack', grams: null }] })).status).toBe(400);
+    expect((await manager.patch(`/api/products/${mince}`, { variant_of: mince })).status).toBe(400);
+  });
+
   it('weighed items are estimated, then priced on their actual weight', async () => {
     expect(priceLine({ qty: kg(2000), unitPriceCents: 13000, priceUnit: 'kg' })).toEqual({ pricing: 'estimate', cents: 26000 });
     const o = createOrder({ customer: { new: { name: 'Weigh Me' } }, source: 'phone', status: 'confirmed', fulfilment_type: 'collection', items: [{ product_id: productId('beef_brisket'), qty: kg(2000) }] }, STAFF);
