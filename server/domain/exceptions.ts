@@ -22,7 +22,9 @@ export type ExceptionType =
   | 'amendment_no_order'
   | 'ai_failure'
   | 'import_failure'
-  | 'integration_failure';
+  | 'integration_failure'
+  | 'payment_issue'
+  | 'amendment_declined';
 
 export type Severity = 'blocking' | 'warning' | 'info';
 

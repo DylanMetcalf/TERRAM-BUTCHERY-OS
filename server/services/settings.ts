@@ -1,9 +1,16 @@
 import { db, json, now } from '../db/db.js';
 
 export interface BusinessSettings {
-  business: { name: string; tagline: string; phone: string; email: string; address: string; timezone: string; currency: string };
+  business: {
+    name: string; tagline: string; phone: string; email: string; address: string; timezone: string; currency: string;
+    /** Public address of the site, used for every link in customer emails (never localhost). */
+    siteUrl: string;
+  };
   orders: {
+    /** Kept for older installs; online orders always wait for a person to confirm them. */
     formOrdersRequireReview: boolean;
+    /** General guidance shown before checkout, on the order page and in emails. Counts from confirmation. */
+    leadTimeText: string;
     autoReadyAfterPacking: boolean;
     leadTimeDays: number;
     duplicateWindowHours: number;
@@ -34,6 +41,27 @@ export interface BusinessSettings {
     learningThreshold: number; // corrections before an alias is suggested
   };
   printing: { showPrices: boolean; paper: 'A4' | 'Letter' };
+  /** How customers pay. Banking details are only shown to a customer on an order that has been asked to pay. */
+  payments: {
+    /** 'ready': ask for payment automatically when an order is marked ready; 'manual': staff send the request. */
+    trigger: 'ready' | 'manual';
+    eftEnabled: boolean;
+    onlineEnabled: boolean;
+    accountHolder: string;
+    bankName: string;
+    accountType: string;
+    accountNumber: string;
+    branchCode: string;
+    swift: string;
+    referenceInstructions: string;
+    eftInstructions: string;
+    paymentContact: string;
+    guidance: string;
+  };
+  /** Reorder reminders and feedback after an order is completed. */
+  retention: { remindersEnabled: boolean; reminderDays: number; feedbackEnabled: boolean; feedbackEmail: boolean };
+  /** Who is told what (customer emails are always the essential ones; these are optional extras). */
+  notifications: { staffEmails: string[]; notifyPreparation: boolean; invoiceReadyEmail: boolean };
   /** Stock section housekeeping (starter items are added once). */
   stock: { seeded: boolean };
   customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean; terms: string; /** Shown when choosing a date. */ noticeNote: string; /** Who gets an email for every online order. */ notifyEmails: string[]; /** Email the customer a copy of their order when they give an address. */ emailCustomer: boolean };
@@ -53,9 +81,11 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     address: '',
     timezone: 'Africa/Johannesburg',
     currency: 'ZAR',
+    siteUrl: 'https://www.terramfarm.co.za',
   },
   orders: {
     formOrdersRequireReview: true,
+    leadTimeText: 'Orders generally require 1–2 weeks from confirmation, depending on stock availability.',
     autoReadyAfterPacking: true,
     leadTimeDays: 1,
     duplicateWindowHours: 72,
@@ -76,6 +106,23 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   },
   ai: { enabled: true, model: 'claude-opus-5', effort: 'low', learningThreshold: 2 },
   printing: { showPrices: false, paper: 'A4' },
+  payments: {
+    trigger: 'ready',
+    eftEnabled: false,
+    onlineEnabled: false,
+    accountHolder: '',
+    bankName: '',
+    accountType: '',
+    accountNumber: '',
+    branchCode: '',
+    swift: '',
+    referenceInstructions: 'Please use your order number as the payment reference.',
+    eftInstructions: 'Pay by EFT into the account below, then upload your proof of payment on this page. Your order shows as paid once we have checked that the money is in our account.',
+    paymentContact: '',
+    guidance: 'We’ll ask for payment once your order is packed and we know the final amount.',
+  },
+  retention: { remindersEnabled: true, reminderDays: 14, feedbackEnabled: true, feedbackEmail: false },
+  notifications: { staffEmails: [], notifyPreparation: false, invoiceReadyEmail: true },
   stock: { seeded: false },
   customerForm: {
     enabled: true,

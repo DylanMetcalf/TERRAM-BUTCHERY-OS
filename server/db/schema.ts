@@ -481,4 +481,196 @@ CREATE TABLE stock_yields (
 );
 `,
   },
+  {
+    id: 7,
+    name: 'customer-platform',
+    sql: `
+-- Catalogue ordering rules (see shared/pricing.ts)
+ALTER TABLE products ADD COLUMN sale_options TEXT;      -- JSON: [{id,label,kind:'pack'|'piece',grams}] customers must choose from
+ALTER TABLE products ADD COLUMN min_qty INTEGER;        -- per order line, in packs/pieces (or grams for loose weight)
+ALTER TABLE products ADD COLUMN max_qty INTEGER;
+ALTER TABLE products ADD COLUMN variant_of TEXT REFERENCES products(id);  -- shown on the form as an option of this product
+ALTER TABLE products ADD COLUMN variant_label TEXT;     -- e.g. "On the bone"
+ALTER TABLE products ADD COLUMN unavailable_reason TEXT;
+ALTER TABLE products ADD COLUMN image TEXT;             -- small data URL
+ALTER TABLE product_preparations ADD COLUMN surcharge_pct REAL NOT NULL DEFAULT 0;
+
+-- Price snapshot on every line: what the customer was quoted, never rewritten by catalogue changes
+ALTER TABLE order_items ADD COLUMN sale_option TEXT;          -- label of the pack/piece option chosen
+ALTER TABLE order_items ADD COLUMN sale_option_kind TEXT;     -- 'pack' (fixed weight) | 'piece' (weighed)
+ALTER TABLE order_items ADD COLUMN product_name_snap TEXT;
+ALTER TABLE order_items ADD COLUMN unit_price_cents INTEGER;  -- per price_unit_snap, surcharge included
+ALTER TABLE order_items ADD COLUMN price_unit_snap TEXT;
+ALTER TABLE order_items ADD COLUMN surcharge_pct REAL;
+ALTER TABLE order_items ADD COLUMN pricing TEXT;              -- 'exact' | 'estimate' | 'by_weight' | 'unpriced'
+ALTER TABLE order_items ADD COLUMN est_cents INTEGER;
+ALTER TABLE order_items ADD COLUMN final_cents INTEGER;
+
+-- Orders: confirmation, timeframe, totals, payment and invoice state
+ALTER TABLE orders ADD COLUMN access_version INTEGER NOT NULL DEFAULT 1;  -- bump to revoke the customer's order link
+ALTER TABLE orders ADD COLUMN customer_email TEXT COLLATE NOCASE;
+ALTER TABLE orders ADD COLUMN confirmed_by TEXT REFERENCES users(id);
+ALTER TABLE orders ADD COLUMN expected_from TEXT;
+ALTER TABLE orders ADD COLUMN expected_to TEXT;
+ALTER TABLE orders ADD COLUMN estimated_total_cents INTEGER;
+ALTER TABLE orders ADD COLUMN confirmed_total_cents INTEGER;
+ALTER TABLE orders ADD COLUMN final_total_cents INTEGER;
+ALTER TABLE orders ADD COLUMN amount_paid_cents INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN payment_state TEXT NOT NULL DEFAULT 'not_requested';
+ALTER TABLE orders ADD COLUMN payment_choice TEXT;
+ALTER TABLE orders ADD COLUMN invoice_status TEXT NOT NULL DEFAULT 'not_requested';
+ALTER TABLE orders ADD COLUMN invoice_details TEXT;
+ALTER TABLE orders ADD COLUMN invoice_requested_at TEXT;
+ALTER TABLE orders ADD COLUMN invoice_ref TEXT;
+ALTER TABLE orders ADD COLUMN invoice_issued_on TEXT;
+ALTER TABLE orders ADD COLUMN invoice_sent_at TEXT;
+ALTER TABLE orders ADD COLUMN invoice_file_id TEXT;
+ALTER TABLE orders ADD COLUMN invoice_assignee TEXT REFERENCES users(id);
+UPDATE orders SET payment_state = CASE payment_status WHEN 'paid' THEN 'paid' WHEN 'pending' THEN 'requested' ELSE 'not_requested' END;
+CREATE INDEX idx_orders_email ON orders(customer_email);
+CREATE INDEX idx_orders_payment_state ON orders(payment_state);
+CREATE INDEX idx_orders_invoice ON orders(invoice_status);
+
+-- Customer communication preferences
+ALTER TABLE customers ADD COLUMN marketing_consent INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE customers ADD COLUMN marketing_consent_at TEXT;
+CREATE INDEX idx_customers_email ON customers(email);
+
+-- Passwordless customer sign-in: a code sent to the email address proves it's theirs
+CREATE TABLE customer_codes (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL COLLATE NOCASE,
+  code_hash TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_customer_codes_email ON customer_codes(email, created_at);
+CREATE TABLE customer_sessions (
+  id TEXT PRIMARY KEY,             -- sha256 of the cookie token
+  email TEXT NOT NULL COLLATE NOCASE,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+
+-- Notifications: the outbox. One row per message; event_key stops duplicates
+ALTER TABLE notifications ADD COLUMN event_key TEXT;
+ALTER TABLE notifications ADD COLUMN category TEXT NOT NULL DEFAULT 'transactional';  -- transactional | marketing | internal
+ALTER TABLE notifications ADD COLUMN recipient TEXT;
+ALTER TABLE notifications ADD COLUMN subject TEXT;
+ALTER TABLE notifications ADD COLUMN html TEXT;
+ALTER TABLE notifications ADD COLUMN reply_to TEXT;
+ALTER TABLE notifications ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE notifications ADD COLUMN next_attempt_at TEXT;
+ALTER TABLE notifications ADD COLUMN provider_id TEXT;
+ALTER TABLE notifications ADD COLUMN updated_at TEXT;
+CREATE UNIQUE INDEX idx_notifications_key ON notifications(event_key) WHERE event_key IS NOT NULL;
+CREATE INDEX idx_notifications_order ON notifications(order_id);
+
+-- Staff-proposed changes the customer may need to approve
+CREATE TABLE order_amendments (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  item_id TEXT REFERENCES order_items(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('change_qty','remove_item','replace_product','timeframe','other')),
+  reason TEXT NOT NULL,
+  proposal TEXT NOT NULL DEFAULT '{}',
+  summary TEXT NOT NULL,
+  price_impact_cents INTEGER,
+  requires_approval INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL CHECK (status IN ('proposed','accepted','declined','applied','withdrawn')),
+  created_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  responded_at TEXT,
+  response_note TEXT,
+  applied_at TEXT
+);
+CREATE INDEX idx_amendments_order ON order_amendments(order_id, status);
+
+-- Files kept privately in the database (proof of payment, invoices). Never served publicly
+CREATE TABLE files (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('proof','invoice')),
+  order_id TEXT REFERENCES orders(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  data BLOB NOT NULL,
+  uploaded_by_kind TEXT NOT NULL,
+  uploaded_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_files_order ON files(order_id);
+
+-- Payments: what was asked for, what was received and verified
+CREATE TABLE payment_requests (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  status TEXT NOT NULL CHECK (status IN ('open','paid','superseded','cancelled')),
+  created_by_kind TEXT NOT NULL,
+  created_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  closed_at TEXT,
+  closed_reason TEXT
+);
+CREATE INDEX idx_payment_requests_order ON payment_requests(order_id, status);
+CREATE TABLE payments (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  request_id TEXT REFERENCES payment_requests(id),
+  method TEXT NOT NULL CHECK (method IN ('online','eft','cash','card','other')),
+  amount_cents INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('verified','failed','reversed')),
+  provider TEXT,
+  provider_ref TEXT,
+  receipt_number INTEGER UNIQUE,
+  verified_by TEXT REFERENCES users(id),
+  verified_by_kind TEXT NOT NULL,
+  proof_id TEXT,
+  note TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_payments_provider_ref ON payments(provider, provider_ref) WHERE provider_ref IS NOT NULL;
+CREATE INDEX idx_payments_order ON payments(order_id);
+CREATE TABLE payment_proofs (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  amount_claimed_cents INTEGER,
+  note TEXT,
+  status TEXT NOT NULL CHECK (status IN ('submitted','accepted','rejected')),
+  reviewed_by TEXT REFERENCES users(id),
+  reviewed_at TEXT,
+  review_note TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_proofs_order ON payment_proofs(order_id, status);
+-- Every message a payment provider sends us, verified or not (for idempotency and audit)
+CREATE TABLE provider_events (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  dedupe_key TEXT NOT NULL,
+  order_id TEXT,
+  outcome TEXT NOT NULL,
+  detail TEXT,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_provider_events ON provider_events(provider, dedupe_key);
+
+-- Optional feedback after an order is completed
+CREATE TABLE order_feedback (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
+  rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+  comment TEXT,
+  created_at TEXT NOT NULL
+);
+
+INSERT INTO counters(name, value) VALUES ('receipt_number', 0);
+`,
+  },
 ];

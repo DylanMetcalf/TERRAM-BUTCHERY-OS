@@ -1,6 +1,6 @@
 import { db, id, now } from '../db/db.js';
 
-export type Component = 'import' | 'interpreter' | 'ai' | 'database' | 'webhook.whatsapp' | 'webhook.email' | 'auth' | 'notifications' | 'integrity' | 'server';
+export type Component = 'import' | 'interpreter' | 'ai' | 'database' | 'webhook.whatsapp' | 'webhook.email' | 'auth' | 'notifications' | 'integrity' | 'server' | 'payments';
 
 export function recordSystemEvent(level: 'info' | 'warning' | 'error', component: Component, message: string, detail?: unknown) {
   try {

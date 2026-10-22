@@ -22,10 +22,20 @@ import { localDate, addDays } from '../lib/time.js';
 import { businessTz } from '../services/settings.js';
 import { emailConfigured, emailFrom, emailSetup, explainEmailError, sendEmail } from '../services/email.js';
 import { rateLimit } from '../http/security.js';
+import { can } from '../../shared/permissions.js';
+import { roleOf } from '../http/context.js';
+import { eftMissing, maskAccount, payfastStatus } from '../services/payment-config.js';
 
 const r = new Hono<Env>();
 
 // ── Settings ────────────────────────────────────────────────
+/** Managers see that banking details exist; only admins (who can change them) see the full account number. */
+function viewSettings(c: any) {
+  const s = getSettings();
+  if (can(roleOf(c), 'settings.write')) return s;
+  return { ...s, payments: { ...s.payments, accountNumber: maskAccount(s.payments.accountNumber) } };
+}
+
 const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
   business: z.object({
     name: z.string().trim().min(1).max(120),
@@ -42,8 +52,16 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
       }
     }, 'Unknown timezone'),
     currency: z.string().length(3),
+    siteUrl: z
+      .string()
+      .trim()
+      .max(200)
+      .regex(/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}(\/[^\s]*)?$/i, 'Enter the full web address, starting with https://')
+      .refine((u) => !/localhost|127\.0\.0\.1|\.local\b/i.test(u), 'Use the public web address, not a local one.')
+      .transform((u) => u.replace(/\/+$/, '')),
   }).partial(),
   orders: z.object({
+    leadTimeText: z.string().trim().min(1).max(300),
     formOrdersRequireReview: z.boolean(),
     autoReadyAfterPacking: z.boolean(),
     leadTimeDays: z.number().int().min(0).max(30),
@@ -71,6 +89,25 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
   }).partial(),
   printing: z.object({ showPrices: z.boolean(), paper: z.enum(['A4', 'Letter']) }).partial(),
   stock: z.object({ seeded: z.boolean() }).partial(),
+  payments: z
+    .object({
+      trigger: z.enum(['ready', 'manual']),
+      eftEnabled: z.boolean(),
+      onlineEnabled: z.boolean(),
+      accountHolder: z.string().trim().max(120),
+      bankName: z.string().trim().max(80),
+      accountType: z.string().trim().max(60),
+      accountNumber: z.string().trim().max(30).regex(/^[0-9 ]*$/, 'The account number can only contain numbers.'),
+      branchCode: z.string().trim().max(20).regex(/^[0-9 ]*$/, 'The branch code can only contain numbers.'),
+      swift: z.string().trim().max(11).regex(/^([A-Za-z0-9]{8}|[A-Za-z0-9]{11})?$/, 'A SWIFT/BIC code is 8 or 11 letters and numbers.'),
+      referenceInstructions: z.string().trim().max(300),
+      eftInstructions: z.string().trim().max(1000),
+      paymentContact: z.string().trim().max(200),
+      guidance: z.string().trim().max(500),
+    })
+    .partial(),
+  retention: z.object({ remindersEnabled: z.boolean(), reminderDays: z.number().int().min(3).max(120), feedbackEnabled: z.boolean(), feedbackEmail: z.boolean() }).partial(),
+  notifications: z.object({ staffEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), notifyPreparation: z.boolean(), invoiceReadyEmail: z.boolean() }).partial(),
   customerForm: z.object({ enabled: z.boolean(), intro: z.string().max(600), confirmationMessage: z.string().max(600), showPrices: z.boolean(), terms: z.string().max(3000), noticeNote: z.string().max(400), notifyEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), emailCustomer: z.boolean() }).partial(),
   brand: z
     .object({
@@ -85,7 +122,7 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
 };
 
 r.get('/settings', requirePerm('settings.read'), (c) =>
-  c.json({ settings: getSettings(), environment: { ai_key: !!process.env.ANTHROPIC_API_KEY, whatsapp: !!process.env.WHATSAPP_VERIFY_TOKEN, whatsapp_secret: !!process.env.WHATSAPP_APP_SECRET, email_inbound: !!process.env.EMAIL_INBOUND_TOKEN, email_outbound: emailConfigured(), email_from: emailConfigured() ? emailFrom() : null, email_server: emailConfigured() ? `${emailSetup().host}:${emailSetup().port} as ${emailSetup().user}` : null } }),
+  c.json({ settings: viewSettings(c), environment: { payfast: payfastStatus(), app_url_env: !!process.env.APP_URL, ai_key: !!process.env.ANTHROPIC_API_KEY, whatsapp: !!process.env.WHATSAPP_VERIFY_TOKEN, whatsapp_secret: !!process.env.WHATSAPP_APP_SECRET, email_inbound: !!process.env.EMAIL_INBOUND_TOKEN, email_outbound: emailConfigured(), email_from: emailConfigured() ? emailFrom() : null, email_server: emailConfigured() ? `${emailSetup().host}:${emailSetup().port} as ${emailSetup().user}` : null } }),
 );
 
 r.put('/settings/:section', requirePerm('settings.write'), async (c) => {
@@ -94,10 +131,18 @@ r.put('/settings/:section', requirePerm('settings.write'), async (c) => {
   if (!schema) throw badRequest('Unknown settings section.');
   const value = await body(c, schema);
   const before = getSettings()[section];
+  if (section === 'payments') {
+    const next = { ...getSettings().payments, ...(value as object) } as BusinessSettings['payments'];
+    const missing = eftMissing(next);
+    if (next.eftEnabled && missing.length) throw badRequest(`To switch on EFT, fill in: ${missing.join(', ')}.`);
+    if (next.onlineEnabled && !payfastStatus().configured) throw badRequest('Online payment can’t be switched on until the PayFast details are added on the server (see the setup guide).');
+  }
   const settings = updateSettings(section, value, c.get('user')!.id);
-  audit(actorOf(c), 'settings.updated', 'settings', section, `Updated ${section} settings`, { before, after: settings[section] });
+  // Banking details never go into the audit log in full
+  const safe = (v: any) => (section === 'payments' && v ? { ...v, accountNumber: maskAccount(v.accountNumber) } : v);
+  audit(actorOf(c), 'settings.updated', 'settings', section, `Updated ${section} settings`, { before: safe(before), after: safe(settings[section]) });
   publish(['settings']);
-  return c.json({ settings });
+  return c.json({ settings: viewSettings(c) });
 });
 
 r.post('/test-email', requirePerm('settings.write'), rateLimit('test-email', 5, 10 * 60_000), async (c) => {

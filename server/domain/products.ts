@@ -1,10 +1,11 @@
 import { db, id, json, now, tx } from '../db/db.js';
 import { normalise } from '../../shared/text.js';
-import { CATALOGUE, type SeedProduct } from '../seed/catalogue.js';
+import { CATALOGUE, DRY_AGED_SURCHARGE_PCT, ORDERING_RULES, type SeedProduct } from '../seed/catalogue.js';
 import { audit, SYSTEM, type Actor } from '../services/audit.js';
 import { publish } from '../services/realtime.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import type { QuantityType } from '../../shared/quantity.js';
+import { parseSaleOptions, type SaleOption } from '../../shared/pricing.js';
 
 export interface Preparation {
   id: string;
@@ -16,6 +17,8 @@ export interface Preparation {
   customer_visible: boolean;
   active: boolean;
   sort_order: number;
+  /** Extra charge for this option, e.g. 25 for dry-aged (+25%). */
+  surcharge_pct: number;
 }
 
 export interface Product {
@@ -38,6 +41,16 @@ export interface Product {
   customer_visible: boolean;
   internal_notes: string | null;
   sort_order: number;
+  /** Fixed packs or whole/half pieces customers must choose from (empty = order by weight or count). */
+  sale_options: SaleOption[];
+  min_qty: number | null;
+  max_qty: number | null;
+  /** Shown on the order form as an option of another product (e.g. Rib-Eye "On the bone"). */
+  variant_of: string | null;
+  variant_label: string | null;
+  /** Why it can't be ordered right now, shown to customers when out of stock. */
+  unavailable_reason: string | null;
+  image: string | null;
   aliases: { id: string; alias: string; source: string }[];
   preparations: Preparation[];
 }
@@ -67,6 +80,13 @@ function rowToProduct(r: any, aliases: any[], preps: any[]): Product {
     customer_visible: !!r.customer_visible,
     internal_notes: r.internal_notes,
     sort_order: r.sort_order,
+    sale_options: parseSaleOptions(r.sale_options),
+    min_qty: r.min_qty ?? null,
+    max_qty: r.max_qty ?? null,
+    variant_of: r.variant_of ?? null,
+    variant_label: r.variant_label ?? null,
+    unavailable_reason: r.unavailable_reason ?? null,
+    image: r.image ?? null,
     aliases: aliases.map((a) => ({ id: a.id, alias: a.alias, source: a.source })),
     preparations: preps.map((p) => ({
       id: p.id,
@@ -78,6 +98,7 @@ function rowToProduct(r: any, aliases: any[], preps: any[]): Product {
       customer_visible: !!p.customer_visible,
       active: !!p.active,
       sort_order: p.sort_order,
+      surcharge_pct: Number(p.surcharge_pct ?? 0),
     })),
   };
 }
@@ -181,8 +202,15 @@ export interface ProductInput {
   active?: boolean;
   customer_visible?: boolean;
   internal_notes?: string | null;
+  sale_options?: SaleOption[] | null;
+  min_qty?: number | null;
+  max_qty?: number | null;
+  variant_of?: string | null;
+  variant_label?: string | null;
+  unavailable_reason?: string | null;
+  image?: string | null;
   aliases?: string[];
-  preparations?: Array<{ group_name: string; name: string; keywords?: string[]; is_default?: boolean; customer_visible?: boolean; active?: boolean }>;
+  preparations?: Array<{ group_name: string; name: string; keywords?: string[]; is_default?: boolean; customer_visible?: boolean; active?: boolean; surcharge_pct?: number }>;
 }
 
 function slugify(s: string) {
@@ -199,7 +227,7 @@ function assertAliasesFree(aliases: string[], productId: string | null) {
 function writePreparations(productId: string, preps: NonNullable<ProductInput['preparations']>) {
   const seenDefault = new Set<string>();
   db().prepare('DELETE FROM product_preparations WHERE product_id = ?').run(productId);
-  const ins = db().prepare('INSERT INTO product_preparations (id, product_id, group_name, name, keywords, is_default, customer_visible, active, sort_order) VALUES (?,?,?,?,?,?,?,?,?)');
+  const ins = db().prepare('INSERT INTO product_preparations (id, product_id, group_name, name, keywords, is_default, customer_visible, active, sort_order, surcharge_pct) VALUES (?,?,?,?,?,?,?,?,?,?)');
   preps.forEach((p, i) => {
     const group = p.group_name.trim();
     const name = p.name.trim();
@@ -208,8 +236,47 @@ function writePreparations(productId: string, preps: NonNullable<ProductInput['p
     if (isDefault && seenDefault.has(group)) isDefault = false;
     if (isDefault) seenDefault.add(group);
     const kws = [...new Set((p.keywords ?? []).map((k) => normalise(k)).filter(Boolean))];
-    ins.run(id('pp_'), productId, group, name, JSON.stringify(kws), isDefault ? 1 : 0, p.customer_visible === false ? 0 : 1, p.active === false ? 0 : 1, i);
+    const surcharge = Number(p.surcharge_pct ?? 0);
+    if (!Number.isFinite(surcharge) || surcharge < 0 || surcharge > 200) throw badRequest(`The surcharge for "${name}" must be between 0% and 200%.`);
+    ins.run(id('pp_'), productId, group, name, JSON.stringify(kws), isDefault ? 1 : 0, p.customer_visible === false ? 0 : 1, p.active === false ? 0 : 1, i, surcharge);
   });
+}
+
+/** Ordering rules: pack/piece options, quantity limits, variant grouping. Checked so customers can't be offered nonsense. */
+function writeRules(productId: string, input: Partial<ProductInput>) {
+  const f: Record<string, unknown> = {};
+  if ('sale_options' in input) {
+    const opts = parseSaleOptions(input.sale_options ?? []);
+    if ((input.sale_options ?? []).length !== opts.length) throw badRequest('Each pack option needs a name, and fixed packs need a weight in grams.');
+    f.sale_options = opts.length ? JSON.stringify(opts) : null;
+  }
+  for (const k of ['min_qty', 'max_qty'] as const) {
+    if (!(k in input)) continue;
+    const v = input[k];
+    if (v != null && (!Number.isInteger(v) || v < 1 || v > 100000)) throw badRequest('Quantity limits must be whole numbers.');
+    f[k] = v ?? null;
+  }
+  if ('variant_of' in input) {
+    const parent = input.variant_of || null;
+    if (parent) {
+      if (parent === productId) throw badRequest('A product can’t be an option of itself.');
+      const pp = db().prepare('SELECT variant_of FROM products WHERE id = ?').get(parent) as { variant_of: string | null } | undefined;
+      if (!pp) throw notFound('That product');
+      if (pp.variant_of) throw badRequest('Choose the main product, not one of its options.');
+    }
+    f.variant_of = parent;
+  }
+  if ('variant_label' in input) f.variant_label = input.variant_label?.trim() || null;
+  if ('unavailable_reason' in input) f.unavailable_reason = input.unavailable_reason?.trim().slice(0, 200) || null;
+  if ('image' in input) {
+    const img = input.image ?? null;
+    if (img && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(img) || img.length > 400_000)) throw badRequest('Use a PNG, JPG or WebP image under 300 KB.');
+    f.image = img;
+  }
+  if (!Object.keys(f).length) return;
+  db().prepare(`UPDATE products SET ${Object.keys(f).map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`).run(...Object.values(f), now(), productId);
+  const row = db().prepare('SELECT min_qty, max_qty FROM products WHERE id = ?').get(productId) as { min_qty: number | null; max_qty: number | null };
+  if (row.min_qty != null && row.max_qty != null && row.min_qty > row.max_qty) throw badRequest('The minimum can’t be more than the maximum.');
 }
 
 export function createProduct(input: ProductInput, actor: Actor): Product {
@@ -237,6 +304,7 @@ export function createProduct(input: ProductInput, actor: Actor): Product {
     const ins = db().prepare('INSERT INTO product_aliases (id, product_id, alias, source, created_by, created_at) VALUES (?,?,?,?,?,?)');
     for (const a of aliases) ins.run(id('pa_'), productId, a, 'admin', actor.userId, ts);
     writePreparations(productId, input.preparations ?? []);
+    writeRules(productId, input);
     audit(actor, 'product.created', 'product', productId, `Added product ${name}`, input);
   });
   invalidateProducts();
@@ -281,6 +349,7 @@ export function updateProduct(productId: string, input: Partial<ProductInput>, a
       for (const a of wanted) if (!existing.has(a)) ins.run(id('pa_'), productId, a, 'admin', actor.userId, now());
     }
     if (input.preparations) writePreparations(productId, input.preparations);
+    writeRules(productId, input);
     const priceChanged = 'price_cents' in input && input.price_cents !== before.price_cents;
     audit(actor, priceChanged ? 'product.price_changed' : 'product.updated', 'product', productId, `Updated ${before.canonical_name}`, {
       before: { ...before, aliases: before.aliases.map((a) => a.alias) },
@@ -310,6 +379,36 @@ export function seedCatalogue(catalogue: SeedProduct[] = CATALOGUE) {
   const count = (db().prepare('SELECT COUNT(*) c FROM products').get() as any).c;
   if (count > 0) return;
   insertCatalogue(catalogue, 0);
+  applyOrderingRules(true);
+}
+
+const ORDERING_RULES_VERSION = 1;
+
+/**
+ * One-time defaults for how customers order (packs, whole/half pieces, variants, dry-aged surcharge,
+ * packaging as an internal standard). Fills in only what hasn't been set, so the family's own
+ * changes under Products are never overwritten.
+ */
+export function applyOrderingRules(force = false) {
+  const row = db().prepare("SELECT value FROM settings WHERE key = 'ordering_rules_version'").get() as { value: string } | undefined;
+  if (!force && row && Number(JSON.parse(row.value)) >= ORDERING_RULES_VERSION) return;
+  tx(() => {
+    const bySlug = new Map((db().prepare('SELECT id, slug, sale_options, variant_of, variant_label FROM products').all() as any[]).map((r) => [r.slug, r]));
+    for (const [slug, rule] of Object.entries(ORDERING_RULES)) {
+      const p = bySlug.get(slug);
+      if (!p) continue;
+      if (rule.sale_options && !p.sale_options) db().prepare('UPDATE products SET sale_options = ? WHERE id = ?').run(JSON.stringify(rule.sale_options), p.id);
+      if (rule.variant_of && !p.variant_of && bySlug.get(rule.variant_of)) db().prepare('UPDATE products SET variant_of = ? WHERE id = ?').run(bySlug.get(rule.variant_of).id, p.id);
+      if (rule.variant_label && !p.variant_label) db().prepare('UPDATE products SET variant_label = ? WHERE id = ?').run(rule.variant_label, p.id);
+    }
+    // Everything is vacuum packed as standard: packaging is no longer a customer choice
+    db().prepare("UPDATE product_preparations SET customer_visible = 0 WHERE group_name = 'Packing'").run();
+    db().prepare("UPDATE product_preparations SET surcharge_pct = ? WHERE group_name = 'Ageing' AND name = 'Dry-aged' AND surcharge_pct = 0").run(DRY_AGED_SURCHARGE_PCT);
+    db()
+      .prepare("INSERT INTO settings (key, value, updated_at) VALUES ('ordering_rules_version', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+      .run(JSON.stringify(ORDERING_RULES_VERSION), now());
+  });
+  invalidateProducts();
 }
 
 /** Bump when server/seed/catalogue.ts changes in a way existing installs should receive. */

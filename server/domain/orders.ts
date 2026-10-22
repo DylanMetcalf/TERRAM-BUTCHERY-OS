@@ -18,6 +18,9 @@ import { publish } from '../services/realtime.js';
 import { getSettings } from '../services/settings.js';
 import { createCustomer, enrichCustomer, requireCustomer, type CustomerInput } from './customers.js';
 import { requireProduct, resolvePreparation, type Product } from './products.js';
+import { finalLine, priceLine, totalOf, withSurcharge, type Pricing, type SaleOption } from '../../shared/pricing.js';
+import { onOrderConfirmed, onOrderStatusChanged, onTimeframeChanged } from './lifecycle.js';
+import { recomputePayment, supersedeIfAmountChanged } from './payments.js';
 import { can, type Role } from '../../shared/permissions.js';
 
 /**
@@ -30,6 +33,8 @@ import { can, type Role } from '../../shared/permissions.js';
 
 export interface ItemInput {
   product_id: string;
+  /** Required on the customer form for products with pack/piece options; qty then only gives the count. */
+  sale_option?: string | null;
   qty: Qty;
   preparation?: Record<string, string>;
   special_instructions?: string | null;
@@ -48,14 +53,27 @@ export interface CreateOrderInput {
   delivery_address?: string | null;
   delivery_notes?: string | null;
   contact_phone?: string | null;
+  /** Where order emails go (the customer's address as given on this order). */
+  customer_email?: string | null;
   notes?: string | null;
   payment_status?: PaymentStatus;
+  /** Billing details when the customer asked for an invoice. */
+  invoice?: InvoiceRequestDetails | null;
   idempotency_key?: string | null;
   import_batch_id?: string | null;
   message_ids?: string[];
   created_summary?: string;
   /** Extra detail stored on the "created" event (e.g. amendments folded in during import). */
   created_data?: Record<string, unknown>;
+}
+
+export interface InvoiceRequestDetails {
+  billing_name: string;
+  company?: string | null;
+  billing_email: string;
+  billing_address?: string | null;
+  vat_number?: string | null;
+  instructions?: string | null;
 }
 
 export interface OrderItem {
@@ -75,8 +93,17 @@ export interface OrderItem {
   cut_at: string | null;
   packed_at: string | null;
   packed_weight_g: number | null;
+  /** Price per unit agreed for this line (snapshot, surcharge included). */
   price_cents: number | null;
   price_unit: 'kg' | 'each' | null;
+  surcharge_pct: number | null;
+  sale_option: string | null;
+  sale_option_kind: 'pack' | 'piece' | null;
+  /** Name as it was when ordered (customer-facing documents use this). */
+  name_snapshot: string;
+  pricing: Pricing | null;
+  est_cents: number | null;
+  final_cents: number | null;
   sort_order: number;
 }
 
@@ -105,6 +132,21 @@ export interface OrderSummary {
   accounting_ref: string | null;
   customer_notified_at: string | null;
   import_batch_id: string | null;
+  customer_email: string | null;
+  confirmed_by: string | null;
+  expected_from: string | null;
+  expected_to: string | null;
+  estimated_total_cents: number | null;
+  confirmed_total_cents: number | null;
+  final_total_cents: number | null;
+  amount_paid_cents: number;
+  payment_state: PaymentState;
+  payment_choice: string | null;
+  invoice_status: InvoiceStatus;
+  invoice_requested_at: string | null;
+  invoice_ref: string | null;
+  invoice_issued_on: string | null;
+  invoice_sent_at: string | null;
   confirmed_at: string | null;
   completed_at: string | null;
   status_changed_at: string;
@@ -116,6 +158,9 @@ export interface OrderSummary {
   open_exceptions: number;
   items_preview: string;
 }
+
+export type PaymentState = 'not_requested' | 'requested' | 'pending' | 'proof_submitted' | 'partially_paid' | 'paid' | 'failed' | 'refunded';
+export type InvoiceStatus = 'not_requested' | 'requested' | 'in_progress' | 'issued' | 'sent' | 'cancelled';
 
 const ORDER_SELECT = `
   SELECT o.*, c.name AS customer_name, c.phone AS customer_phone,
@@ -152,12 +197,14 @@ export function orderByNumber(n: number): OrderSummary | undefined {
   return r ? mapOrder(r) : undefined;
 }
 
+const ITEM_SELECT = `SELECT i.*, p.canonical_name AS product_name, p.category AS product_category, p.piece_noun,
+    COALESCE(i.unit_price_cents, p.price_cents) AS price_cents, COALESCE(i.price_unit_snap, p.price_unit) AS price_unit
+  FROM order_items i JOIN products p ON p.id = i.product_id`;
+
 export function getItems(orderId: string, includeRemoved = false): OrderItem[] {
   const rows = db()
     .prepare(
-      `SELECT i.*, p.canonical_name AS product_name, p.category AS product_category, p.piece_noun, p.price_cents, p.price_unit
-       FROM order_items i JOIN products p ON p.id = i.product_id
-       WHERE i.order_id = ? ${includeRemoved ? '' : "AND i.status = 'active'"} ORDER BY i.sort_order, i.created_at`,
+      `${ITEM_SELECT} WHERE i.order_id = ? ${includeRemoved ? '' : "AND i.status = 'active'"} ORDER BY i.sort_order, i.created_at`,
     )
     .all(orderId) as any[];
   return rows.map(mapItem);
@@ -173,7 +220,7 @@ export function mapItem(r: any): OrderItem {
     product_category: r.product_category,
     piece_noun: r.piece_noun,
     qty,
-    qty_label: formatQty(qty, r.piece_noun),
+    qty_label: r.sale_option && r.sale_option_kind === 'piece' ? `${r.count} × ${r.sale_option}` : formatQty(qty, r.piece_noun),
     preparation: json(r.preparation, {}),
     preparation_label: r.preparation_label,
     special_instructions: r.special_instructions,
@@ -184,6 +231,13 @@ export function mapItem(r: any): OrderItem {
     packed_weight_g: r.packed_weight_g,
     price_cents: r.price_cents,
     price_unit: r.price_unit,
+    surcharge_pct: r.surcharge_pct ?? null,
+    sale_option: r.sale_option ?? null,
+    sale_option_kind: r.sale_option_kind ?? null,
+    name_snapshot: r.product_name_snap ?? r.product_name,
+    pricing: r.pricing ?? null,
+    est_cents: r.est_cents ?? null,
+    final_cents: r.final_cents ?? null,
     sort_order: r.sort_order,
   };
 }
@@ -191,8 +245,7 @@ export function mapItem(r: any): OrderItem {
 export function getItem(itemId: string): OrderItem {
   const r = db()
     .prepare(
-      `SELECT i.*, p.canonical_name AS product_name, p.category AS product_category, p.piece_noun, p.price_cents, p.price_unit
-       FROM order_items i JOIN products p ON p.id = i.product_id WHERE i.id = ?`,
+      `${ITEM_SELECT} WHERE i.id = ?`,
     )
     .get(itemId);
   if (!r) throw notFound('That item');
@@ -203,6 +256,7 @@ export function getItem(itemId: string): OrderItem {
 
 export interface ValidatedItem {
   product: Product;
+  sale_option: SaleOption | null;
   qty: Qty;
   preparation: Record<string, string>;
   preparation_label: string;
@@ -211,34 +265,133 @@ export interface ValidatedItem {
 }
 
 /** Validation Engine — every item, from any source, passes through here. */
-export function validateItem(input: ItemInput, opts: { allowInactive?: boolean } = {}): ValidatedItem {
+export function validateItem(input: ItemInput, opts: { allowInactive?: boolean; customer?: boolean } = {}): ValidatedItem {
   if (!input || typeof input.product_id !== 'string') throw badRequest('Each item needs a product.');
   const product = requireProduct(input.product_id);
   if (!product.active && !opts.allowInactive) throw badRequest(`${product.canonical_name} is not currently available.`);
   const q = input.qty;
-  if (!q || !['weight', 'count', 'portions'].includes(q.kind)) throw badRequest(`Please give a quantity for ${product.canonical_name}.`);
-  const qty: Qty = {
-    kind: q.kind,
-    count: q.kind === 'weight' ? null : Number(q.count),
-    weight_g: q.kind === 'count' ? null : Math.round(Number(q.weight_g)),
-  };
-  const problem = validateQty(qty, product.quantity_type, product.allows_portions);
-  if (problem) throw badRequest(`${product.canonical_name}: ${problem}`);
+  let qty: Qty;
+  let saleOption: SaleOption | null = null;
+  if (input.sale_option) {
+    // A pack or piece option: the option fixes the size, the customer only chooses how many
+    saleOption = product.sale_options.find((o) => o.id === input.sale_option) ?? null;
+    if (!saleOption) throw badRequest(`That size isn’t available for ${product.customer_name}.`);
+    const count = Number(q?.count);
+    if (!Number.isInteger(count) || count < 1) throw badRequest(`Choose how many for ${product.customer_name}.`);
+    qty = saleOption.kind === 'pack' ? { kind: 'portions', count, weight_g: saleOption.grams } : { kind: 'count', count, weight_g: null };
+  } else {
+    if (opts.customer && product.sale_options.length) throw badRequest(`Choose a size for ${product.customer_name}: ${product.sale_options.map((o) => o.label).join(', ')}.`);
+    if (!q || !['weight', 'count', 'portions'].includes(q.kind)) throw badRequest(`Please give a quantity for ${product.canonical_name}.`);
+    qty = {
+      kind: q.kind,
+      count: q.kind === 'weight' ? null : Number(q.count),
+      weight_g: q.kind === 'count' ? null : Math.round(Number(q.weight_g)),
+    };
+    const problem = validateQty(qty, product.quantity_type, product.allows_portions);
+    if (problem) throw badRequest(`${product.canonical_name}: ${problem}`);
+  }
+  // Per-product limits, counted in the units the customer chooses (packs, pieces or grams)
+  const amount = qty.kind === 'weight' ? qty.weight_g ?? 0 : qty.count ?? 0;
+  if (product.min_qty != null && amount < product.min_qty) throw badRequest(`${product.customer_name}: the minimum is ${product.min_qty}${qty.kind === 'weight' ? ' g' : ''}.`);
+  if (product.max_qty != null && amount > product.max_qty) throw badRequest(`${product.customer_name}: the most we can take on one order is ${product.max_qty}${qty.kind === 'weight' ? ' g' : ''}. Ask us if you need more.`);
+  if (opts.customer && qty.kind !== 'weight' && (qty.count ?? 0) > 500) throw badRequest(`${product.customer_name}: that’s more than we can take online. Please contact us.`);
+  if (opts.customer && product.pack_size && (qty.kind !== 'count' || (qty.count ?? 0) % product.pack_size !== 0))
+    throw badRequest(`${product.customer_name} are sold in lots of ${product.pack_size}. Please choose ${product.pack_size}, ${product.pack_size * 2}, ${product.pack_size * 3}…`);
   const { preparation, label } = resolvePreparation(product, input.preparation);
   const instr = input.special_instructions?.toString().trim().slice(0, 500) || null;
-  return { product, qty, preparation, preparation_label: label, special_instructions: instr, source_text: input.source_text?.slice(0, 500) ?? null };
+  return { product, sale_option: saleOption, qty, preparation, preparation_label: label, special_instructions: instr, source_text: input.source_text?.slice(0, 500) ?? null };
+}
+
+/** The price snapshot for a validated line, from the catalogue as it is right now. */
+export function quoteItem(v: ValidatedItem): { unit_price_cents: number | null; price_unit: 'kg' | 'each' | null; surcharge_pct: number; pricing: Pricing; est_cents: number | null } {
+  const surcharge = v.product.preparations
+    .filter((o) => v.preparation[o.group_name] === o.name)
+    .reduce((t, o) => t + (o.surcharge_pct || 0), 0);
+  const unit = v.product.price_cents == null ? null : withSurcharge(v.product.price_cents, surcharge);
+  const piece = v.sale_option ? v.sale_option.grams : v.product.typical_piece_g;
+  const q = priceLine({ qty: v.qty, unitPriceCents: unit, priceUnit: v.product.price_unit, saleKind: v.sale_option?.kind ?? null, pieceGrams: piece });
+  return { unit_price_cents: unit, price_unit: v.product.price_unit, surcharge_pct: surcharge, pricing: q.pricing, est_cents: q.cents };
 }
 
 function insertItem(orderId: string, v: ValidatedItem, sort: number): string {
   const itemId = id('oi_');
   const ts = now();
+  const qt = quoteItem(v);
   db()
     .prepare(
-      `INSERT INTO order_items (id, order_id, product_id, qty_kind, count, weight_g, preparation, preparation_label, special_instructions, source_text, sort_order, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO order_items (id, order_id, product_id, qty_kind, count, weight_g, preparation, preparation_label, special_instructions, source_text, sort_order, created_at, updated_at,
+         sale_option, sale_option_kind, product_name_snap, unit_price_cents, price_unit_snap, surcharge_pct, pricing, est_cents)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
-    .run(itemId, orderId, v.product.id, v.qty.kind, v.qty.count, v.qty.weight_g, JSON.stringify(v.preparation), v.preparation_label, v.special_instructions, v.source_text, sort, ts, ts);
+    .run(
+      itemId, orderId, v.product.id, v.qty.kind, v.qty.count, v.qty.weight_g, JSON.stringify(v.preparation), v.preparation_label, v.special_instructions, v.source_text, sort, ts, ts,
+      v.sale_option?.label ?? null, v.sale_option?.kind ?? null, v.product.customer_name, qt.unit_price_cents, qt.price_unit, qt.surcharge_pct, qt.pricing, qt.est_cents,
+    );
   return itemId;
+}
+
+/**
+ * Re-works out an order's totals from its line snapshots (never from today's catalogue).
+ * Final total exists only when every line has a final price (fixed packs, or weighed when packed).
+ */
+export function recomputeTotals(orderId: string) {
+  const items = db().prepare("SELECT id, pricing, est_cents, unit_price_cents, price_unit_snap, packed_weight_g FROM order_items WHERE order_id = ? AND status = 'active'").all(orderId) as any[];
+  const order = db().prepare('SELECT delivery_fee_cents FROM orders WHERE id = ?').get(orderId) as { delivery_fee_cents: number | null } | undefined;
+  if (!order) return;
+  const fee = order.delivery_fee_cents ?? 0;
+  let allFinal = items.length > 0;
+  let finalSum = fee;
+  for (const it of items) {
+    const f = finalLine({ pricing: it.pricing, est_cents: it.est_cents, unit_price_cents: it.unit_price_cents, price_unit: it.price_unit_snap, packed_weight_g: it.packed_weight_g });
+    db().prepare('UPDATE order_items SET final_cents = ? WHERE id = ?').run(f, it.id);
+    if (f == null) allFinal = false;
+    else finalSum += f;
+  }
+  const t = totalOf(items.map((i) => ({ pricing: i.pricing, cents: i.est_cents })), fee);
+  db().prepare('UPDATE orders SET estimated_total_cents = ?, final_total_cents = ? WHERE id = ?').run(items.length ? t.estimateCents : null, allFinal ? finalSum : null, orderId);
+  supersedeIfAmountChanged(orderId);
+  recomputePayment(orderId);
+}
+
+/** Price summary for an order, as staff and the customer see it. */
+export function orderMoney(orderId: string) {
+  const o = db().prepare('SELECT estimated_total_cents, confirmed_total_cents, final_total_cents, amount_paid_cents, delivery_fee_cents FROM orders WHERE id = ?').get(orderId) as any;
+  const items = db().prepare("SELECT pricing, est_cents FROM order_items WHERE order_id = ? AND status = 'active'").all(orderId) as any[];
+  const t = totalOf(items.map((i) => ({ pricing: i.pricing, cents: i.est_cents })), o?.delivery_fee_cents ?? 0);
+  const due = o?.final_total_cents ?? (t.exact && items.length ? t.estimateCents : null);
+  return {
+    estimated_cents: o?.estimated_total_cents ?? null,
+    estimate_is_exact: t.exact && items.length > 0,
+    lines_priced_on_weight: t.pendingLines + items.filter((i) => i.pricing === 'estimate').length,
+    confirmed_cents: o?.confirmed_total_cents ?? null,
+    final_cents: o?.final_total_cents ?? null,
+    delivery_fee_cents: o?.delivery_fee_cents ?? null,
+    paid_cents: o?.amount_paid_cents ?? 0,
+    /** What is owed now; null until the amount is known for certain. */
+    due_cents: due,
+    balance_cents: due == null ? null : Math.max(0, due - (o?.amount_paid_cents ?? 0)),
+  };
+}
+
+/** Older lines saved before price snapshots existed take the price on record when this ran. */
+export function backfillItemSnapshots() {
+  const rows = db().prepare('SELECT i.id, i.order_id FROM order_items i WHERE i.pricing IS NULL').all() as { id: string; order_id: string }[];
+  if (!rows.length) return 0;
+  const orders = new Set<string>();
+  tx(() => {
+    for (const r of rows) {
+      const it = db().prepare('SELECT * FROM order_items WHERE id = ?').get(r.id) as any;
+      const product = requireProduct(it.product_id);
+      const v: ValidatedItem = { product, sale_option: null, qty: { kind: it.qty_kind, count: it.count, weight_g: it.weight_g }, preparation: json(it.preparation, {}), preparation_label: it.preparation_label, special_instructions: it.special_instructions, source_text: it.source_text };
+      const qt = quoteItem(v);
+      db()
+        .prepare('UPDATE order_items SET product_name_snap = COALESCE(product_name_snap, ?), unit_price_cents = ?, price_unit_snap = ?, surcharge_pct = ?, pricing = ?, est_cents = ? WHERE id = ?')
+        .run(product.customer_name, qt.unit_price_cents, qt.price_unit, qt.surcharge_pct, qt.pricing, qt.est_cents, r.id);
+      orders.add(r.order_id);
+    }
+    for (const o of orders) recomputeTotals(o);
+  });
+  return rows.length;
 }
 
 export function describeItem(v: { product: Product; qty: Qty; preparation_label: string } | OrderItem): string {
@@ -264,7 +417,7 @@ export function createOrder(input: CreateOrderInput, actor: Actor): OrderSummary
     const existing = db().prepare('SELECT id FROM orders WHERE idempotency_key = ?').get(input.idempotency_key) as any;
     if (existing) return requireOrder(existing.id);
   }
-  const validated = input.items.map((i) => validateItem(i));
+  const validated = input.items.map((i) => validateItem(i, { customer: input.source === 'form' }));
   if (!validated.length && input.status !== 'needs_clarification') throw badRequest('An order needs at least one item.');
   if (input.requested_date && !isValidYmd(input.requested_date)) throw badRequest('That date is not valid.');
   if (input.fulfilment_type && !['collection', 'delivery'].includes(input.fulfilment_type)) throw badRequest('Choose collection or delivery.');
@@ -277,16 +430,22 @@ export function createOrder(input: CreateOrderInput, actor: Actor): OrderSummary
     db()
       .prepare(
         `INSERT INTO orders (id, order_number, customer_id, source, status, resume_status, fulfilment_type, requested_date, time_window, delivery_address, delivery_notes,
-           contact_phone, notes, payment_status, import_batch_id, idempotency_key, created_by, confirmed_at, status_changed_at, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           contact_phone, notes, payment_status, import_batch_id, idempotency_key, created_by, confirmed_at, status_changed_at, created_at, updated_at,
+           customer_email, confirmed_by, invoice_status, invoice_details, invoice_requested_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         orderId, orderNumber, customerId, input.source, input.status, input.status === 'needs_clarification' ? input.resume_status ?? 'review' : null,
         input.fulfilment_type ?? null, input.requested_date ?? null, input.time_window?.slice(0, 100) ?? null, input.delivery_address?.slice(0, 300) ?? null,
         input.delivery_notes?.slice(0, 500) ?? null, input.contact_phone ?? null, input.notes?.slice(0, 2000) ?? null, input.payment_status ?? 'unpaid',
         input.import_batch_id ?? null, input.idempotency_key ?? null, actor.userId, input.status === 'confirmed' ? ts : null, ts, ts, ts,
+        input.customer_email?.trim().toLowerCase() || null, input.status === 'confirmed' ? actor.userId : null,
+        input.invoice ? 'requested' : 'not_requested', input.invoice ? JSON.stringify(input.invoice) : null, input.invoice ? ts : null,
       );
     validated.forEach((v, i) => insertItem(orderId, v, i));
+    if (input.payment_status === 'paid') db().prepare("UPDATE orders SET payment_state = 'paid' WHERE id = ?").run(orderId);
+    recomputeTotals(orderId);
+    if (input.status === 'confirmed') db().prepare('UPDATE orders SET confirmed_total_cents = estimated_total_cents WHERE id = ?').run(orderId);
     for (const mid of input.message_ids ?? []) db().prepare('UPDATE messages SET order_id = ?, status = ? WHERE id = ?').run(orderId, 'processed', mid);
     if (input.delivery_address || input.contact_phone) enrichCustomer(customerId, { phone: input.contact_phone, address: input.fulfilment_type === 'delivery' ? input.delivery_address : null }, actor);
     addEvent(
@@ -298,8 +457,11 @@ export function createOrder(input: CreateOrderInput, actor: Actor): OrderSummary
       input.message_ids?.[0] ?? null,
     );
     audit(actor, 'order.created', 'order', orderId, `Created order #${orderNumber}`, { source: input.source });
+    if (input.invoice) addEvent(orderId, 'invoice_requested', `Invoice requested for ${input.invoice.billing_name}${input.invoice.company ? ` (${input.invoice.company})` : ''}`, actor);
   });
   publish(['orders', 'customers'], { orderId, summary: 'New order' });
+  // Orders entered as already confirmed (staff phone orders, imports) are confirmed by that person
+  if (input.status === 'confirmed') onOrderConfirmed(orderId, actor);
   return requireOrder(orderId);
 }
 
@@ -324,7 +486,7 @@ export function deleteOrder(orderId: string, actor: Actor): { order_number: numb
   return { order_number: o.order_number };
 }
 
-export function transition(orderId: string, to: OrderStatus, actor: Actor, role: Role | null, opts: { note?: string; system?: boolean } = {}): OrderSummary {
+export function transition(orderId: string, to: OrderStatus, actor: Actor, role: Role | null, opts: { note?: string; system?: boolean; confirm?: { expected_from: string | null; expected_to: string | null } } = {}): OrderSummary {
   const order = requireOrder(orderId);
   const from = order.status;
   if (from === to) return order;
@@ -339,14 +501,25 @@ export function transition(orderId: string, to: OrderStatus, actor: Actor, role:
     if (blocking.c > 0) throw conflict('Resolve the open questions on this order first.');
   }
   if (to === 'out_for_delivery' && order.fulfilment_type !== 'delivery') throw conflict('This order is for collection, not delivery.');
+  // A first confirmation is a decision: the customer is told, so it needs the expected timeframe
+  const firstConfirmation = to === 'confirmed' && !order.confirmed_at;
+  if (firstConfirmation && !opts.system && !opts.confirm) throw conflict('Use “Confirm order” so the customer gets the expected timeframe.');
 
   tx(() => {
     const ts = now();
     const sets: string[] = ['status = ?', 'status_changed_at = ?', 'updated_at = ?'];
     const vals: unknown[] = [to, ts, ts];
     if (to === 'confirmed' && !order.confirmed_at) {
-      sets.push('confirmed_at = ?');
-      vals.push(ts);
+      sets.push('confirmed_at = ?', 'confirmed_by = ?', 'confirmed_total_cents = estimated_total_cents');
+      vals.push(ts, actor.userId);
+    }
+    if (opts.confirm) {
+      sets.push('expected_from = ?', 'expected_to = ?');
+      vals.push(opts.confirm.expected_from, opts.confirm.expected_to);
+      if (opts.confirm.expected_from) {
+        sets.push('requested_date = ?');
+        vals.push(opts.confirm.expected_from);
+      }
     }
     if (to === 'completed') {
       sets.push('completed_at = ?');
@@ -369,7 +542,74 @@ export function transition(orderId: string, to: OrderStatus, actor: Actor, role:
     if (to === 'ready') queueReadyNotification(orderId);
   });
   publish(['orders'], { orderId });
+  if (firstConfirmation) onOrderConfirmed(orderId, actor);
+  else onOrderStatusChanged(orderId, from, to, actor);
   return requireOrder(orderId);
+}
+
+/** What still stops an order being confirmed (empty list = ready). Shown to staff before they confirm. */
+export function confirmationProblems(orderId: string): string[] {
+  const o = requireOrder(orderId);
+  const out: string[] = [];
+  const items = getItems(orderId);
+  if (!items.length) out.push('The order has no items.');
+  for (const i of items) {
+    const p = requireProduct(i.product_id);
+    if (!p.active) out.push(`${p.canonical_name} is marked out of stock. Change or remove it, or mark it back in stock.`);
+    if (i.pricing === 'unpriced') out.push(`${p.canonical_name} has no price. Set its price under Products first.`);
+  }
+  const blocking = (db().prepare("SELECT COUNT(*) n FROM exceptions WHERE order_id = ? AND status = 'open' AND severity = 'blocking'").get(orderId) as { n: number }).n;
+  if (blocking) out.push('Resolve the open questions on this order first.');
+  const pending = (db().prepare("SELECT COUNT(*) n FROM order_amendments WHERE order_id = ? AND status = 'proposed' AND requires_approval = 1").get(orderId) as { n: number }).n;
+  if (pending) out.push('A proposed change is still waiting for the customer’s answer.');
+  if (!o.fulfilment_type) out.push('Choose collection or delivery.');
+  if (o.fulfilment_type === 'delivery' && !o.delivery_address) out.push('Add the delivery address.');
+  const c = db().prepare('SELECT phone, email FROM customers WHERE id = ?').get(o.customer_id) as { phone: string | null; email: string | null };
+  if (!o.contact_phone && !c.phone && !o.customer_email && !c.email) out.push('Add a phone number or email for the customer.');
+  return out;
+}
+
+/**
+ * CONFIRM ORDER — the explicit decision by an authorised person, with the expected timeframe.
+ * Idempotent: confirming an already-confirmed order changes nothing and sends nothing.
+ */
+export function confirmOrder(orderId: string, input: { expected_from: string; expected_to?: string | null }, actor: Actor, role: Role | null): { order: OrderSummary; already: boolean } {
+  const o = requireOrder(orderId);
+  if (o.confirmed_at && !['review', 'needs_clarification', 'on_hold'].includes(o.status)) return { order: o, already: true };
+  if (o.status === 'confirmed') return { order: o, already: true };
+  if (!['review', 'needs_clarification', 'on_hold'].includes(o.status)) throw conflict(`An order that is ${STATUS_LABEL[o.status].toLowerCase()} can't be confirmed.`);
+  if (!isValidYmd(input.expected_from)) throw badRequest('Choose the expected date.');
+  const to = input.expected_to || null;
+  if (to && (!isValidYmd(to) || to < input.expected_from)) throw badRequest('The end of the timeframe must be on or after the start.');
+  const problems = confirmationProblems(orderId);
+  if (problems.length) throw conflict(problems[0], { problems });
+  const order = transition(orderId, 'confirmed', actor, role, { confirm: { expected_from: input.expected_from, expected_to: to } });
+  return { order, already: false };
+}
+
+/** Changing a timeframe the customer was given: old and new are recorded, a reason is required and the customer is told. */
+export function changeTimeframe(orderId: string, input: { expected_from: string; expected_to?: string | null; reason: string }, actor: Actor): OrderSummary {
+  const o = requireOrder(orderId);
+  if (['completed', 'cancelled'].includes(o.status)) throw conflict('This order is finished.');
+  if (!isValidYmd(input.expected_from)) throw badRequest('Choose the expected date.');
+  const to = input.expected_to || null;
+  if (to && (!isValidYmd(to) || to < input.expected_from)) throw badRequest('The end of the timeframe must be on or after the start.');
+  const reason = input.reason?.trim();
+  if (o.confirmed_at && !reason) throw badRequest('Give a reason. The customer is told about the change.');
+  if (o.expected_from === input.expected_from && (o.expected_to ?? null) === to) return o;
+  const before = { from: o.expected_from, to: o.expected_to };
+  tx(() => {
+    db().prepare('UPDATE orders SET expected_from = ?, expected_to = ?, requested_date = ?, updated_at = ? WHERE id = ?').run(input.expected_from, to, input.expected_from, now(), orderId);
+    addEvent(orderId, 'timeframe_changed', `Expected timeframe changed: ${fmtRange(before.from, before.to)} → ${fmtRange(input.expected_from, to)}${reason ? ` · ${reason}` : ''}`, actor, { before, after: { from: input.expected_from, to }, reason });
+    audit(actor, 'order.timeframe_changed', 'order', orderId, `#${o.order_number}: ${fmtRange(before.from, before.to)} → ${fmtRange(input.expected_from, to)}`, { reason });
+  });
+  if (o.confirmed_at) onTimeframeChanged(orderId, before, reason || '');
+  publish(['orders'], { orderId });
+  return requireOrder(orderId);
+}
+
+function fmtRange(a: string | null, b: string | null) {
+  return !a ? '—' : b && b !== a ? `${a} to ${b}` : a;
 }
 
 function queueReadyNotification(orderId: string) {
@@ -416,6 +656,7 @@ export function addItem(orderId: string, input: ItemInput, actor: Actor, ctx: Am
   tx(() => {
     const sort = (db().prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 s FROM order_items WHERE order_id = ?').get(orderId) as any).s;
     itemId = insertItem(orderId, v, sort);
+    recomputeTotals(orderId);
     const warn = productionWarning(order);
     addEvent(orderId, 'item_added', `Added ${describeItem(v)}`, actor, { item_id: itemId, item: describeItem(v), reason: ctx.reason, warning: warn }, ctx.messageId ?? null);
     touch(orderId);
@@ -435,6 +676,7 @@ function regressForNewWork(order: OrderSummary, actor: Actor) {
 }
 
 export interface ItemPatch {
+  sale_option?: string | null;
   qty?: Qty;
   preparation?: Record<string, string>;
   special_instructions?: string | null;
@@ -446,8 +688,11 @@ export function updateItem(itemId: string, patch: ItemPatch, actor: Actor, ctx: 
   const order = requireOrder(before.order_id);
   assertAmendable(order);
   if (before.status !== 'active') throw conflict('That item has been removed.');
+  const productChanged = !!patch.product_id && patch.product_id !== before.product_id;
+  const beforeOption = before.sale_option ? requireProduct(before.product_id).sale_options.find((o) => o.label === before.sale_option)?.id ?? null : null;
   const v = validateItem({
     product_id: patch.product_id ?? before.product_id,
+    sale_option: patch.sale_option !== undefined ? patch.sale_option : productChanged || patch.qty ? null : beforeOption,
     qty: patch.qty ?? before.qty,
     preparation: patch.preparation ?? (patch.product_id && patch.product_id !== before.product_id ? {} : before.preparation),
     special_instructions: patch.special_instructions !== undefined ? patch.special_instructions : before.special_instructions,
@@ -466,6 +711,15 @@ export function updateItem(itemId: string, patch: ItemPatch, actor: Actor, ctx: 
          ${physicalChange ? ', cut_at = NULL, cut_by = NULL, packed_at = NULL, packed_by = NULL' : ''} WHERE id = ?`,
       )
       .run(v.product.id, v.qty.kind, v.qty.count, v.qty.weight_g, JSON.stringify(v.preparation), v.preparation_label, v.special_instructions, now(), itemId);
+    // A different product or preparation is priced as it is today; a quantity change keeps the agreed unit price
+    const qt = quoteItem(v);
+    const keepUnit = !productChanged && v.preparation_label === before.preparation_label && before.price_cents != null;
+    const unit = keepUnit ? before.price_cents : qt.unit_price_cents;
+    const q = priceLine({ qty: v.qty, unitPriceCents: unit, priceUnit: keepUnit ? before.price_unit : qt.price_unit, saleKind: v.sale_option?.kind ?? null, pieceGrams: v.sale_option ? v.sale_option.grams : v.product.typical_piece_g });
+    db()
+      .prepare('UPDATE order_items SET sale_option = ?, sale_option_kind = ?, product_name_snap = ?, unit_price_cents = ?, price_unit_snap = ?, surcharge_pct = ?, pricing = ?, est_cents = ? WHERE id = ?')
+      .run(v.sale_option?.label ?? null, v.sale_option?.kind ?? null, v.product.customer_name, unit, keepUnit ? before.price_unit : qt.price_unit, keepUnit ? before.surcharge_pct : qt.surcharge_pct, q.pricing, q.cents, itemId);
+    recomputeTotals(order.id);
     const warn = physicalChange ? productionWarning(order) : null;
     addEvent(
       order.id,
@@ -495,6 +749,7 @@ export function removeItem(itemId: string, actor: Actor, ctx: AmendContext = {})
   if (before.status === 'removed') return;
   tx(() => {
     db().prepare("UPDATE order_items SET status = 'removed', updated_at = ? WHERE id = ?").run(now(), itemId);
+    recomputeTotals(order.id);
     addEvent(order.id, 'item_removed', `Removed ${describeItem(before)}`, actor, { item_id: itemId, item: describeItem(before), reason: ctx.reason, warning: productionWarning(order) }, ctx.messageId ?? null);
     touch(order.id);
   });
@@ -515,6 +770,7 @@ export interface OrderPatch {
   payment_status?: PaymentStatus;
   accounting_ref?: string | null;
   customer_id?: string;
+  customer_email?: string | null;
 }
 
 const PATCH_LABEL: Record<keyof OrderPatch, string> = {
@@ -529,6 +785,7 @@ const PATCH_LABEL: Record<keyof OrderPatch, string> = {
   payment_status: 'Payment',
   accounting_ref: 'Accounting reference',
   customer_id: 'Customer',
+  customer_email: 'Email for updates',
 };
 
 export function updateOrder(orderId: string, patch: OrderPatch, actor: Actor, role: Role | null, ctx: AmendContext = {}): OrderSummary {
@@ -543,6 +800,8 @@ export function updateOrder(orderId: string, patch: OrderPatch, actor: Actor, ro
     if (k === 'payment_status' && !['unpaid', 'pending', 'paid'].includes(v)) throw badRequest('Unknown payment status.');
     if ((k === 'payment_status' || k === 'accounting_ref') && !can(role, 'payments.write') && !ctx.reason) throw forbidden('Only a manager can change payment details.');
     if (k === 'customer_id') requireCustomer(v);
+    if (k === 'customer_email' && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw badRequest('That email address doesn’t look right.');
+    if (k === 'customer_email' && v) v = String(v).toLowerCase();
     if ((order as any)[k] === v) continue;
     fields[k] = v;
     changes.push(`${PATCH_LABEL[k]}: ${fmt((order as any)[k])} → ${fmt(v)}`);
@@ -554,11 +813,19 @@ export function updateOrder(orderId: string, patch: OrderPatch, actor: Actor, ro
   }
   if (!changes.length) return order;
   // Payment details, notes and the delivery distance/fee can be updated at any stage
-  if (Object.keys(fields).some((k) => !['payment_status', 'accounting_ref', 'notes', 'delivery_km', 'delivery_fee_cents'].includes(k))) assertAmendable(order);
+  if (Object.keys(fields).some((k) => !['payment_status', 'accounting_ref', 'notes', 'delivery_km', 'delivery_fee_cents', 'customer_email'].includes(k))) assertAmendable(order);
   tx(() => {
     db()
       .prepare(`UPDATE orders SET ${Object.keys(fields).map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`)
       .run(...Object.values(fields), now(), orderId);
+    if ('delivery_fee_cents' in fields) recomputeTotals(orderId);
+    if ('payment_status' in fields) {
+      // Marking paid by hand (e.g. settled in Xero or cash on collection) without an amount on record
+      const verified = (db().prepare("SELECT COUNT(*) n FROM payments WHERE order_id = ? AND status = 'verified'").get(orderId) as { n: number }).n;
+      if (fields.payment_status !== 'paid' && verified) throw conflict('This order has verified payments. Reverse the payment instead of marking it unpaid.');
+      db().prepare('UPDATE orders SET payment_state = ? WHERE id = ?').run(fields.payment_status === 'paid' ? 'paid' : 'not_requested', orderId);
+      recomputePayment(orderId);
+    }
     addEvent(orderId, 'details_changed', changes.join(' · '), actor, { before: pick(order, Object.keys(fields)), after: fields, reason: ctx.reason }, ctx.messageId ?? null);
     audit(actor, 'order.updated', 'order', orderId, `#${order.order_number}: ${changes.join('; ')}`);
   });
@@ -636,6 +903,10 @@ export function setItemPacked(itemId: string, packed: boolean, actor: Actor, pac
   if (packedWeightG != null && (!Number.isFinite(packedWeightG) || packedWeightG <= 0 || packedWeightG > 500000)) throw badRequest('That weight is not valid.');
   tx(() => {
     db().prepare('UPDATE order_items SET packed_at = ?, packed_by = ?, packed_weight_g = COALESCE(?, packed_weight_g) WHERE id = ?').run(packed ? now() : null, packed ? actor.userId : null, packedWeightG ?? null, itemId);
+    if (packedWeightG != null) {
+      recomputeTotals(o.id);
+      addEvent(o.id, 'item_weighed', `${it.product_name} weighed at ${(packedWeightG / 1000).toLocaleString('en-ZA', { maximumFractionDigits: 3 })} kg`, actor, { item_id: itemId, weight_g: packedWeightG });
+    }
     if (packed && !it.cut_at) db().prepare('UPDATE order_items SET cut_at = ?, cut_by = ? WHERE id = ?').run(now(), actor.userId, itemId);
     const cur = requireOrder(o.id);
     if (cur.status === 'cutting' && cur.items_cut === cur.item_count) transition(o.id, 'cut', actor, null, { system: true, note: 'all items cut' });
@@ -653,4 +924,20 @@ export function completePacking(orderId: string, actor: Actor): OrderSummary {
   transition(orderId, 'packed', actor, null, { system: true });
   if (getSettings().orders.autoReadyAfterPacking) transition(orderId, 'ready', actor, null, { system: true, note: 'packed and ready' });
   return requireOrder(orderId);
+}
+
+/** Records (or corrects) the actual weight of a weighed item, which sets its final price. */
+export function setItemWeight(itemId: string, weightG: number | null, actor: Actor) {
+  const it = getItem(itemId);
+  const o = requireOrder(it.order_id);
+  if (['completed', 'cancelled'].includes(o.status)) throw conflict('This order is finished.');
+  if (weightG != null && (!Number.isFinite(weightG) || weightG <= 0 || weightG > 500000)) throw badRequest('That weight is not valid.');
+  if ((it.packed_weight_g ?? null) === weightG) return it;
+  tx(() => {
+    db().prepare('UPDATE order_items SET packed_weight_g = ?, updated_at = ? WHERE id = ?').run(weightG, now(), itemId);
+    recomputeTotals(o.id);
+    addEvent(o.id, 'item_weighed', weightG ? `${it.product_name} weighed at ${(weightG / 1000).toLocaleString('en-ZA', { maximumFractionDigits: 3 })} kg${it.packed_weight_g ? ` (was ${(it.packed_weight_g / 1000).toLocaleString('en-ZA', { maximumFractionDigits: 3 })} kg)` : ''}` : `${it.product_name}: weight cleared`, actor, { item_id: itemId, before: it.packed_weight_g, after: weightG });
+  });
+  publish(['orders'], { orderId: o.id });
+  return getItem(itemId);
 }

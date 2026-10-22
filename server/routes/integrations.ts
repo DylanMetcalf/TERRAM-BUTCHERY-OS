@@ -7,6 +7,7 @@ import { processInbound } from '../intelligence/inbound.js';
 import { actorOf, requirePerm, type Env } from '../http/context.js';
 import { body } from '../http/schemas.js';
 import { rateLimit } from '../http/security.js';
+import { handleItn } from '../domain/payfast.js';
 
 /**
  * Integration boundary. Each adapter authenticates its channel and converts
@@ -14,6 +15,16 @@ import { rateLimit } from '../http/security.js';
  * cares which channel a message came from.
  */
 const r = new Hono<Env>();
+
+// PayFast ITN (instant transaction notification). Authenticated by signature, source and PayFast's own confirmation.
+r.post('/payfast/notify', rateLimit('payfast', 300, 60_000), async (c) => {
+  const raw = await c.req.text();
+  // The address our hosting proxy saw (it appends it last); earlier entries could be supplied by anyone
+  const ip = c.req.header('x-forwarded-for')?.split(',').pop()?.trim() || ((c.env as any)?.incoming?.socket?.remoteAddress ?? null);
+  const res = await handleItn(raw.slice(0, 20_000), ip);
+  // PayFast only needs a 200 for notifications it sent; anything that failed our checks gets 400
+  return c.text(res.ok ? 'OK' : 'Rejected', res.ok ? 200 : 400);
+});
 
 // WhatsApp Business Cloud API — verification handshake
 r.get('/whatsapp/webhook', (c) => {

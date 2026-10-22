@@ -262,3 +262,38 @@ export const CATALOGUE: SeedProduct[] = [
     aliases: ['eggs', 'egg', 'farm eggs', 'free range eggs', 'tray of eggs', 'egg tray', 'trays of eggs'],
   },
 ];
+
+/**
+ * How customers may order particular products on the online form (enforced on the server).
+ * Applied once to existing installs and to fresh catalogues; after that the family manages
+ * them under Products, and these defaults never overwrite their changes.
+ */
+export interface OrderingRule {
+  sale_options?: { id: string; label: string; kind: 'pack' | 'piece'; grams: number | null }[];
+  variant_of?: string;
+  variant_label?: string;
+}
+const MINCE_PACKS = [
+  { id: '500g', label: '500 g pack', kind: 'pack' as const, grams: 500 },
+  { id: '1kg', label: '1 kg pack', kind: 'pack' as const, grams: 1000 },
+];
+const WORS_PACKS = [{ id: '1kg', label: '1 kg pack', kind: 'pack' as const, grams: 1000 }];
+export const ORDERING_RULES: Record<string, OrderingRule> = {
+  beef_mince_lean: { sale_options: MINCE_PACKS },
+  beef_mince_8020: { sale_options: MINCE_PACKS },
+  wors_normal: { sale_options: WORS_PACKS },
+  wors_bbq: { sale_options: WORS_PACKS },
+  beef_fillet: {
+    sale_options: [
+      { id: 'whole', label: 'Whole fillet', kind: 'piece', grams: null },
+      { id: 'half', label: 'Half fillet', kind: 'piece', grams: null },
+      { id: 'steak', label: 'Fillet steak (about 250 g)', kind: 'piece', grams: 250 },
+    ],
+    variant_label: 'Off the bone',
+  },
+  beef_fillet_bone: { variant_of: 'beef_fillet', variant_label: 'On the bone' },
+  beef_ribeye: { variant_label: 'Off the bone' },
+  beef_ribeye_bone: { variant_of: 'beef_ribeye', variant_label: 'On the bone' },
+};
+/** Dry-ageing carries a 25% surcharge on the normal price (order form terms). */
+export const DRY_AGED_SURCHARGE_PCT = 25;

@@ -14,7 +14,7 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   if (!c.req.path.startsWith('/api/') && !c.res.headers.get('Content-Security-Policy')) {
     c.header(
       'Content-Security-Policy',
-      "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://www.payfast.co.za https://sandbox.payfast.co.za",
     );
   }
 };
