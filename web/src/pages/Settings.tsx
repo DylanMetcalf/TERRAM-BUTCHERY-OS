@@ -85,7 +85,7 @@ function Panel({ title, children, footer }: { title: string; children: ReactNode
   return (
     <Card>
       <div className="border-b border-line px-5 py-4"><h2 className="font-display text-xl font-semibold">{title}</h2></div>
-      <fieldset disabled={!can('settings.write')} className="space-y-5 p-5">{children}</fieldset>
+      <fieldset disabled={!can('settings.write')} className="min-w-0 space-y-5 p-5">{children}</fieldset>
       {footer && can('settings.write') && <div className="flex justify-end border-t border-line bg-surface-2 px-5 py-3">{footer}</div>}
     </Card>
   );
@@ -559,7 +559,7 @@ function PaymentsSettings({ s, env }: { s: any; env: any }) {
     <div className="space-y-6">
       <Panel title="How customers pay" footer={<Button variant="primary" loading={save.isPending} onClick={() => save.mutate(v)}>Save</Button>}>
         <Field label="When is the customer asked to pay?">
-          <Segmented full value={v.trigger} onChange={(x) => setV({ ...v, trigger: x })} options={[{ value: 'ready', label: 'Automatically when ready' }, { value: 'manual', label: 'Only when we send it' }]} />
+          <Segmented full value={v.trigger} onChange={(x) => setV({ ...v, trigger: x })} options={[{ value: 'ready', label: 'When ready' }, { value: 'manual', label: 'When we send it' }]} />
         </Field>
         <p className="-mt-2 text-[13px] text-ink-3">A payment request is only sent once the final amount is known (weighed items packed), there are no unanswered changes, and at least one payment method below is available.</p>
         <Switch checked={!!v.eftEnabled} onChange={(x) => setV({ ...v, eftEnabled: x })} label="Accept EFT (bank transfer)" description={missing.length ? `Needs: ${missing.join(', ')}.` : 'Customers see the banking details below on their order page and upload proof. Staff verify it against the bank.'} />

@@ -74,6 +74,7 @@ export function ConfirmSheet({ order, problems, open, onClose }: { order: OrderS
     },
     onError: a.fail,
   });
+  const setType = useMutation({ mutationFn: (t: 'collection' | 'delivery') => api.patch(`/api/orders/${order.id}`, { fulfilment_type: t }), onSuccess: () => a.done(), onError: a.fail });
   const badRange = !!to && to < from;
   return (
     <Sheet
@@ -89,6 +90,15 @@ export function ConfirmSheet({ order, problems, open, onClose }: { order: OrderS
             <div className="font-semibold">Sort these out first:</div>
             <ul className="mt-1 list-disc pl-5">{problems.map((p) => <li key={p}>{p}</li>)}</ul>
           </div>
+        )}
+        {!order.fulfilment_type && (
+          <Field label="Collection or delivery?" hint={order.delivery_address ? `Customer’s address: ${order.delivery_address}` : undefined}>
+            <div className="flex gap-2">
+              {(['collection', 'delivery'] as const).map((t) => (
+                <Button key={t} variant="secondary" loading={setType.isPending && setType.variables === t} disabled={t === 'delivery' && !order.delivery_address} onClick={() => setType.mutate(t)}>{t === 'collection' ? 'Collection' : 'Delivery'}</Button>
+              ))}
+            </div>
+          </Field>
         )}
         {order.requested_date && <p className="text-[14px] text-ink-2">Customer’s preferred date: <b>{longDate(order.requested_date)}</b></p>}
         <TimeframeFields from={from} to={to} setFrom={setFrom} setTo={setTo} />
@@ -346,6 +356,8 @@ function InvoiceSheet({ orderId, invoice, onClose }: { orderId: string; invoice:
         f.set('file', file);
         await api.upload(`/api/orders/${orderId}/invoice/file`, f);
       }
+      // Sent always follows issued: record the issue first (quietly), then the send
+      if (status === 'sent' && invoice.status !== 'issued') await api.patch(`/api/orders/${orderId}/invoice`, { status: 'issued', reference: ref.trim(), issued_on: date, notify_customer: false });
       return api.patch(`/api/orders/${orderId}/invoice`, { status, reference: ref.trim(), issued_on: date, notify_customer: notify });
     },
     onSuccess: (_r, status) => { a.done(status === 'sent' ? 'Invoice marked as sent' : 'Invoice marked as issued'); onClose(); },

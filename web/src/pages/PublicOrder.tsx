@@ -327,7 +327,7 @@ export default function PublicOrder() {
   const shownExact = quote ? quote.total.exact : localExact;
   const pricedOnWeight = quote ? quote.lines.some((l) => l.pricing === 'estimate' || l.pricing === 'by_weight') : local.some((l) => l.pricing === 'estimate' || l.pricing === 'by_weight');
   const cartCount = s.lines.length + (s.special?.trim() ? 1 : 0);
-  const hideBar = typing; // the on-screen keyboard is up: give the search box and results the room
+  const hideBar = typing && s.step === 0; // keyboard up while searching: give the search box and results the room
 
   const totalBlock = shownTotal != null && shownTotal > 0 && (
     <div className="flex items-baseline justify-between gap-3 text-[15px]">
@@ -772,8 +772,11 @@ function AddSheet({ family, start, line, existing, onAdd, onRemove, onClose, cur
   const [count, setCount] = useState<number>(line?.qty.count ?? Math.max(1, p.min_qty ?? 1));
   const [prep, setPrep] = useState<Record<string, string>>(() => line?.preparation ?? defaults(p));
   const [note, setNote] = useState(line?.special_instructions ?? '');
+  const firstPid = useRef(pid);
   useEffect(() => {
-    if (line && line.product_id === p.id) return;
+    // Only when the customer switches to another variation, not on opening
+    if (pid === firstPid.current) return;
+    firstPid.current = pid;
     setOption(p.sale_options[0]?.id ?? null);
     setPrep(defaults(p));
     setQty(null);

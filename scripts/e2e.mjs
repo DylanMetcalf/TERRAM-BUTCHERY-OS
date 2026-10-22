@@ -11,7 +11,8 @@ const cust = await (await b.newContext({ viewport: { width: 390, height: 844 }, 
 cust.on('pageerror', (e) => errors.push('customer: ' + e.message));
 await cust.goto(base + '/order');
 await cust.getByRole('button', { name: /^Lean Mince/ }).first().click();
-await cust.getByRole('button', { name: 'Add to order', exact: false }).click();
+await cust.getByRole('dialog').getByRole('button', { name: /^1 kg pack/ }).click();
+await cust.getByRole('dialog').getByRole('button', { name: /Add to order/ }).click();
 await cust.getByRole('button', { name: /^Rump\b/ }).first().click();
 await cust.getByRole('button', { name: /More quantity/ }).first().click();
 await cust.getByRole('button', { name: 'Thick cut' }).click();
@@ -21,14 +22,14 @@ await cust.getByLabel('Search products').fill('droewors');
 await cust.getByRole('button', { name: /^Droewors/ }).first().click();
 await cust.getByRole('button', { name: /Add to order/ }).click();
 await cust.getByLabel('Search products').fill('');
+await cust.getByLabel('Search products').blur();
 await cust.getByRole('button', { name: /View order/ }).click();
 await cust.getByRole('button', { name: 'Remove Droewors' }).click();
 if (await cust.getByRole('dialog').getByText('Droewors').count()) errors.push('removing from the cart did not work');
 await cust.getByRole('button', { name: 'Checkout' }).click();
-await cust.fill('#n', 'Naledi Zulu');
-await cust.fill('#p', '071 555 3380');
+await cust.getByLabel('Name', { exact: true }).fill('Naledi Zulu');
+await cust.getByLabel('Mobile number').fill('071 555 3380');
 await cust.getByRole('button', { name: 'Continue' }).click();
-await cust.locator('button:has-text("Sat"), button:has-text("Tomorrow"), button:has-text("Fri")').first().click();
 // Address-only mode (the default): the family arranges collection or delivery
 if (await cust.getByText('Your address').count()) await cust.locator('textarea').first().fill('12 Kerk Street, Pretoria East');
 await cust.getByRole('button', { name: 'Continue' }).click();
@@ -52,8 +53,14 @@ step('staff signed in');
 // The form order waits for review — confirm it
 await p.goto(base + '/orders?view=review');
 await p.getByText('Naledi Zulu').first().click();
-await p.getByRole('button', { name: 'Confirm order' }).click();
-await p.getByText('Order confirmed').waitFor();
+await p.getByRole('button', { name: 'Confirm order' }).first().click();
+if (await p.getByRole('dialog').getByRole('button', { name: 'Collection', exact: true }).count()) {
+  await p.getByRole('dialog').getByRole('button', { name: 'Collection', exact: true }).click();
+  await p.getByText('Choose collection or delivery.').waitFor({ state: 'detached' });
+}
+await p.getByRole('button', { name: '1 week' }).click();
+await p.getByRole('dialog').getByRole('button', { name: 'Confirm order' }).click();
+await p.getByText(/Order confirmed/).first().waitFor();
 step('form order reviewed and confirmed');
 
 // 3. Paste messy WhatsApp messages
