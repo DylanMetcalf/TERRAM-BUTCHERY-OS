@@ -581,3 +581,13 @@ describe('notification outbox', () => {
 
 void transition;
 void updateItem;
+
+describe('customer page privacy', () => {
+  it('order pages and their data are not cached or indexed', async () => {
+    const r = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 1 } }]));
+    const res = await pub().get(`/api/public/o/${tokenPath(r.body.order_url)}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('x-robots-tag')).toContain('noindex');
+  });
+});

@@ -24,6 +24,15 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
   const app = new Hono<Env>();
 
   app.use('*', securityHeaders);
+  // Customer pages and their data are private: never cached by shared caches, never indexed
+  app.use('*', async (c, next) => {
+    await next();
+    const path = c.req.path;
+    if (/^\/(o|unsubscribe)\/|^\/account$/.test(path) || /^\/api\/public\/(o|account|unsubscribe)(\/|$)/.test(path)) {
+      c.header('X-Robots-Tag', 'noindex, nofollow');
+      c.header('Cache-Control', 'no-store');
+    }
+  });
   app.use('*', async (c, next) => {
     c.set('requestId', Math.random().toString(36).slice(2, 10));
     await next();
