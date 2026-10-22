@@ -10,6 +10,7 @@ import { recordSystemEvent } from './services/health.js';
 import { buildApp } from './app.js';
 import { startJobs } from './services/jobs.js';
 import { refreshDefaultWording } from './services/settings.js';
+import { backfillItemSnapshots } from './domain/orders.js';
 import { seedStockOnce } from './domain/stock.js';
 
 // Minimal .env loader (no dependency)
@@ -26,6 +27,7 @@ openDatabase(dbPath);
 seedCatalogue();
 upgradeCatalogue();
 applyOrderingRules();
+backfillItemSnapshots();
 refreshDefaultWording();
 seedStockOnce();
 const admin = ensureInitialAdmin();

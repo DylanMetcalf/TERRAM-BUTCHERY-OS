@@ -4,6 +4,8 @@ import { db } from '../db/db.js';
 import { localDate } from '../lib/time.js';
 import { recordSystemEvent } from './health.js';
 import { businessTz } from './settings.js';
+import { processOutbox } from './notify.js';
+import { runReorderReminders } from '../domain/retention.js';
 
 /**
  * Background housekeeping that must run without anyone remembering to do it.
@@ -57,4 +59,17 @@ export function startJobs() {
   timer = setInterval(tick, 15 * 60_000);
   timer.unref();
   setTimeout(tick, 60_000).unref();
+  // Deliver queued messages (and retry failed ones when their time comes) every minute
+  setInterval(() => processOutbox().catch((e) => recordSystemEvent('error', 'notifications', 'Outbox run failed', String(e?.stack ?? e))), 60_000).unref();
+  setTimeout(() => processOutbox().catch(() => undefined), 5_000).unref();
+  // Reorder reminders: checked hourly, each sent once
+  const reminders = () => {
+    try {
+      runReorderReminders();
+    } catch (e) {
+      recordSystemEvent('error', 'notifications', 'Reorder reminders failed', String((e as Error)?.stack ?? e));
+    }
+  };
+  setInterval(reminders, 60 * 60_000).unref();
+  setTimeout(reminders, 2 * 60_000).unref();
 }

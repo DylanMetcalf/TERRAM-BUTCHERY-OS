@@ -59,7 +59,7 @@ export interface BusinessSettings {
     guidance: string;
   };
   /** Reorder reminders and feedback after an order is completed. */
-  retention: { remindersEnabled: boolean; reminderDays: number; feedbackEnabled: boolean; feedbackEmail: boolean };
+  retention: { remindersEnabled: boolean; reminderDays: number; feedbackEnabled: boolean };
   /** Who is told what (customer emails are always the essential ones; these are optional extras). */
   notifications: { staffEmails: string[]; notifyPreparation: boolean; invoiceReadyEmail: boolean };
   /** Stock section housekeeping (starter items are added once). */
@@ -121,7 +121,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     paymentContact: '',
     guidance: 'We’ll ask for payment once your order is packed and we know the final amount.',
   },
-  retention: { remindersEnabled: true, reminderDays: 14, feedbackEnabled: true, feedbackEmail: false },
+  retention: { remindersEnabled: true, reminderDays: 14, feedbackEnabled: true },
   notifications: { staffEmails: [], notifyPreparation: false, invoiceReadyEmail: true },
   stock: { seeded: false },
   customerForm: {

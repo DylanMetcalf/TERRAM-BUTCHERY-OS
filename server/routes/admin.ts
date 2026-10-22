@@ -106,7 +106,7 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
       guidance: z.string().trim().max(500),
     })
     .partial(),
-  retention: z.object({ remindersEnabled: z.boolean(), reminderDays: z.number().int().min(3).max(120), feedbackEnabled: z.boolean(), feedbackEmail: z.boolean() }).partial(),
+  retention: z.object({ remindersEnabled: z.boolean(), reminderDays: z.number().int().min(3).max(120), feedbackEnabled: z.boolean() }).partial(),
   notifications: z.object({ staffEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), notifyPreparation: z.boolean(), invoiceReadyEmail: z.boolean() }).partial(),
   customerForm: z.object({ enabled: z.boolean(), intro: z.string().max(600), confirmationMessage: z.string().max(600), showPrices: z.boolean(), terms: z.string().max(3000), noticeNote: z.string().max(400), notifyEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), emailCustomer: z.boolean() }).partial(),
   brand: z
