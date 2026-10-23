@@ -27,6 +27,8 @@ const TYPE_LABEL: Record<string, string> = {
   ai_failure: 'Could not read message',
   import_failure: 'Import problem',
   integration_failure: 'Integration problem',
+  payment_issue: 'Payment to check',
+  amendment_declined: 'Change declined',
 };
 
 function describeChange(c: any): string {

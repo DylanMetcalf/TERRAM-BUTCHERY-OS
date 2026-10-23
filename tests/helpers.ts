@@ -1,6 +1,7 @@
 import { openDatabase, setDb } from '../server/db/db';
 import { invalidateProducts, listProducts, seedCatalogue } from '../server/domain/products';
 import { clearSettingsCache } from '../server/services/settings';
+import { resetLinkSecret } from '../server/services/links';
 import { createUser } from '../server/domain/users';
 import { buildApp } from '../server/app';
 import type { Actor } from '../server/services/audit';
@@ -13,6 +14,7 @@ export function freshDb(catalogue: 'test' | 'terram' = 'test') {
   setDb(db);
   invalidateProducts();
   clearSettingsCache();
+  resetLinkSecret();
   seedCatalogue(catalogue === 'test' ? TEST_CATALOGUE : undefined);
   return db;
 }
@@ -49,6 +51,25 @@ export class Client {
   get(path: string) {
     return this.req('GET', path);
   }
+  /** multipart/form-data upload (proof of payment, invoice files). */
+  async upload(path: string, file: { name: string; bytes: Buffer | Uint8Array; type?: string }, fields: Record<string, string> = {}) {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+    fd.set('file', new File([file.bytes], file.name, { type: file.type ?? 'application/octet-stream' }));
+    const res = await this.app.request(path, { method: 'POST', headers: { 'x-terram': '1', ...(this.cookie ? { cookie: this.cookie } : {}) }, body: fd });
+    const text = await res.text();
+    let json: any = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = text;
+    }
+    return { status: res.status, body: json, headers: res.headers };
+  }
+  /** Raw response (for file downloads). */
+  async raw(path: string) {
+    return this.app.request(path, { headers: { 'x-terram': '1', ...(this.cookie ? { cookie: this.cookie } : {}) } });
+  }
   post(path: string, body?: unknown, headers?: Record<string, string>) {
     return this.req('POST', path, body ?? {}, headers);
   }
@@ -61,7 +82,7 @@ export async function signedIn(role: Role, app = buildApp()) {
   const email = `${role}-${Math.random().toString(36).slice(2, 8)}@terram.test`;
   createUser({ name: `${role} user`, email, role, password: 'password123' }, { userId: null, kind: 'system' });
   const c = new Client(app);
-  const r = await c.post('/api/auth/login', { email, password: 'password123' });
+  const r = await c.post('/api/auth/login', { email, password: 'password123' }, { 'x-forwarded-for': `192.0.2.${Math.floor(Math.random() * 250)}-${email}` });
   if (r.status !== 200) throw new Error('login failed');
   return c;
 }

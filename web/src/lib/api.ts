@@ -11,11 +11,12 @@ export function newKey(): string {
 
 async function request<T>(method: string, url: string, body?: unknown, opts: { idempotencyKey?: string } = {}): Promise<T> {
   const headers: Record<string, string> = { 'x-terram': '1' };
-  if (body !== undefined) headers['content-type'] = 'application/json';
+  const form = typeof FormData !== 'undefined' && body instanceof FormData;
+  if (body !== undefined && !form) headers['content-type'] = 'application/json';
   if (opts.idempotencyKey) headers['idempotency-key'] = opts.idempotencyKey;
   let res: Response;
   try {
-    res = await fetch(url, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
+    res = await fetch(url, { method, headers, body: form ? (body as FormData) : body !== undefined ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
   } catch {
     throw new ApiError(0, navigator.onLine ? 'Could not reach the server. Please try again.' : 'You are offline. Your changes have not been sent yet.', 'network');
   }
@@ -39,6 +40,8 @@ export const api = {
   patch: <T>(url: string, body?: unknown) => request<T>('PATCH', url, body ?? {}),
   put: <T>(url: string, body?: unknown) => request<T>('PUT', url, body ?? {}),
   del: <T>(url: string) => request<T>('DELETE', url),
+  /** Multipart upload (files); the browser sets the content type. */
+  upload: <T>(url: string, form: FormData) => request<T>('POST', url, form),
 };
 
 export function qs(params: Record<string, string | number | boolean | null | undefined>) {

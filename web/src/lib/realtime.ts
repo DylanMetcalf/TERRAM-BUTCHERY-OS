@@ -23,6 +23,7 @@ const TOPIC_KEYS: Record<string, string[][]> = {
   settings: [['settings'], ['me']],
   intelligence: [['intelligence']],
   stock: [['stock']],
+  notifications: [['notifications'], ['order'], ['dashboard']],
 };
 
 export function startRealtime(qc: QueryClient): () => void {

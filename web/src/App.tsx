@@ -44,11 +44,15 @@ const Intelligence = lazy(() => import('./pages/Intelligence'));
 const Reports = lazy(() => import('./pages/Reports'));
 const Stock = lazy(() => import('./pages/Stock'));
 const Settings = lazy(() => import('./pages/Settings'));
+const Invoices = lazy(() => import('./pages/Invoices'));
 const PrintView = lazy(() => import('./print/Print'));
 const Devices = lazy(() => import('./pages/Devices'));
 const PublicOrder = lazy(() => import('./pages/PublicOrder'));
 const PublicHome = lazy(() => import('./pages/PublicHome'));
 const PublicPrivacy = lazy(() => import('./pages/PublicPrivacy'));
+const CustomerOrderPage = lazy(() => import('./pages/CustomerOrderPage'));
+const CustomerAccount = lazy(() => import('./pages/CustomerAccount'));
+const Unsubscribe = lazy(() => import('./pages/Unsubscribe'));
 
 function FullSpinner() {
   return (
@@ -71,6 +75,18 @@ function Routed() {
   const loc = useLocation();
   if (loc.pathname === '/privacy') {
     return <Suspense fallback={<FullSpinner />}><PublicPrivacy /></Suspense>;
+  }
+  // Customer pages: the order page behind a signed link, order history, reminder preferences
+  if (/^\/(o|unsubscribe)\/[^/]+/.test(loc.pathname) || loc.pathname === '/account') {
+    return (
+      <Suspense fallback={<FullSpinner />}>
+        <Routes>
+          <Route path="/o/:token" element={<CustomerOrderPage />} />
+          <Route path="/account" element={<CustomerAccount />} />
+          <Route path="/unsubscribe/:token" element={<Unsubscribe />} />
+        </Routes>
+      </Suspense>
+    );
   }
   if (loc.pathname === '/order' || loc.pathname.startsWith('/order/')) {
     return (
@@ -138,6 +154,7 @@ function InternalApp() {
                   <Route path="/reports" element={<Reports />} />
                   <Route path="/stock" element={<Stock />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/invoices" element={<Invoices />} />
                   <Route path="/devices" element={<Devices />} />
                   <Route path="/login" element={<Navigate to="/" replace />} />
                   <Route path="*" element={<NotFound />} />

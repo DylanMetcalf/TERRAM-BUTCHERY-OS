@@ -43,7 +43,20 @@ export interface OrderSummary {
   items_packed: number;
   open_exceptions: number;
   items_preview: string;
+  customer_email?: string | null;
+  expected_from?: string | null;
+  expected_to?: string | null;
+  confirmed_by?: string | null;
+  payment_state?: PaymentState;
+  invoice_status?: InvoiceStatus;
+  estimated_total_cents?: number | null;
+  confirmed_total_cents?: number | null;
+  final_total_cents?: number | null;
+  amount_paid_cents?: number | null;
 }
+
+export type PaymentState = 'not_requested' | 'requested' | 'pending' | 'proof_submitted' | 'partially_paid' | 'paid' | 'failed' | 'refunded';
+export type InvoiceStatus = 'not_requested' | 'requested' | 'in_progress' | 'issued' | 'sent' | 'cancelled';
 
 export interface OrderItem {
   id: string;
@@ -64,6 +77,11 @@ export interface OrderItem {
   packed_weight_g: number | null;
   price_cents: number | null;
   price_unit: 'kg' | 'each' | null;
+  sale_option?: string | null;
+  pricing?: 'exact' | 'estimate' | 'by_weight' | 'unpriced' | null;
+  est_cents?: number | null;
+  final_cents?: number | null;
+  unit_price_cents?: number | null;
 }
 
 export interface Preparation {
@@ -74,7 +92,10 @@ export interface Preparation {
   is_default: boolean;
   customer_visible: boolean;
   active: boolean;
+  surcharge_pct?: number;
 }
+
+export interface SaleOption { id: string; label: string; kind: 'pack' | 'piece'; grams: number | null }
 
 export interface Product {
   id: string;
@@ -97,6 +118,13 @@ export interface Product {
   aliases: { id: string; alias: string; source: string }[];
   preparations: Preparation[];
   orders_90d?: number;
+  sale_options?: SaleOption[];
+  min_qty?: number | null;
+  max_qty?: number | null;
+  variant_of?: string | null;
+  variant_label?: string | null;
+  unavailable_reason?: string | null;
+  image?: string | null;
 }
 
 export interface Customer {

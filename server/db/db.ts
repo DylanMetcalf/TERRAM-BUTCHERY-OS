@@ -32,6 +32,17 @@ export function setDb(d: DB) {
 function migrate(d: DB) {
   d.exec(`CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)`);
   const applied = new Set((d.prepare('SELECT id FROM _migrations').all() as { id: number }[]).map((r) => r.id));
+  // Before changing the structure of a database that already holds data, keep a copy of it
+  const pending = MIGRATIONS.filter((m) => !applied.has(m.id));
+  if (pending.length && applied.size && d.name !== ':memory:') {
+    try {
+      const dir = path.join(path.dirname(path.resolve(d.name)), 'backups');
+      fs.mkdirSync(dir, { recursive: true });
+      d.exec(`VACUUM INTO '${path.join(dir, `terram-before-migration-${pending[0].id}-${Date.now()}.db`).replace(/'/g, "''")}'`);
+    } catch (e) {
+      console.error('[terram] Could not back up the database before migrating:', e);
+    }
+  }
   for (const m of MIGRATIONS) {
     if (applied.has(m.id)) continue;
     d.transaction(() => {

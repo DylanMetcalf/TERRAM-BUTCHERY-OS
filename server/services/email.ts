@@ -73,16 +73,24 @@ function getTransport() {
   return transport;
 }
 
-/** Sends one email. Throws on failure (callers decide whether that matters). */
-export async function sendEmail(msg: OutgoingEmail): Promise<void> {
+/** Test hook: EMAIL_TRANSPORT=memory-fail makes every send fail, to exercise retries. */
+export const memoryFail = { next: 0 };
+
+/** Sends one email and returns the mail server's message id. Throws on failure (callers decide whether that matters). */
+export async function sendEmail(msg: OutgoingEmail): Promise<string | null> {
   const to = [...new Set(msg.to.map((x) => x.trim()).filter(Boolean))];
-  if (!to.length) return;
+  if (!to.length) return null;
   if (process.env.EMAIL_TRANSPORT === 'memory') {
+    if (memoryFail.next > 0) {
+      memoryFail.next--;
+      throw Object.assign(new Error('connect ECONNREFUSED (test)'), { code: 'ECONNECTION' });
+    }
     outbox.push({ ...msg, to });
-    return;
+    return `<memory-${outbox.length}@terram.test>`;
   }
   if (!emailConfigured()) throw new Error('Email is not set up on the server (SMTP settings missing).');
-  await getTransport().sendMail({ from: emailFrom(), to, subject: msg.subject, text: msg.text, html: msg.html, replyTo: msg.replyTo || undefined });
+  const info = await getTransport().sendMail({ from: emailFrom(), to, subject: msg.subject, text: msg.text, html: msg.html, replyTo: msg.replyTo || undefined });
+  return info?.messageId ?? null;
 }
 
 /** Fire-and-forget: never delays or fails the request that triggered it; failures show in System health. */

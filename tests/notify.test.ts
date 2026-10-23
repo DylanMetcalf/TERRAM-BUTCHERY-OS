@@ -44,13 +44,20 @@ describe('email for new online orders', () => {
     expect(m.text).toContain('4 steaks Rump');
     expect(m.text).toContain('30 eggs Eggs');
     expect(m.text).toContain('SPECIAL REQUEST: 2kg venison steaks');
-    expect(m.text).toMatch(/Open it in Terram: http:\/\/localhost\/orders\/or_/);
+    // Links use the configured public address, never the address the request arrived on
+    expect(m.text).toMatch(/Open order in Terram: https:\/\/www\.terramfarm\.co\.za\/orders\/or_/);
+    expect(m.text).not.toContain('localhost');
     expect(m.replyTo).toBe('naledi@example.com');
     expect(m.html).not.toContain('<script');
-    const copy = outbox.find((x) => x.subject.startsWith('Your '))!;
+    const copy = outbox.find((x) => x.subject.startsWith('We'))!;
     expect(copy.to).toEqual(['naledi@example.com']);
-    expect(copy.subject).toMatch(/^Your Terram Farm order #\d+$/);
+    expect(copy.subject).toBe("We've received your Terram Farm order");
     expect(copy.text).toContain('4 steaks Rump');
+    expect(copy.text).toMatch(/Order reference: #\d+/);
+    expect(copy.text).toContain('Status: Received, waiting for our confirmation');
+    expect(copy.text).not.toMatch(/has been confirmed|is now confirmed|good news/i); // received is never presented as confirmed
+    expect(copy.text).toContain('Orders generally require 1–2 weeks from confirmation');
+    expect(copy.text).toMatch(/View my order: https:\/\/www\.terramfarm\.co\.za\/o\/or_[^.\s]+\.[\w-]{32}/);
     expect(copy.text).not.toMatch(/\/orders\//); // no staff link for customers
     expect(copy.replyTo).toBe('orders@terramfarm.co.za');
     expect(copy.text).toMatch(/Need to change something\? Reply to this email with your reference #\d+/);

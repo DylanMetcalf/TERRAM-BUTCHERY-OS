@@ -150,7 +150,7 @@ describe('live WhatsApp channel', () => {
 
   it('asks a person before changing a confirmed order', async () => {
     const a = await processInbound(msg('w1', '2kg mince and 4 rumps please'));
-    transition(a.order_id!, 'confirmed', STAFF, 'staff');
+    transition(a.order_id!, 'confirmed', STAFF, 'staff', { confirm: { expected_from: null, expected_to: null } });
     const b = await processInbound(msg('w2', 'Actually make that 3kg mince.'));
     expect(b.exceptions).toBeGreaterThan(0);
     expect(itemsOf(a.order_id!)).toContain('2kg Beef Mince');

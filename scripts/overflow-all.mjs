@@ -4,7 +4,7 @@ const base = 'http://localhost:8092';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const widths = (process.env.WIDTHS ?? '390,768,1024,1280,1440').split(',').map(Number);
 const login = async (p) => { await p.goto(base + '/login'); await p.fill('#email', 'dylan@terram.test'); await p.fill('#password', 'butchery123'); await p.click('button[type=submit]'); await p.waitForTimeout(1000); };
-let paths = ['/', '/orders', '/cutting', '/packing', '/fulfilment', '/customers', '/products', '/stock', '/stock?tab=plan', '/stock?tab=items', '/stock?tab=purchases', '/stock?tab=suppliers', '/exceptions', '/intelligence', '/reports', '/settings', '/devices', '/orders/new', '/import'];
+let paths = ['/', '/orders', '/cutting', '/packing', '/fulfilment', '/customers', '/products', '/stock', '/stock?tab=plan', '/stock?tab=items', '/stock?tab=purchases', '/stock?tab=suppliers', '/exceptions', '/intelligence', '/reports', '/settings', '/devices', '/orders/new', '/import', '/invoices', '/settings?tab=payments', '/settings?tab=messages', '/orders?view=awaiting_payment', '/order', '/account'];
 let problems = 0;
 for (const w of widths) {
   const ctx = await b.newContext({ viewport: { width: w, height: 900 }, isMobile: w < 500 });
@@ -14,7 +14,8 @@ for (const w of widths) {
   const extra = await p.evaluate(async () => {
     const c = await (await fetch('/api/customers?limit=5')).json();
     const o = await (await fetch('/api/orders?limit=3')).json();
-    return [...c.customers.slice(0, 2).map((x) => `/customers/${x.id}`), ...(o.orders ?? []).slice(0, 2).map((x) => `/orders/${x.id}`)];
+    const links = await Promise.all((o.orders ?? []).slice(0, 2).map(async (x) => (await (await fetch(`/api/orders/${x.id}/link`)).json()).url));
+    return [...c.customers.slice(0, 2).map((x) => `/customers/${x.id}`), ...(o.orders ?? []).slice(0, 2).map((x) => `/orders/${x.id}`), ...links.filter(Boolean).map((u) => new URL(u).pathname)];
   });
   for (const path of [...paths, ...extra]) {
     await p.goto(base + path); await p.waitForTimeout(700);

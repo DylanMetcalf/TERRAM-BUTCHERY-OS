@@ -24,7 +24,20 @@ import {
   updateItem,
   updateOrder,
   type OrderSummary,
- deleteOrder } from '../domain/orders.js';
+ deleteOrder,
+  addEvent,
+  confirmOrder,
+  confirmationProblems,
+  changeTimeframe,
+  orderMoney,
+  setItemWeight,
+} from '../domain/orders.js';
+import { listAmendments, proposeAmendment, withdrawAmendment } from '../domain/amendments.js';
+import { createPaymentRequest, openRequest, paymentSummary, reversePayment, reviewProof, recordVerifiedPayment, sendPaymentRequestEmail } from '../domain/payments.js';
+import { INVOICE_LABEL, listInvoiceRequests, requestInvoice, updateInvoiceRequest } from '../domain/invoices.js';
+import { listNotifications, notificationProblemCount, retryNotification } from '../services/notify.js';
+import { orderUrl, revokeOrderLinks } from '../services/links.js';
+import { fileHeaders, readFile, storeFile } from '../services/files.js';
 import { findPossibleDuplicates } from '../domain/duplicates.js';
 import { raiseException } from '../domain/exceptions.js';
 import { actorOf, requirePerm, roleOf, type Env } from '../http/context.js';
@@ -50,6 +63,9 @@ r.get('/', requirePerm('orders.read'), (c) => {
   else if (view === 'undated') where.push("o.requested_date IS NULL AND o.status NOT IN ('completed','cancelled')");
   else if (view === 'completed') where.push("o.status = 'completed'");
   else if (view === 'cancelled') where.push("o.status = 'cancelled'");
+  else if (view === 'awaiting_payment') where.push("o.payment_state IN ('requested','pending','partially_paid','failed') AND o.status != 'cancelled'");
+  else if (view === 'proofs') where.push("EXISTS (SELECT 1 FROM payment_proofs p WHERE p.order_id = o.id AND p.status = 'submitted')");
+  else if (view === 'awaiting_customer') where.push("EXISTS (SELECT 1 FROM order_amendments a WHERE a.order_id = o.id AND a.status = 'proposed' AND a.requires_approval = 1)");
   if (q.status && (ORDER_STATUSES as readonly string[]).includes(q.status)) where.push('o.status = ?'), vals.push(q.status);
   const from = ymdParam(q.from);
   const to = ymdParam(q.to);
@@ -158,7 +174,19 @@ r.get('/:id', requirePerm('orders.read'), (c) => {
   const transitions = allowedTransitions(order.status).filter((t) => (t === 'cancelled' ? can(role, 'orders.cancel') : true));
   const customer = db().prepare('SELECT id, name, phone, email, address, notes FROM customers WHERE id = ?').get(order.customer_id);
   const replies = db().prepare("SELECT id, body, created_at FROM notifications WHERE order_id = ? AND kind = 'reply_suggestion' ORDER BY created_at DESC LIMIT 3").all(order.id);
-  return c.json({ order, items, events, messages, interpretations, exceptions, transitions, customer, replies });
+  const inv = db().prepare('SELECT invoice_details, invoice_file_id FROM orders WHERE id = ?').get(order.id) as any;
+  const invoiceFile = inv?.invoice_file_id ? db().prepare('SELECT id, filename, size, created_at FROM files WHERE id = ?').get(inv.invoice_file_id) : null;
+  const feedback = db().prepare('SELECT rating, comment, created_at FROM order_feedback WHERE order_id = ?').get(order.id) ?? null;
+  return c.json({
+    order, items, events, messages, interpretations, exceptions, transitions, customer, replies,
+    money: orderMoney(order.id),
+    payment: can(role, 'orders.read') ? paymentSummary(order.id) : null,
+    amendments: listAmendments(order.id),
+    invoice: { status: order.invoice_status, status_label: INVOICE_LABEL[order.invoice_status], details: json(inv?.invoice_details, null), reference: order.invoice_ref, issued_on: order.invoice_issued_on, sent_at: order.invoice_sent_at, file: invoiceFile },
+    notifications: listNotifications({ orderId: order.id, limit: 50 }),
+    confirmation_problems: ['review', 'needs_clarification', 'on_hold'].includes(order.status) ? confirmationProblems(order.id) : [],
+    feedback,
+  });
 });
 
 r.patch('/:id', requirePerm('orders.write'), async (c) => {
@@ -173,6 +201,113 @@ r.post('/:id/transition', requirePerm('orders.write'), async (c) => {
   if (['cutting', 'cut', 'packing', 'packed', 'ready', 'out_for_delivery', 'completed'].includes(to) && !can(role, 'production.write')) throw badRequest('You cannot move orders through production.');
   const order = transition(c.req.param('id'), to as OrderStatus, actorOf(c), role, { note });
   return c.json({ order });
+});
+
+// ── Confirmation & timeframe ─────────────────────────────────
+const Timeframe = z.object({ expected_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose the expected date'), expected_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional() });
+
+r.post('/:id/confirm', requirePerm('orders.write'), async (c) => {
+  const input = await body(c, Timeframe);
+  const res = confirmOrder(c.req.param('id'), { expected_from: input.expected_from, expected_to: input.expected_to ?? null }, actorOf(c), roleOf(c));
+  return c.json(res);
+});
+
+r.post('/:id/timeframe', requirePerm('orders.write'), async (c) => {
+  const input = await body(c, Timeframe.extend({ reason: z.string().max(500).default('') }));
+  return c.json({ order: changeTimeframe(c.req.param('id'), { expected_from: input.expected_from, expected_to: input.expected_to ?? null, reason: input.reason }, actorOf(c)) });
+});
+
+// ── Amendments ───────────────────────────────────────────────
+r.post('/:id/amendments', requirePerm('orders.write'), async (c) => {
+  const input = await body(
+    c,
+    z.object({
+      kind: z.enum(['change_qty', 'remove_item', 'replace_product', 'timeframe', 'other']),
+      reason: z.string().trim().min(1, 'Explain the reason').max(500),
+      item_id: z.string().max(64).nullable().optional(),
+      product_id: z.string().max(64).nullable().optional(),
+      sale_option: z.string().max(40).nullable().optional(),
+      qty: QtySchema.nullable().optional(),
+      preparation: PrepSchema.nullable(),
+      expected_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      expected_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      message: z.string().max(1000).nullable().optional(),
+      requires_approval: z.boolean().optional(),
+    }),
+  );
+  return c.json({ amendment: proposeAmendment(c.req.param('id'), input as any, actorOf(c)) });
+});
+
+// ── Payments ─────────────────────────────────────────────────
+r.post('/:id/payment-request', requirePerm('orders.write'), (c) => {
+  const res = createPaymentRequest(c.req.param('id'), actorOf(c));
+  return c.json({ created: res.created, payment: paymentSummary(c.req.param('id')) });
+});
+
+r.post('/:id/payment-request/resend', requirePerm('orders.write'), (c) => {
+  const req = openRequest(c.req.param('id'));
+  if (!req) throw badRequest('There is no open payment request to send again.');
+  const n = (db().prepare("SELECT COUNT(*) n FROM notifications WHERE event_key LIKE ?").get(`payment_requested:${req.id}%`) as { n: number }).n;
+  sendPaymentRequestEmail(c.req.param('id'), req, n);
+  return c.json({ ok: true });
+});
+
+r.post('/:id/payments', requirePerm('payments.write'), async (c) => {
+  const input = await body(c, z.object({ method: z.enum(['eft', 'cash', 'card', 'other']), amount_cents: z.number().int().positive().max(100_000_000), note: z.string().max(500).nullable().optional() }));
+  const res = recordVerifiedPayment(c.req.param('id'), { method: input.method, amount_cents: input.amount_cents, request_id: openRequest(c.req.param('id'))?.id ?? null, note: input.note ?? null }, actorOf(c), 'staff');
+  return c.json({ payment: res.payment, summary: paymentSummary(c.req.param('id')) });
+});
+
+// ── Invoice request ──────────────────────────────────────────
+const InvoiceDetails = z.object({
+  billing_name: z.string().trim().min(2).max(120),
+  company: z.string().max(120).nullable().optional(),
+  billing_email: z.string().trim().email().max(200),
+  billing_address: z.string().max(300).nullable().optional(),
+  vat_number: z.string().max(40).nullable().optional(),
+  instructions: z.string().max(500).nullable().optional(),
+});
+
+r.post('/:id/invoice/request', requirePerm('orders.write'), async (c) => {
+  const d = await body(c, InvoiceDetails);
+  return c.json({ order: requestInvoice(c.req.param('id'), d as any, actorOf(c)) });
+});
+
+r.patch('/:id/invoice', requirePerm('payments.write'), async (c) => {
+  const u = await body(
+    c,
+    z.object({
+      status: z.enum(['requested', 'in_progress', 'issued', 'sent', 'cancelled']).optional(),
+      reference: z.string().max(80).nullable().optional(),
+      issued_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      assignee: z.string().max(64).nullable().optional(),
+      details: InvoiceDetails.nullable().optional(),
+      notify_customer: z.boolean().optional(),
+    }),
+  );
+  return c.json({ order: updateInvoiceRequest(c.req.param('id'), u as any, actorOf(c)) });
+});
+
+r.post('/:id/invoice/file', requirePerm('payments.write'), async (c) => {
+  if (Number(c.req.header('content-length') ?? 0) > 11 * 1024 * 1024) throw badRequest('The file is too big. The limit is 10 MB.');
+  const form = await c.req.parseBody();
+  const file = form.file;
+  if (!file || typeof file === 'string') throw badRequest('Choose the invoice file.');
+  const stored = storeFile('invoice', c.req.param('id'), file.name, Buffer.from(await file.arrayBuffer()), actorOf(c));
+  return c.json({ order: updateInvoiceRequest(c.req.param('id'), { file_id: stored.id }, actorOf(c)), file: stored });
+});
+
+// ── Customer link ────────────────────────────────────────────
+r.get('/:id/link', requirePerm('orders.write'), (c) => {
+  requireOrder(c.req.param('id'));
+  return c.json({ url: orderUrl(c.req.param('id')) });
+});
+
+r.post('/:id/link/revoke', requirePerm('orders.write'), (c) => {
+  const o = requireOrder(c.req.param('id'));
+  revokeOrderLinks(o.id);
+  addEvent(o.id, 'link_revoked', 'Customer order link replaced (old links no longer work)', actorOf(c));
+  return c.json({ url: orderUrl(o.id) });
 });
 
 r.post('/:id/items', requirePerm('orders.write'), async (c) => {
@@ -200,7 +335,7 @@ r.post('/:id/packed', requirePerm('production.write'), (c) => c.json({ order: co
 export const items = new Hono<Env>();
 
 items.patch('/:id', requirePerm('orders.write'), async (c) => {
-  const patch = await body(c, z.object({ qty: QtySchema.optional(), preparation: PrepSchema, special_instructions: z.string().max(500).nullable().optional(), product_id: z.string().max(64).optional() }));
+  const patch = await body(c, z.object({ qty: QtySchema.optional(), sale_option: z.string().max(40).nullable().optional(), preparation: PrepSchema, special_instructions: z.string().max(500).nullable().optional(), product_id: z.string().max(64).optional() }));
   return c.json({ item: updateItem(c.req.param('id'), patch as any, actorOf(c), { reason: 'Edited by staff' }) });
 });
 
@@ -215,6 +350,11 @@ items.post('/:id/packed', requirePerm('production.write'), async (c) => {
   return c.json({ item: getItem(c.req.param('id')) });
 });
 
+items.post('/:id/weight', requirePerm('production.write'), async (c) => {
+  const { weight_g } = await body(c, z.object({ weight_g: z.number().positive().max(500000).nullable() }));
+  return c.json({ item: setItemWeight(c.req.param('id'), weight_g == null ? null : Math.round(weight_g), actorOf(c)) });
+});
+
 items.post('/cut', requirePerm('production.write'), async (c) => {
   const { item_ids, cut } = await body(c, z.object({ item_ids: z.array(z.string().max(64)).min(1).max(500), cut: z.boolean() }));
   const orders = setItemsCut(item_ids, cut, actorOf(c));
@@ -222,3 +362,41 @@ items.post('/cut', requirePerm('production.write'), async (c) => {
 });
 
 export default r;
+
+/** Staff-only actions not tied to one order URL. */
+export const staffPayments = new Hono<Env>();
+
+staffPayments.post('/proofs/:id/review', requirePerm('payments.write'), async (c) => {
+  const input = await body(c, z.discriminatedUnion('accept', [z.object({ accept: z.literal(true), amount_cents: z.number().int().positive().max(100_000_000), note: z.string().max(500).nullable().optional() }), z.object({ accept: z.literal(false), reason: z.string().trim().min(1, 'Give a reason').max(500) })]));
+  const payment = reviewProof(c.req.param('id'), input as any, actorOf(c));
+  return c.json({ ok: true, payment });
+});
+
+staffPayments.post('/payments/:id/reverse', requirePerm('payments.write'), async (c) => {
+  const { reason } = await body(c, z.object({ reason: z.string().trim().min(1, 'Give a reason').max(500) }));
+  reversePayment(c.req.param('id'), reason, actorOf(c));
+  return c.json({ ok: true });
+});
+
+/** Private files (proofs, invoices) for signed-in staff only. */
+staffPayments.get('/files/:id', requirePerm('orders.read'), (c) => {
+  const f = readFile(c.req.param('id'));
+  return c.body(new Uint8Array(f.data), 200, fileHeaders(f, c.req.query('inline') === '1'));
+});
+
+staffPayments.get('/invoices', requirePerm('orders.read'), (c) => {
+  const f = c.req.query('filter');
+  return c.json({ requests: listInvoiceRequests(f === 'done' || f === 'all' ? f : 'outstanding') });
+});
+
+staffPayments.get('/notifications', requirePerm('system.health'), (c) => c.json({ notifications: listNotifications({ status: c.req.query('status') || null, limit: 300 }), problems: notificationProblemCount() }));
+
+staffPayments.post('/notifications/:id/retry', requirePerm('system.health'), (c) => {
+  if (!retryNotification(c.req.param('id'))) throw badRequest('Only a message that failed or wasn’t sent can be tried again.');
+  return c.json({ ok: true });
+});
+
+staffPayments.post('/amendments/:id/withdraw', requirePerm('orders.write'), (c) => {
+  withdrawAmendment(c.req.param('id'), actorOf(c));
+  return c.json({ ok: true });
+});

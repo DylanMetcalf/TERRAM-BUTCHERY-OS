@@ -12,6 +12,7 @@ export const PrepSchema = z.record(z.string().max(60), z.string().max(80)).optio
 
 export const ItemSchema = z.object({
   product_id: z.string().min(1).max(64),
+  sale_option: z.string().max(40).nullable().optional(),
   qty: QtySchema,
   preparation: PrepSchema,
   special_instructions: z.string().max(500).nullable().optional(),
@@ -57,6 +58,7 @@ export const OrderPatchSchema = z.object({
   payment_status: z.enum(['unpaid', 'pending', 'paid']).optional(),
   accounting_ref: optStr(100),
   customer_id: z.string().max(64).optional(),
+  customer_email: z.string().trim().max(200).email('Enter a valid email').nullable().optional().or(z.literal('').transform(() => null)),
 });
 
 export const PublicOrderSchema = z.object({
@@ -68,9 +70,25 @@ export const PublicOrderSchema = z.object({
   items: z.array(ItemSchema.omit({ special_instructions: true }).extend({ special_instructions: z.string().max(300).nullable().optional() })).max(40),
   special_request: optStr(1500),
   fulfilment_type: z.enum(['collection', 'delivery']).nullable().optional(),
-  requested_date: ymd,
+  /** The customer's preferred date (optional: lead time counts from confirmation). */
+  requested_date: ymd.nullable().optional(),
   delivery_address: optStr(300),
   notes: optStr(1000),
+  invoice: z
+    .object({
+      billing_name: z.string().trim().min(2, 'Enter the name for the invoice').max(120),
+      company: optStr(120),
+      billing_email: z.string().trim().max(200).email('Enter the email the invoice should go to'),
+      billing_address: optStr(300),
+      vat_number: optStr(40),
+      instructions: optStr(500),
+    })
+    .nullable()
+    .optional(),
+  /** Optional, unticked by default: occasional reorder reminders. Ordering never depends on it. */
+  marketing_consent: z.boolean().optional(),
+  /** The total the customer was shown; if prices changed since, they're asked to look again. */
+  seen_total_cents: z.number().int().min(0).nullable().optional(),
   website: z.string().max(0).optional(), // honeypot — must stay empty
   client_ref: z.string().min(8).max(80),
 });

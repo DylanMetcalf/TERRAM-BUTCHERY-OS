@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import path from 'node:path';
 import fs from 'node:fs';
 import { openDatabase } from './db/db.js';
-import { seedCatalogue, upgradeCatalogue } from './domain/products.js';
+import { applyOrderingRules, seedCatalogue, upgradeCatalogue } from './domain/products.js';
 import { ensureInitialAdmin } from './domain/users.js';
 import { purgeExpiredSessions } from './auth/sessions.js';
 import { purgeIdempotencyKeys } from './http/security.js';
@@ -10,6 +10,7 @@ import { recordSystemEvent } from './services/health.js';
 import { buildApp } from './app.js';
 import { startJobs } from './services/jobs.js';
 import { refreshDefaultWording } from './services/settings.js';
+import { backfillItemSnapshots } from './domain/orders.js';
 import { seedStockOnce } from './domain/stock.js';
 
 // Minimal .env loader (no dependency)
@@ -25,6 +26,8 @@ const dbPath = process.env.DATABASE_PATH ?? './data/terram.db';
 openDatabase(dbPath);
 seedCatalogue();
 upgradeCatalogue();
+applyOrderingRules();
+backfillItemSnapshots();
 refreshDefaultWording();
 seedStockOnce();
 const admin = ensureInitialAdmin();

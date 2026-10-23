@@ -10,19 +10,29 @@ import { DEFAULT_BRAND_COLOUR, getSettings } from './services/settings.js';
 import { loadUser, requireAuth, type Env } from './http/context.js';
 import { csrfGuard, idempotency, securityHeaders } from './http/security.js';
 import auth from './routes/auth.js';
-import orders, { items } from './routes/orders.js';
+import orders, { items, staffPayments } from './routes/orders.js';
 import production from './routes/production.js';
 import { customers, products } from './routes/catalog.js';
 import { exceptions, imports, intelligence, misc } from './routes/intelligence.js';
 import admin from './routes/admin.js';
 import publicRoutes from './routes/public.js';
 import integrations from './routes/integrations.js';
+import customerRoutes from './routes/customer.js';
 import stock from './routes/stock.js';
 
 export function buildApp(opts: { staticDir?: string | null } = {}) {
   const app = new Hono<Env>();
 
   app.use('*', securityHeaders);
+  // Customer pages and their data are private: never cached by shared caches, never indexed
+  app.use('*', async (c, next) => {
+    await next();
+    const path = c.req.path;
+    if (/^\/(o|unsubscribe)\/|^\/account$/.test(path) || /^\/api\/public\/(o|account|unsubscribe)(\/|$)/.test(path)) {
+      c.header('X-Robots-Tag', 'noindex, nofollow');
+      c.header('Cache-Control', 'no-store');
+    }
+  });
   app.use('*', async (c, next) => {
     c.set('requestId', Math.random().toString(36).slice(2, 10));
     await next();
@@ -31,7 +41,7 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
   app.onError((err, c) => {
     if (err instanceof AppError) {
       if (err.status === 401 && err.code === 'unauthenticated') return c.json({ error: err.userMessage, code: err.code }, 401);
-      return c.json({ error: err.userMessage, code: err.code, details: err.status === 400 ? err.details : undefined }, err.status as any);
+      return c.json({ error: err.userMessage, code: err.code, details: err.status === 400 || err.status === 409 ? err.details : undefined }, err.status as any);
     }
     if (err?.name === 'ZodError') return c.json({ error: 'Please check the details and try again.', code: 'bad_request' }, 400);
     const ref = c.get('requestId') ?? '';
@@ -46,6 +56,7 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
   api.route('/auth', auth);
   api.route('/public', publicRoutes);
   api.route('/integrations', integrations);
+  api.route('/public', customerRoutes);
   api.route('/orders', orders);
   api.route('/items', items);
   api.route('/production', production);
@@ -56,6 +67,7 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
   api.route('/intelligence', intelligence);
   api.route('/stock', stock);
   api.route('/admin', admin);
+  api.route('/', staffPayments);
   api.route('/', misc);
 
   api.get('/health', (c) => c.json({ ok: true }));

@@ -1,31 +1,39 @@
 import { Hono } from 'hono';
 import { db, id, now } from '../db/db.js';
-import { estimateLinePrice, formatMoney, formatQty } from '../../shared/quantity.js';
-import { escapeHtml, sendEmailInBackground } from '../services/email.js';
+import { formatQty } from '../../shared/quantity.js';
+import { priceLine, totalOf, withSurcharge } from '../../shared/pricing.js';
 import { normalisePhone } from '../../shared/text.js';
 import { AppError, badRequest } from '../lib/errors.js';
 import { addDays, localDate, weekdayOf } from '../lib/time.js';
 import { CUSTOMER } from '../services/audit.js';
 import { businessTz, getSettings } from '../services/settings.js';
+import { orderToken } from '../services/links.js';
+import { paymentMethods } from '../services/payment-config.js';
 import { matchCustomer } from '../domain/customers.js';
 import { findPossibleDuplicates } from '../domain/duplicates.js';
 import { raiseException } from '../domain/exceptions.js';
-import { createOrder, getItems, requireOrder } from '../domain/orders.js';
-import { listProducts, prepGroups, requireProduct } from '../domain/products.js';
+import { createOrder, getItems, quoteItem, requireOrder, validateItem, type ItemInput } from '../domain/orders.js';
+import { onOrderReceived } from '../domain/lifecycle.js';
+import { listProducts, prepGroups, requireProduct, type Product } from '../domain/products.js';
 import { body, PublicOrderSchema } from '../http/schemas.js';
 import { rateLimit } from '../http/security.js';
+import { z } from 'zod';
 
 /** Public customer ordering — feeds the same central order engine as everything else. */
 const r = new Hono();
 
+export const PACKAGING_NOTE = 'Packaged products are prepared using our standard vacuum packaging to help maintain freshness.';
+
 r.get('/info', (c) => {
   const s = getSettings();
   const today = localDate(new Date(), businessTz());
+  const pm = paymentMethods();
   return c.json({
     business: { name: s.business.name, tagline: s.business.tagline, phone: s.business.phone, email: s.business.email, address: s.business.address },
-    // Only what the order form needs — never the internal email recipients
-    form: { enabled: s.customerForm.enabled, intro: s.customerForm.intro, confirmationMessage: s.customerForm.confirmationMessage, showPrices: s.customerForm.showPrices, terms: s.customerForm.terms, noticeNote: s.customerForm.noticeNote },
+    // Only what the order form needs — never the internal email recipients or banking details
+    form: { enabled: s.customerForm.enabled, intro: s.customerForm.intro, confirmationMessage: s.customerForm.confirmationMessage, showPrices: s.customerForm.showPrices, terms: s.customerForm.terms, noticeNote: s.customerForm.noticeNote, leadTime: s.orders.leadTimeText, packagingNote: PACKAGING_NOTE },
     fulfilment: { collectionDays: s.fulfilment.collectionDays, deliveryDays: s.fulfilment.deliveryDays, deliveryEnabled: s.fulfilment.deliveryEnabled, collectionHours: s.fulfilment.collectionHours, collectionPlace: s.fulfilment.collectionPlace, collectionAddress: s.fulfilment.collectionAddress, deliveryNotes: s.fulfilment.deliveryNotes, freeDeliveryKm: s.fulfilment.freeDeliveryKm, deliveryRatePerKmCents: s.fulfilment.deliveryRatePerKmCents, customerChooses: s.fulfilment.customerChooses, showDeliveryFees: s.fulfilment.showDeliveryFees },
+    payments: { online: pm.online, eft: pm.eft, guidance: s.payments.guidance },
     earliest_date: addDays(today, s.orders.leadTimeDays),
     today,
     currency: s.business.currency,
@@ -37,28 +45,91 @@ r.get('/brand', (c) => {
   return c.json({ name: s.business.name, tagline: s.business.tagline, primary: s.brand.primary, showName: s.brand.showName, hasLogo: !!s.brand.logo, version: s.brand.version });
 });
 
+/** What a customer may see about a product: prices (if shown), sizes, options and availability. */
+export function publicProduct(p: Product, showPrices: boolean) {
+  const unit = p.price_cents;
+  return {
+    id: p.id,
+    // Products switched off but still "shown on the form" stay listed as out of stock, so customers see them
+    out_of_stock: !p.active,
+    unavailable_reason: !p.active ? p.unavailable_reason : null,
+    name: p.customer_name,
+    category: p.category,
+    description: p.description,
+    image: p.image,
+    quantity_type: p.quantity_type,
+    allows_portions: p.allows_portions,
+    piece_noun: p.piece_noun,
+    typical_piece_g: p.typical_piece_g,
+    pack_size: p.pack_size,
+    min_qty: p.min_qty,
+    max_qty: p.max_qty,
+    variant_of: p.variant_of,
+    variant_label: p.variant_label,
+    price_cents: showPrices ? unit : null,
+    price_unit: showPrices ? p.price_unit : null,
+    sale_options: p.sale_options.map((o) => {
+      const q = priceLine({ qty: o.kind === 'pack' ? { kind: 'portions', count: 1, weight_g: o.grams } : { kind: 'count', count: 1, weight_g: null }, unitPriceCents: unit, priceUnit: p.price_unit, saleKind: o.kind, pieceGrams: o.grams });
+      return { id: o.id, label: o.label, kind: o.kind, grams: o.grams, price_cents: showPrices ? q.cents : null, pricing: q.pricing };
+    }),
+    options: prepGroups(p, { customerOnly: true }).map((g) => ({ group: g.group, options: g.options.map((o) => ({ name: o.name, is_default: o.is_default, surcharge_pct: o.surcharge_pct || 0 })) })),
+  };
+}
+
 r.get('/catalogue', (c) => {
   const show = getSettings().customerForm.showPrices;
   const products = listProducts()
-    // Products switched off but still "shown on the form" stay listed as out of stock, so customers see them
     .filter((p) => p.customer_visible)
-    .map((p) => ({
-      id: p.id,
-      out_of_stock: !p.active,
-      name: p.customer_name,
-      category: p.category,
-      description: p.description,
-      quantity_type: p.quantity_type,
-      allows_portions: p.allows_portions,
-      piece_noun: p.piece_noun,
-      typical_piece_g: p.typical_piece_g,
-      pack_size: p.pack_size,
-      price_cents: show ? p.price_cents : null,
-      price_unit: show ? p.price_unit : null,
-      options: prepGroups(p, { customerOnly: true }).map((g) => ({ group: g.group, options: g.options.map((o) => ({ name: o.name, is_default: o.is_default })) })),
-    }));
+    .map((p) => publicProduct(p, show));
   return c.json({ products });
 });
+
+/**
+ * Prices a basket exactly as the order will be priced, from today's catalogue. The form shows this
+ * on the review step, so a customer always sees current prices and availability before sending.
+ */
+export function quoteBasket(items: ItemInput[]) {
+  const show = getSettings().customerForm.showPrices;
+  const lines = items.map((it, index) => {
+    try {
+      const p = requireProduct(it.product_id);
+      if (!p.customer_visible) return { index, ok: false, problem: 'This product is no longer on our list.', product_id: it.product_id, pricing: null, cents: null };
+      if (!p.active) return { index, ok: false, problem: `${p.customer_name} is out of stock at the moment.`, product_id: it.product_id, pricing: null, cents: null };
+      const v = validateItem(it, { customer: true });
+      for (const [g, val] of Object.entries(v.preparation)) {
+        const opt = p.preparations.find((o) => o.group_name === g && o.name === val);
+        if (opt && !opt.customer_visible && it.preparation?.[g]) return { index, ok: false, problem: `That option is not available for ${p.customer_name}.`, product_id: it.product_id, pricing: null, cents: null };
+      }
+      const q = quoteItem(v);
+      return {
+        index,
+        ok: true,
+        problem: null,
+        product_id: p.id,
+        label: v.sale_option && v.sale_option.kind === 'piece' ? `${v.qty.count} × ${v.sale_option.label}` : formatQty(v.qty, p.piece_noun),
+        preparation_label: v.preparation_label,
+        pricing: show ? q.pricing : 'unpriced',
+        cents: show ? q.est_cents : null,
+        unit_price_cents: show ? q.unit_price_cents : null,
+        price_unit: q.price_unit,
+        surcharge_pct: q.surcharge_pct,
+      };
+    } catch (e) {
+      return { index, ok: false, problem: e instanceof AppError ? e.userMessage : 'This item can’t be ordered as chosen.', product_id: it.product_id, pricing: null, cents: null };
+    }
+  });
+  const okLines = lines.filter((l) => l.ok);
+  const total = totalOf(okLines.map((l) => ({ pricing: l.pricing as any, cents: l.cents })));
+  return { lines, total: { estimate_cents: okLines.length ? total.estimateCents : null, exact: total.exact && okLines.length > 0, pending_lines: total.pendingLines } };
+}
+
+const QuoteSchema = z.object({ items: PublicOrderSchema.shape.items });
+r.post('/quote', rateLimit('public-quote', 120, 10 * 60_000), async (c) => {
+  const input = await body(c, QuoteSchema);
+  return c.json(quoteBasket(input.items as ItemInput[]));
+});
+
+void withSurcharge;
 
 r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   const s = getSettings();
@@ -69,14 +140,15 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   const existing = db().prepare('SELECT id FROM orders WHERE idempotency_key = ?').get(idemKey) as any;
   if (existing) {
     const o = requireOrder(existing.id);
-    return c.json({ ok: true, order_number: o.order_number, message: s.customerForm.confirmationMessage, replay: true });
+    return c.json({ ok: true, order_number: o.order_number, order_url: `/o/${orderToken(o.id)}`, message: s.customerForm.confirmationMessage, replay: true });
   }
   // Business rules the form must respect (never trust the browser)
   const today = localDate(new Date(), businessTz());
   const earliest = addDays(today, s.orders.leadTimeDays);
-  if (input.requested_date < earliest) throw badRequest('Please choose a later date.');
-  if (input.requested_date > addDays(today, 90)) throw badRequest('Please choose a date within the next three months.');
-  const wd = weekdayOf(input.requested_date);
+  const date = input.requested_date ?? null;
+  if (date && date < earliest) throw badRequest('Please choose a later date.');
+  if (date && date > addDays(today, 90)) throw badRequest('Please choose a date within the next three months.');
+  const wd = date ? weekdayOf(date) : null;
   // "Address only" mode: the customer gives an address and the family arranges collection or delivery
   const chooses = s.fulfilment.customerChooses;
   const fulfilmentType = chooses ? (input.fulfilment_type ?? 'collection') : null;
@@ -84,40 +156,40 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
     if (!input.delivery_address?.trim()) throw badRequest('Please enter your address so we can arrange your order.');
   } else if (fulfilmentType === 'delivery') {
     if (!s.fulfilment.deliveryEnabled) throw badRequest('Delivery is not available at the moment.');
-    if (!s.fulfilment.deliveryDays.includes(wd)) throw badRequest('We do not deliver on that day.');
+    if (wd != null && !s.fulfilment.deliveryDays.includes(wd)) throw badRequest('We do not deliver on that day.');
     if (!input.delivery_address?.trim()) throw badRequest('Please enter your delivery address.');
-  } else if (!s.fulfilment.collectionDays.includes(wd)) throw badRequest('We are not open for collections on that day.');
+  } else if (wd != null && !s.fulfilment.collectionDays.includes(wd)) throw badRequest('We are not open for collections on that day.');
   const special = input.special_request?.trim() || null;
   if (!input.items.length && !special) throw badRequest('Please choose at least one product, or describe what you need under Special requests.');
-  for (const it of input.items) {
-    const p = requireProduct(it.product_id);
-    if (!p.customer_visible) throw badRequest('One of the products is no longer available. Please refresh the page.');
-    if (!p.active) throw badRequest(`Sorry, ${p.customer_name} is out of stock at the moment. Please remove it from your order.`);
-    if (p.pack_size && (it.qty.kind !== 'count' || (it.qty.count ?? 0) % p.pack_size !== 0)) throw badRequest(`${p.customer_name} are sold in lots of ${p.pack_size}. Please choose ${p.pack_size}, ${p.pack_size * 2}, ${p.pack_size * 3}…`);
-    for (const [g, v] of Object.entries(it.preparation ?? {})) {
-      const opt = p.preparations.find((o) => o.group_name === g && o.name === v);
-      if (!opt || !opt.customer_visible || !opt.active) throw badRequest(`That option is not available for ${p.customer_name}.`);
-    }
+  // Every line is re-checked and re-priced on the server; the browser's view is never trusted
+  const quote = quoteBasket(input.items as ItemInput[]);
+  const bad = quote.lines.find((l) => !l.ok);
+  if (bad) throw new AppError(400, bad.problem ?? 'Please review your order.', 'basket_problem', { quote });
+  if (input.seen_total_cents != null && quote.total.estimate_cents != null && quote.total.estimate_cents !== input.seen_total_cents) {
+    throw new AppError(409, 'Some prices have changed since you started your order. Please check the new total and send again.', 'prices_changed', { quote });
   }
   const phone = normalisePhone(input.customer.phone);
   if (!phone) throw badRequest('Please enter a valid phone number.');
   const match = matchCustomer({ phone, email: input.customer.email || null });
   const customer = match.status === 'matched' ? { id: match.customer.id } : { new: { name: input.customer.name, phone: input.customer.phone, email: input.customer.email || null, address: input.delivery_address ?? null } };
+  const products = new Map(input.items.map((i) => [i.product_id, requireProduct(i.product_id)]));
   // Preserve the raw submission as a message, like any other channel
   const messageId = id('ms_');
-  const summary = input.items.map((i) => `${formatQty(i.qty as any, requireProduct(i.product_id).piece_noun)} ${requireProduct(i.product_id).customer_name}${Object.values(i.preparation ?? {}).length ? ` (${Object.values(i.preparation ?? {}).join(', ')})` : ''}${i.special_instructions ? ` — ${i.special_instructions}` : ''}`).join('\n');
+  const summary = quote.lines.map((l, k) => `${(l as any).label} ${products.get(l.product_id)!.customer_name}${(l as any).preparation_label ? ` (${(l as any).preparation_label})` : ''}${input.items[k].special_instructions ? ` — ${input.items[k].special_instructions}` : ''}`).join('\n');
   db()
     .prepare("INSERT INTO messages (id, channel, external_id, direction, sender_name, sender_phone, body, received_at, classification, status, created_at) VALUES (?, 'form', ?, 'in', ?, ?, ?, ?, 'new_order', 'processed', ?)")
-    .run(messageId, input.client_ref, input.customer.name, phone, `${summary}${special ? `\nSpecial request: ${special}` : ''}\n${fulfilmentType === 'delivery' ? 'Delivery' : fulfilmentType === 'collection' ? 'Collection' : 'Wanted by'} ${input.requested_date}${!chooses && input.delivery_address ? `\nAddress: ${input.delivery_address}` : ''}${input.notes ? `\nNote: ${input.notes}` : ''}\n\n${JSON.stringify(input)}`, now(), now());
+    .run(messageId, input.client_ref, input.customer.name, phone, `${summary}${special ? `\nSpecial request: ${special}` : ''}\n${fulfilmentType === 'delivery' ? 'Delivery' : fulfilmentType === 'collection' ? 'Collection' : 'Preferred date'} ${date ?? 'not given'}${!chooses && input.delivery_address ? `\nAddress: ${input.delivery_address}` : ''}${input.notes ? `\nNote: ${input.notes}` : ''}\n\n${JSON.stringify(input)}`, now(), now());
   const order = createOrder(
     {
       customer,
       source: 'form',
-      items: input.items.map((i) => ({ product_id: i.product_id, qty: i.qty as any, preparation: i.preparation ?? {}, special_instructions: i.special_instructions ?? null, source_text: 'Order form' })),
-      // A special request alone has nothing to cut yet: it waits until it's agreed with the customer
-      status: !input.items.length ? 'needs_clarification' : s.orders.formOrdersRequireReview || special ? 'review' : 'confirmed',
+      items: input.items.map((i) => ({ product_id: i.product_id, sale_option: i.sale_option ?? null, qty: i.qty as any, preparation: i.preparation ?? {}, special_instructions: i.special_instructions ?? null, source_text: 'Order form' })),
+      // Online orders always wait for a person at Terram to confirm them. A special request alone has nothing to cut yet.
+      status: !input.items.length ? 'needs_clarification' : 'review',
       fulfilment_type: fulfilmentType,
-      requested_date: input.requested_date,
+      requested_date: date,
+      customer_email: input.customer.email || null,
+      invoice: input.invoice ? { billing_name: input.invoice.billing_name, company: input.invoice.company || null, billing_email: input.invoice.billing_email, billing_address: input.invoice.billing_address || null, vat_number: input.invoice.vat_number || null, instructions: input.invoice.instructions || null } : null,
       delivery_address: fulfilmentType === 'collection' ? null : input.delivery_address ?? null,
       contact_phone: input.customer.phone,
       notes: input.notes ?? null,
@@ -128,6 +200,9 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
     CUSTOMER,
   );
   db().prepare('UPDATE messages SET customer_id = ? WHERE id = ?').run(order.customer_id, messageId);
+  // Reminders only with a clear yes; never taken away by ordering without ticking it
+  if (input.marketing_consent) db().prepare('UPDATE customers SET marketing_consent = 1, marketing_consent_at = ? WHERE id = ?').run(now(), order.customer_id);
+  if (input.customer.email) db().prepare('UPDATE customers SET email = COALESCE(email, ?) WHERE id = ?').run(input.customer.email.toLowerCase(), order.customer_id);
   if (special) {
     db().prepare('UPDATE orders SET special_request = ? WHERE id = ?').run(special, order.id);
     raiseException({
@@ -153,87 +228,8 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   const dups = findPossibleDuplicates(order.customer_id, getItems(order.id).map((i) => ({ product_id: i.product_id, qty: i.qty })), { excludeOrderId: order.id, requestedDate: order.requested_date });
   if (dups.length)
     raiseException({ type: 'possible_duplicate', severity: 'warning', title: `Online order #${order.order_number} may duplicate #${dups[0].order_number}`, detail: dups[0].reasons.join(', '), order_id: order.id, payload: { duplicate_of: { order_id: dups[0].order_id, order_number: dups[0].order_number } } });
-  emailNewOrder(c, order.id, special, input.notes ?? null, input.customer.email || null);
-  return c.json({ ok: true, order_number: order.order_number, message: s.customerForm.confirmationMessage });
+  onOrderReceived(order.id, { special, notes: input.notes ?? null });
+  return c.json({ ok: true, order_number: order.order_number, order_url: `/o/${orderToken(order.id)}`, message: s.customerForm.confirmationMessage });
 });
-
-/** Emails a new online order to the addresses in Settings → Customer form (the family's backup copy). */
-function emailNewOrder(c: any, orderId: string, special: string | null, notes: string | null, customerEmail: string | null) {
-  const s = getSettings();
-  const to = s.customerForm.notifyEmails;
-  if (!to.length && !(customerEmail && s.customerForm.emailCustomer)) return;
-  const o = requireOrder(orderId);
-  const items = getItems(orderId);
-  const proto = c.req.header('x-forwarded-proto') ?? new URL(c.req.url).protocol.replace(':', '');
-  const link = `${proto}://${c.req.header('x-forwarded-host') ?? c.req.header('host') ?? new URL(c.req.url).host}/orders/${o.id}`;
-  const lines = items.map((i) => {
-    const est = estimateLinePrice(i.qty, (i as any).price_cents ?? null, (i as any).price_unit ?? null);
-    return { text: `${i.qty_label} ${i.product_name}${i.preparation_label ? ` (${i.preparation_label})` : ''}${i.special_instructions ? ` — ${i.special_instructions}` : ''}`, est };
-  });
-  const total = lines.every((l) => l.est != null) && lines.length ? lines.reduce((t, l) => t + (l.est ?? 0), 0) : null;
-  const when = o.fulfilment_type ? `${o.fulfilment_type === 'delivery' ? 'Delivery' : 'Collection'} on ${o.requested_date ?? '—'}` : `Wanted by ${o.requested_date ?? '—'} (collection or delivery to be arranged)`;
-  const facts: [string, string][] = [
-    ['Customer', `${o.customer_name}${o.contact_phone ? ` · ${o.contact_phone}` : ''}${customerEmail ? ` · ${customerEmail}` : ''}`],
-    ['When', when],
-    ...(o.fulfilment_type !== 'collection' && o.delivery_address ? [['Address', o.delivery_address] as [string, string]] : []),
-    ...(notes ? [['Note', notes] as [string, string]] : []),
-  ];
-  const text = [
-    `New online order #${o.order_number}`,
-    '',
-    ...facts.map(([k, v]) => `${k}: ${v}`),
-    '',
-    ...(lines.length ? ['Items:', ...lines.map((l) => `- ${l.text}`)] : []),
-    ...(total != null ? ['', `Estimated total: ${formatMoney(total, s.business.currency)}`] : []),
-    ...(special ? ['', `SPECIAL REQUEST: ${special}`] : []),
-    '',
-    `Open it in Terram: ${link}`,
-  ].join('\n');
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#262626;max-width:560px">
-<h2 style="margin:0 0 12px;color:#446041">New online order #${o.order_number}</h2>
-<table style="border-collapse:collapse;margin-bottom:14px">${facts.map(([k, v]) => `<tr><td style="padding:3px 12px 3px 0;color:#777">${k}</td><td style="padding:3px 0"><b>${escapeHtml(v)}</b></td></tr>`).join('')}</table>
-${lines.length ? `<ul style="padding-left:18px;margin:0 0 12px">${lines.map((l) => `<li style="margin:3px 0">${escapeHtml(l.text)}</li>`).join('')}</ul>` : ''}
-${total != null ? `<p style="margin:0 0 12px">Estimated total: <b>${formatMoney(total, s.business.currency)}</b></p>` : ''}
-${special ? `<p style="margin:0 0 12px;padding:10px 12px;background:#f8edd8;border-radius:8px"><b>Special request:</b> ${escapeHtml(special)}</p>` : ''}
-<p><a href="${escapeHtml(link)}" style="display:inline-block;background:#446041;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none">Open order in Terram</a></p>
-</div>`;
-  sendEmailInBackground({ to, subject: `New order #${o.order_number} — ${o.customer_name}${special ? ' (special request)' : ''}`, text, html, replyTo: customerEmail }, `online order #${o.order_number}`);
-
-  // The customer's own copy: what they asked for, and that we'll confirm it (no staff link)
-  if (customerEmail && s.customerForm.emailCustomer) {
-    const b = s.business;
-    const wa = (b.phone ?? '').replace(/\D/g, '').replace(/^0/, '27');
-    const ctext = [
-      `Hi ${o.customer_name.split(' ')[0]},`,
-      '',
-      `Thank you for your order with ${b.name}. We've received it (reference #${o.order_number}) and will be in touch to confirm it.`,
-      '',
-      ...(lines.length ? ['Your order:', ...lines.map((l) => `- ${l.text}`)] : []),
-      ...(total != null ? ['', `Estimated total: ${formatMoney(total, b.currency)} (final price depends on the packed weight)`] : []),
-      ...(special ? ['', `Special request: ${special}`] : []),
-      '',
-      when,
-      ...(o.fulfilment_type !== 'collection' && o.delivery_address ? [`${o.fulfilment_type === 'delivery' ? 'Delivery to' : 'Your address'}: ${o.delivery_address}`] : []),
-      '',
-      `Need to change something? Reply to this email with your reference #${o.order_number}${b.phone ? `, or call/WhatsApp ${b.phone}` : ''}, and we'll update your order.`,
-      '',
-      b.name,
-    ].join('\n');
-    const chtml = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#262626;max-width:560px">
-<p>Hi ${escapeHtml(o.customer_name.split(' ')[0])},</p>
-<p>Thank you for your order with ${escapeHtml(b.name)}. We've received it (reference <b>#${o.order_number}</b>) and will be in touch to confirm it.</p>
-${lines.length ? `<ul style="padding-left:18px">${lines.map((l) => `<li style="margin:3px 0">${escapeHtml(l.text)}</li>`).join('')}</ul>` : ''}
-${total != null ? `<p>Estimated total: <b>${formatMoney(total, b.currency)}</b> <span style="color:#777">(final price depends on the packed weight)</span></p>` : ''}
-${special ? `<p style="padding:10px 12px;background:#f8edd8;border-radius:8px"><b>Special request:</b> ${escapeHtml(special)}</p>` : ''}
-<p>${escapeHtml(when)}${o.fulfilment_type !== 'collection' && o.delivery_address ? `<br>${o.fulfilment_type === 'delivery' ? 'Delivery to' : 'Your address'}: ${escapeHtml(o.delivery_address)}` : ''}</p>
-<div style="margin:18px 0;padding:12px 14px;border:1px solid #e4e4de;border-radius:10px">
-<b>Need to change something?</b><br>Reply to this email with your reference <b>#${o.order_number}</b>${b.phone ? `, or call us on ${escapeHtml(b.phone)}` : ''}, and we'll update your order.
-${wa ? `<p style="margin:10px 0 0"><a href="https://wa.me/${wa}?text=${encodeURIComponent(`Hi, I'd like to change my order #${o.order_number}: `)}" style="display:inline-block;background:#446041;color:#fff;padding:9px 14px;border-radius:8px;text-decoration:none">WhatsApp us about order #${o.order_number}</a></p>` : ''}
-</div>
-<p style="color:#446041;font-weight:bold">${escapeHtml(b.name)}</p>
-</div>`;
-    sendEmailInBackground({ to: [customerEmail], subject: `Your ${b.name} order #${o.order_number}`, text: ctext, html: chtml, replyTo: b.email || null }, `order confirmation to the customer #${o.order_number}`);
-  }
-}
 
 export default r;
