@@ -19,6 +19,21 @@ This covers the customer ordering platform: catalogue rules, the order form, con
 9. **Completed**: the customer can leave optional feedback and **Reorder**. Reorder loads a new draft basket at today's prices; the customer reviews and sends it. Nothing is ordered automatically.
 10. **Reorder reminders** (optional): sent only to customers who ticked the reminder box, about 14 days after completion (configurable). Each customer gets one per order, and none if they've ordered again since. Every reminder has an unsubscribe link.
 
+## Instagram, Google reviews and past orders
+
+- *Settings → Business*: paste your **Instagram profile link** and your **Google review link** (Google Business Profile → "Ask for reviews" → copy link). If either is left blank, it isn't shown.
+- **Instagram** is offered to every customer: on the thank-you screen, the order page and in emails.
+- **Google review** is offered only to customers who have actually had an order completed. That means the thank-you screen for a returning customer, the order page once completed, and the "order complete" email. Everyone who qualifies is asked, whatever their rating. Google's rules don't allow inviting only happy customers.
+- **Past orders**:
+  - Each device remembers the orders placed or opened on it ("Orders from this device").
+  - Customer emails include a "See all your orders" link that signs them in for 30 days.
+  - Customers can also get a 6-digit code at `/account`.
+  - Orders are never shown just because someone typed a name or phone number. Anyone could type those.
+
+## Vegetables and new sections
+
+In *Products → Add product*, type a new category such as **Vegetables** (or "Vegetables – Leafy greens"). The part before the dash becomes a tab on the order form. Use "each" pricing with a piece name like *bunch* or *head*, or price per kg.
+
 ## Server environment variables (Render → Environment)
 
 Secrets live only here, never in the app or on devices.

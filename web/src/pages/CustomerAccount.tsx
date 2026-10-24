@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronRight, LogOut } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { DeviceOrders } from '../components/Social';
 import { PublicShell } from '../components/PublicShell';
 import { Button, Card, Field, Input, Spinner, Switch } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -13,7 +14,21 @@ import { dateTime, formatMoney } from '../lib/format';
  */
 export default function CustomerAccount() {
   const qc = useQueryClient();
-  const { data, error, isLoading } = useQuery({ queryKey: ['customer-account'], queryFn: () => api.get<any>('/api/public/account'), retry: false });
+  const [params, setParams] = useSearchParams();
+  const linkToken = params.get('k');
+  // "See all your orders" from an email: the link itself proves the address, so sign straight in
+  const viaLink = useMutation({
+    mutationFn: (token: string) => api.post('/api/public/account/link', { token }),
+    onSettled: () => {
+      setParams({}, { replace: true });
+      qc.invalidateQueries({ queryKey: ['customer-account'] });
+    },
+  });
+  useEffect(() => {
+    if (linkToken && !viaLink.isPending) viaLink.mutate(linkToken);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkToken]);
+  const { data, error, isLoading } = useQuery({ queryKey: ['customer-account'], queryFn: () => api.get<any>('/api/public/account'), retry: false, enabled: !linkToken });
   useEffect(() => {
     document.title = 'Your orders';
   }, []);
@@ -21,8 +36,15 @@ export default function CustomerAccount() {
   const logout = useMutation({ mutationFn: () => api.post('/api/public/account/logout'), onSuccess: () => qc.removeQueries({ queryKey: ['customer-account'] }) });
   const prefs = useMutation({ mutationFn: (reminders: boolean) => api.post<any>('/api/public/account/preferences', { reminders }), onSuccess: (r) => qc.setQueryData(['customer-account'], r) });
 
-  if (isLoading) return <PublicShell subtitle="Your orders"><div className="flex justify-center py-24"><Spinner className="size-6" /></div></PublicShell>;
-  if (signedOut || !data) return <PublicShell subtitle="Your orders"><SignIn onDone={() => qc.invalidateQueries({ queryKey: ['customer-account'] })} /></PublicShell>;
+  if (isLoading || linkToken) return <PublicShell subtitle="Your orders"><div className="flex justify-center py-24"><Spinner className="size-6" /></div></PublicShell>;
+  if (signedOut || !data)
+    return (
+      <PublicShell subtitle="Your orders">
+        {viaLink.error && <p className="mx-auto mb-4 max-w-md rounded-xl bg-ochre-soft px-4 py-3 text-[14px] text-ochre-soft-ink">{(viaLink.error as Error).message}</p>}
+        <SignIn initialEmail={params.get('email') ?? ''} onDone={() => qc.invalidateQueries({ queryKey: ['customer-account'] })} />
+        <div className="mx-auto mt-5 max-w-md"><DeviceOrders limit={10} /></div>
+      </PublicShell>
+    );
 
   return (
     <PublicShell subtitle="Your orders">
@@ -63,8 +85,8 @@ export default function CustomerAccount() {
   );
 }
 
-function SignIn({ onDone }: { onDone: () => void }) {
-  const [email, setEmail] = useState('');
+function SignIn({ onDone, initialEmail }: { onDone: () => void; initialEmail: string }) {
+  const [email, setEmail] = useState(initialEmail);
   const [code, setCode] = useState('');
   const [sent, setSent] = useState<string | null>(null);
   const ask = useMutation({ mutationFn: () => api.post<{ message: string }>('/api/public/account/code', { email }), onSuccess: (r) => setSent(r.message) });

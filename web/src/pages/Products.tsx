@@ -193,10 +193,11 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
             <Field label="Name customers see" optional><Input value={v.customer_name ?? ''} onChange={(e) => set('customer_name', e.target.value)} /></Field>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Category">
-              <Select value={v.category} onChange={(e) => set('category', e.target.value)}>
-                {[...new Set([...(allProducts?.products ?? []).map((x) => x.category), v.category].filter(Boolean))].map((c) => <option key={c}>{c}</option>)}
-              </Select>
+            <Field label="Category" htmlFor="product-category" hint="Pick one, or type a new one, e.g. “Vegetables” or “Vegetables – Leafy greens”. The part before the dash becomes a tab on the order form.">
+              <Input id="product-category" list="product-categories" value={v.category ?? ''} onChange={(e) => set('category', e.target.value)} placeholder="e.g. Vegetables" />
+              <datalist id="product-categories">
+                {[...new Set([...(allProducts?.products ?? []).map((x) => x.category), 'Vegetables'].filter(Boolean))].map((c) => <option key={c} value={c} />)}
+              </datalist>
             </Field>
             <Field label="Price" optional>
               <div className="flex gap-2">

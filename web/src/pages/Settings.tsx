@@ -103,6 +103,10 @@ function Business({ s }: { s: any }) {
         <Field label="Email"><Input value={v.email} onChange={(e) => setV({ ...v, email: e.target.value })} /></Field>
       </div>
       <Field label="Address"><Textarea rows={2} value={v.address} onChange={(e) => setV({ ...v, address: e.target.value })} /></Field>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Instagram profile link" optional hint="Shown to customers after they order, and in emails."><Input value={v.instagramUrl ?? ''} onChange={(e) => setV({ ...v, instagramUrl: e.target.value })} placeholder="https://www.instagram.com/…" /></Field>
+        <Field label="Google review link" optional hint="Google Business Profile → “Ask for reviews” → copy the link. Only shown to customers who have had an order completed."><Input value={v.googleReviewUrl ?? ''} onChange={(e) => setV({ ...v, googleReviewUrl: e.target.value })} placeholder="https://g.page/r/…/review" /></Field>
+      </div>
       <Field label="Public web address" hint="Used for every link in customer emails (order pages, payments). Must be the live https address, e.g. https://www.terramfarm.co.za."><Input value={v.siteUrl ?? ''} onChange={(e) => setV({ ...v, siteUrl: e.target.value })} placeholder="https://www.terramfarm.co.za" /></Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Time zone" hint="Decides what “today” and “Saturday” mean."><Input value={v.timezone} onChange={(e) => setV({ ...v, timezone: e.target.value })} /></Field>

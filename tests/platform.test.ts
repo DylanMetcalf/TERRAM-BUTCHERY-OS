@@ -6,7 +6,7 @@ import { db } from '../server/db/db';
 import { outbox, memoryFail } from '../server/services/email';
 import { processOutbox, retryNotification } from '../server/services/notify';
 import { updateSettings } from '../server/services/settings';
-import { orderFromToken, orderToken } from '../server/services/links';
+import { accountLinkToken, emailFromAccountLink, orderFromToken, orderToken } from '../server/services/links';
 import { createOrder, getItems, requireOrder, transition, updateItem, completePacking, setItemsCut } from '../server/domain/orders';
 import { updateProduct } from '../server/domain/products';
 import { handleItn, phpUrlencode, signFields } from '../server/domain/payfast';
@@ -589,5 +589,59 @@ describe('customer page privacy', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     expect(res.headers.get('x-robots-tag')).toContain('noindex');
+  });
+});
+
+describe('reviews, Instagram and finding past orders', () => {
+  const REVIEW = 'https://g.page/r/terram-test/review';
+  const IG = 'https://www.instagram.com/terramfarm_test';
+  const setLinks = () => updateSettings('business', { instagramUrl: IG, googleReviewUrl: REVIEW } as any, null);
+
+  it('admins can only save real Instagram and Google review links', async () => {
+    const admin = await signedIn('admin');
+    expect((await admin.req('PUT', '/api/admin/settings/business', { instagramUrl: 'https://evil.example.com/x' })).status).toBe(400);
+    expect((await admin.req('PUT', '/api/admin/settings/business', { googleReviewUrl: 'javascript:alert(1)' })).status).toBe(400);
+    expect((await admin.req('PUT', '/api/admin/settings/business', { instagramUrl: IG, googleReviewUrl: REVIEW })).status).toBe(200);
+    expect((await pub().get('/api/public/info')).body.business).toMatchObject({ instagramUrl: IG, googleReviewUrl: REVIEW });
+  });
+
+  it('the Google review invitation goes only to customers who have had an order completed', async () => {
+    setLinks();
+    const first = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 1 } }]));
+    expect(first.body.returning_customer).toBe(false);
+    const view = (await pub().get(`/api/public/o/${tokenPath(first.body.order_url)}`)).body.order;
+    expect(view.social).toEqual({ instagram: IG, review: null });
+    // Complete that order: now its page, the completion email and the next order all invite a review
+    const id = orderFromToken(tokenPath(first.body.order_url))!;
+    db().prepare("UPDATE orders SET status = 'ready', confirmed_at = ?, fulfilment_type = 'collection' WHERE id = ?").run(new Date().toISOString(), id);
+    transition(id, 'completed', STAFF, 'admin', { system: true });
+    await flush();
+    expect((await pub().get(`/api/public/o/${tokenPath(first.body.order_url)}`)).body.order.social.review).toBe(REVIEW);
+    const doneMail = mail(/is complete/)[0];
+    expect(doneMail.html).toContain(REVIEW);
+    expect(doneMail.html).toContain(IG);
+    const again = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 2 } }]));
+    expect(again.body.returning_customer).toBe(true);
+  });
+
+  it('the “see all your orders” email link signs the customer in; tampered or expired links don’t', async () => {
+    createOrder({ customer: { new: { name: 'Alice', email: 'alice@example.com' } }, source: 'phone', status: 'review', customer_email: 'alice@example.com', items: [{ product_id: productId('beef_rump'), qty: kg(1000) }] }, STAFF);
+    const token = accountLinkToken('Alice@Example.com');
+    expect(emailFromAccountLink(token)).toBe('alice@example.com');
+    expect(emailFromAccountLink(token, Date.now() + 31 * 86400_000)).toBeNull();
+    const [e, exp] = token.split('.');
+    const forged = `${Buffer.from('bob@example.com').toString('base64url')}.${exp}.${token.split('.')[2]}`;
+    expect(emailFromAccountLink(forged)).toBeNull();
+    expect(emailFromAccountLink(`${e}.${Number(exp) + 999999}.${token.split('.')[2]}`)).toBeNull();
+    const c = pub();
+    expect((await c.post('/api/public/account/link', { token: forged })).status).toBe(400);
+    expect((await c.post('/api/public/account/link', { token })).status).toBe(200);
+    const acct = await c.get('/api/public/account');
+    expect(acct.status).toBe(200);
+    expect(acct.body.orders).toHaveLength(1);
+    // The received email carries the link
+    await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 1 } }]));
+    await flush();
+    expect(mail(/received your/)[0].html).toContain('/account?k=');
   });
 });

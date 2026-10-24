@@ -18,7 +18,7 @@ import { listProducts, type Product } from './products.js';
 export type StockKind = 'carcass' | 'cut' | 'ingredient' | 'packaging' | 'other';
 export type StockUnit = 'kg' | 'each' | 'pack';
 export const STOCK_KINDS: StockKind[] = ['carcass', 'cut', 'ingredient', 'packaging', 'other'];
-export const EXPENSE_CATEGORIES = ['Beef', 'Lamb', 'Other meat', 'Spices & ingredients', 'Packaging', 'Abattoir & processing', 'Transport', 'Equipment & repairs', 'Other'] as const;
+export const EXPENSE_CATEGORIES = ['Beef', 'Lamb', 'Other meat', 'Vegetables', 'Spices & ingredients', 'Packaging', 'Abattoir & processing', 'Transport', 'Equipment & repairs', 'Other'] as const;
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 

@@ -25,49 +25,52 @@ c.on('pageerror', (e) => fail('customer page error: ' + e.message));
 await c.goto(base + '/order');
 await c.getByRole('heading', { name: 'What would you like?' }).waitFor();
 
-// Mobile search: what you type stays visible and the results sit above the keyboard
-await c.getByLabel('Search products').tap();
-await c.waitForTimeout(500);
+// Mobile search: a full-screen panel with the box at the top and results under it, above the keyboard
+const panel = c.getByRole('dialog', { name: 'Search products' });
+const openSearch = () => c.getByRole('button', { name: /^Search products/ }).tap();
+const pick = async (term, name) => {
+  await openSearch();
+  await panel.getByRole('searchbox').fill(term);
+  await panel.getByRole('button', { name }).first().tap();
+  await c.getByRole('dialog').getByRole('button', { name: /Add to order/ }).waitFor();
+};
+await openSearch();
 await c.setViewportSize({ width: 390, height: 420 }); // the keyboard takes the bottom half
-await c.getByLabel('Search products').pressSequentially('mince', { delay: 30 });
-await c.waitForTimeout(500);
+await panel.getByRole('searchbox').pressSequentially('mince', { delay: 30 });
+await c.waitForTimeout(400);
 const s = await c.evaluate(() => {
-  const i = document.querySelector('input[aria-label="Search products"]').getBoundingClientRect();
-  const first = [...document.querySelectorAll('main section button')].find((x) => /Mince/.test(x.textContent))?.getBoundingClientRect();
-  const bar = document.querySelector('.safe-bottom.fixed')?.getBoundingClientRect();
-  return { input: [i.top, i.bottom], first: first ? [first.top, first.bottom] : null, bar: bar ? bar.top : null, h: innerHeight, value: document.querySelector('input[aria-label="Search products"]').value };
+  const dlg = document.querySelector('[role=dialog][aria-label="Search products"]');
+  const i = dlg.querySelector('input').getBoundingClientRect();
+  const first = [...dlg.querySelectorAll('li button')].find((x) => /Mince/.test(x.textContent))?.getBoundingClientRect();
+  return { input: [i.top, i.bottom], first: first ? [first.top, first.bottom] : null, h: innerHeight, value: dlg.querySelector('input').value, focused: document.activeElement === dlg.querySelector('input') };
 });
 if (s.value !== 'mince') fail(`search box shows "${s.value}"`);
+if (!s.focused) fail('search box did not get the keyboard focus from the tap');
 if (s.input[0] < 0 || s.input[1] > s.h) fail(`search box off screen: ${JSON.stringify(s)}`);
-if (!s.first || s.first[0] > s.h - 40) fail(`first result not visible above the keyboard: ${JSON.stringify(s)}`);
-if (s.bar != null && s.bar < s.h) fail(`bottom bar covers the screen while typing: ${JSON.stringify(s)}`);
+if (!s.first || s.first[1] > s.h) fail(`first result not visible above the keyboard: ${JSON.stringify(s)}`);
 await shot(c, '01-mobile-search-keyboard');
-step(`mobile search visible while typing (input ${Math.round(s.input[0])}–${Math.round(s.input[1])}, first result at ${Math.round(s.first?.[0])}, viewport ${s.h})`);
-await c.getByLabel('Search products').press('Enter');
+step(`mobile search panel: box at ${Math.round(s.input[0])}–${Math.round(s.input[1])}, first result ends at ${Math.round(s.first?.[1])}, visible height ${s.h}`);
 await c.setViewportSize({ width: 390, height: 844 });
 
-// Lean mince: a size must be chosen; 2 × 1kg packs, exact price
-await c.getByRole('button', { name: /^Lean Mince/ }).first().click();
+// Lean mince (picked straight from the search panel): a size must be chosen; 2 × 1kg packs, exact price
+await panel.getByRole('button', { name: /^Lean Mince/ }).first().tap();
 await c.getByRole('dialog').getByRole('button', { name: /^1 kg pack/ }).click();
 await c.getByRole('dialog').getByRole('button', { name: 'More' }).click();
 const addLabel = await c.getByRole('dialog').getByRole('button', { name: /Add to order/ }).textContent();
-if (!/R\s?250/.test(addLabel.replace(/ /g, ' '))) fail(`mince 2 × 1kg price on button: ${addLabel}`);
+if (!/R\s?250/.test(addLabel.replace(/\u00a0/g, ' '))) fail(`mince 2 × 1kg price on button: ${addLabel}`);
 await c.getByRole('dialog').getByRole('button', { name: /Add to order/ }).click();
-await c.getByLabel('Clear search').click();
 // Rib-eye on the bone is an option inside the rib-eye card
-await c.getByLabel('Search products').fill('rib eye');
-await c.getByRole('button', { name: /^Rib-Eye/ }).first().click();
+await pick('rib eye', /^Rib-Eye/);
 await c.getByRole('dialog').getByRole('button', { name: /On the bone/ }).click();
 await c.getByRole('dialog').getByRole('button', { name: 'More quantity' }).first().click().catch(() => undefined);
 await c.getByRole('dialog').getByRole('button', { name: /Add to order/ }).click();
 // Dry-aged rump: surcharge shown
-await c.getByLabel('Search products').fill('rump');
-await c.getByRole('button', { name: /^Rump/ }).first().click();
+await pick('rump', /^Rump/);
 await c.getByRole('dialog').getByRole('button', { name: /Dry-aged/ }).click();
 if (!(await c.getByText(/instead of/).count())) fail('dry-aged surcharge price not shown');
 await c.getByRole('dialog').getByRole('button', { name: 'More quantity' }).first().click().catch(() => undefined);
 await c.getByRole('dialog').getByRole('button', { name: /Add to order/ }).click();
-await c.getByLabel('Clear search').click();
+await c.getByRole('button', { name: 'Clear search' }).first().tap().catch(() => undefined);
 if (await c.getByText('Packing', { exact: true }).count()) fail('packaging is still offered as a customer choice');
 await shot(c, '02-catalogue');
 await c.getByRole('button', { name: /View order/ }).click();
@@ -119,6 +122,8 @@ await p.getByRole('button', { name: 'Save' }).first().click();
 await p.getByText('Settings saved').first().waitFor();
 await shot(p, '07-settings-banking');
 step('admin entered banking details and switched EFT on');
+const links = await api(p, 'PUT', '/api/admin/settings/business', { instagramUrl: 'https://www.instagram.com/terramfarm_example', googleReviewUrl: 'https://g.page/r/terram-example/review' });
+if (links.status !== 200) fail('saving social links: ' + JSON.stringify(links.body));
 
 const list = await api(p, 'GET', '/api/orders?view=review');
 const order = list.body.orders.find((o) => o.customer_name === 'Thandi Journey-Test');
@@ -242,6 +247,20 @@ await shot(c, '14-reorder-draft');
 const drafts = await api(p, 'GET', '/api/orders?view=review');
 if (drafts.body.orders.some((o) => o.customer_name === 'Thandi Journey-Test')) fail('reorder created an order by itself');
 step('reorder loaded a draft basket (nothing sent)');
+
+// Send the reorder: a returning customer is invited to review on Google and follow on Instagram
+await c.getByRole('button', { name: 'Checkout' }).click();
+await c.getByRole('button', { name: 'Continue' }).click();
+await c.getByRole('button', { name: 'Continue' }).click();
+await c.getByText(/Checking today’s prices/).waitFor({ state: 'detached' }).catch(() => undefined);
+if (await c.getByRole('checkbox').count()) await c.getByRole('checkbox').check();
+await c.getByRole('button', { name: 'Send order' }).click();
+await c.getByRole('heading', { name: 'Order received' }).waitFor();
+if (!(await c.getByRole('link', { name: /Leave a Google review/ }).count())) fail('returning customer not invited to review');
+if (!(await c.getByRole('link', { name: /Instagram/ }).count())) fail('Instagram link missing');
+if (!(await c.getByText('Orders from this device').count())) fail('device orders not listed');
+await shot(c, '16-returning-done');
+step('returning customer: Google review + Instagram + past orders on the thank-you screen');
 
 // Messages were recorded honestly (email isn't configured on the QA server)
 const notes = (await api(p, 'GET', `/api/orders/${order.id}`)).body.notifications;

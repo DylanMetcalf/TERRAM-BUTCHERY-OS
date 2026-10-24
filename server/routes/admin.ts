@@ -59,6 +59,8 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
       .regex(/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}(\/[^\s]*)?$/i, 'Enter the full web address, starting with https://')
       .refine((u) => !/localhost|127\.0\.0\.1|\.local\b/i.test(u), 'Use the public web address, not a local one.')
       .transform((u) => u.replace(/\/+$/, '')),
+    instagramUrl: z.string().trim().max(300).regex(/^(https:\/\/(www\.)?instagram\.com\/[^\s]+)?$/i, 'Paste your Instagram profile link, e.g. https://www.instagram.com/terramfarm'),
+    googleReviewUrl: z.string().trim().max(500).regex(/^(https:\/\/(g\.page|maps\.app\.goo\.gl|search\.google\.com|www\.google\.[a-z.]+|google\.[a-z.]+|maps\.google\.[a-z.]+|g\.co)\/[^\s]*)?$/i, 'Paste the “Ask for reviews” link from your Google Business Profile (it starts with https://g.page/ or https://search.google.com/).'),
   }).partial(),
   orders: z.object({
     leadTimeText: z.string().trim().min(1).max(300),

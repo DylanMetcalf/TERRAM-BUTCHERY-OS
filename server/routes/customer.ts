@@ -5,7 +5,7 @@ import { db, now } from '../db/db.js';
 import { AppError, badRequest, notFound } from '../lib/errors.js';
 import { body } from '../http/schemas.js';
 import { rateLimit } from '../http/security.js';
-import { customerFromUnsubscribe, orderFromToken } from '../services/links.js';
+import { customerFromUnsubscribe, emailFromAccountLink, orderFromToken } from '../services/links.js';
 import { fileHeaders, readFile, storeFile } from '../services/files.js';
 import { getSettings } from '../services/settings.js';
 import { respondToAmendment } from '../domain/amendments.js';
@@ -15,6 +15,7 @@ import { requireOrder } from '../domain/orders.js';
 import {
   accountView,
   CUSTOMER_COOKIE,
+  createCustomerSession,
   customerCancel,
   customerOrderView,
   emailForSession,
@@ -135,6 +136,16 @@ r.post('/account/verify', rateLimit('account-verify', 15, 15 * 60_000), async (c
   const input = await body(c, z.object({ email: z.string().trim().max(200), code: z.string().trim().max(12) }));
   const session = verifySignInCode(input.email, input.code);
   if (!session) throw new AppError(400, 'That code isn’t right or has expired. Check the latest email, or ask for a new code.', 'bad_code');
+  setCookie(c, CUSTOMER_COOKIE, session.token, { httpOnly: true, sameSite: 'Lax', secure: secure(), path: '/', expires: session.expires });
+  return c.json({ ok: true });
+});
+
+/** The "See all your orders" link from an email signs the customer in on this device. */
+r.post('/account/link', rateLimit('account-link', 20, 15 * 60_000), async (c) => {
+  const input = await body(c, z.object({ token: z.string().max(400) }));
+  const email = emailFromAccountLink(input.token);
+  if (!email) throw new AppError(400, 'That link has expired. Enter your email below and we’ll send you a code instead.', 'bad_link');
+  const session = createCustomerSession(email);
   setCookie(c, CUSTOMER_COOKIE, session.token, { httpOnly: true, sameSite: 'Lax', secure: secure(), path: '/', expires: session.expires });
   return c.json({ ok: true });
 });
