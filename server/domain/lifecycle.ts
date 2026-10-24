@@ -4,7 +4,7 @@ import { STATUS_LABEL, type OrderStatus } from '../../shared/workflow.js';
 import type { Actor } from '../services/audit.js';
 import { getSettings } from '../services/settings.js';
 import { notify } from '../services/notify.js';
-import { orderUrl, siteUrl } from '../services/links.js';
+import { orderUrl, siteUrl, accountUrl } from '../services/links.js';
 import { formatTimeframe, layout, money, signOff, type EmailLine } from '../services/templates.js';
 import { addEvent, getItems, orderMoney, requireOrder, type OrderItem, type OrderSummary } from './orders.js';
 import { requestPaymentWhenReady } from './payments.js';
@@ -88,7 +88,11 @@ export function onOrderReceived(orderId: string, opts: { special: string | null;
         { heading: 'When', paragraphs: [`${lead} We'll confirm your expected timeframe once your order has been reviewed.`] },
       ],
       cta: { label: 'View my order', url: orderUrl(orderId) },
-      links: wa ? [{ label: `WhatsApp us about order #${o.order_number}`, url: `https://wa.me/${wa}?text=${encodeURIComponent(`Hi, I'd like to change my order #${o.order_number}: `)}` }] : [],
+      links: [
+        ...(wa ? [{ label: `WhatsApp us about order #${o.order_number}`, url: `https://wa.me/${wa}?text=${encodeURIComponent(`Hi, I'd like to change my order #${o.order_number}: `)}` }] : []),
+        { label: 'See all your orders', url: accountUrl(c.email) },
+        ...(s.business.instagramUrl ? [{ label: `Follow ${s.business.name} on Instagram`, url: s.business.instagramUrl }] : []),
+      ],
       closing: [
         `Need to change something? Reply to this email with your reference #${o.order_number}${s.business.phone ? `, or call/WhatsApp ${s.business.phone}` : ''}, and we'll update your order.`,
         "You'll receive another update when your order is confirmed.",
@@ -224,8 +228,15 @@ export function onOrderStatusChanged(orderId: string, from: OrderStatus, to: Ord
     send(
       `Thank you — order #${o.order_number} is complete`,
       'Thank you for your order.',
-      [`Your order #${o.order_number} has been ${o.fulfilment_type === 'delivery' ? 'delivered' : 'collected'}. Thank you for supporting ${s.business.name}!`, ...(fb ? ['If you have a moment, we’d love to hear how everything was. You can leave a quick rating on your order page.'] : [])],
-      { cta: { label: fb ? 'Leave feedback' : 'View my order', url: orderUrl(orderId, fb ? '#feedback' : '') } },
+      [`Your order #${o.order_number} has been ${o.fulfilment_type === 'delivery' ? 'delivered' : 'collected'}. Thank you for supporting ${s.business.name}!`, ...(s.business.googleReviewUrl ? ['If you enjoyed it, a quick Google review would mean a lot to us. It helps other families find a local farm they can trust.'] : fb ? ['If you have a moment, we’d love to hear how everything was. You can leave a quick rating on your order page.'] : [])],
+      {
+        cta: s.business.googleReviewUrl ? { label: 'Leave us a Google review', url: s.business.googleReviewUrl } : { label: fb ? 'Leave feedback' : 'View my order', url: orderUrl(orderId, fb ? '#feedback' : '') },
+        links: [
+          ...(s.business.googleReviewUrl && fb ? [{ label: 'Or leave private feedback just for us', url: orderUrl(orderId, '#feedback') }] : []),
+          ...(s.business.instagramUrl ? [{ label: `Follow ${s.business.name} on Instagram`, url: s.business.instagramUrl }] : []),
+          ...(c.email ? [{ label: 'See all your orders and reorder', url: accountUrl(c.email) }] : []),
+        ],
+      },
     );
   } else if (to === 'cancelled') {
     send(`Your order #${o.order_number} has been cancelled`, 'Order cancelled.', [`Your order #${o.order_number} has been cancelled. If you didn't expect this, please contact us and we'll help.`]);

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, CalendarClock, Check, Minus, PackageCheck, Pencil, Plus, Receipt, Search, ShoppingBag, Store, Trash2, Truck, WifiOff, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ChevronRight, CalendarClock, Check, Minus, PackageCheck, Pencil, Plus, Receipt, Search, ShoppingBag, Store, Trash2, Truck, WifiOff, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/order-bits';
@@ -10,7 +10,8 @@ import { Button, Card, cx, Field, Input, Segmented, Sheet, Spinner, Textarea } f
 import { api, ApiError, newKey } from '../lib/api';
 import { addDays, formatMoney, formatQty, friendlyDate, longDate } from '../lib/format';
 import { useOnline } from '../lib/realtime';
-import { REORDER_KEY } from '../lib/customer';
+import { REORDER_KEY, rememberOrder } from '../lib/customer';
+import { DeviceOrders, GoogleReviewCard, InstagramCard } from '../components/Social';
 import type { Qty, QuantityType } from '../lib/types';
 import { priceLine, withSurcharge, type Pricing } from '../../../shared/pricing';
 
@@ -141,12 +142,23 @@ export default function PublicOrder() {
   const [laterOpen, setLaterOpen] = useState(false);
   const [q, setQ] = useState('');
   const [cat_, setCat] = useState('All');
-  const [done, setDone] = useState<{ number: number | null; message: string; url: string | null; email: string } | null>(null);
+  const [done, setDone] = useState<{ number: number | null; message: string; url: string | null; email: string; returning: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ReactNode | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const typing = useTypingOnTouch();
-  const searchRef = useRef<HTMLDivElement>(null);
+  const [touch] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches);
+  const [searching, setSearching] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
+  // Focus inside the tap itself: phones only open the keyboard for a focus that comes straight from a tap
+  const openSearch = () => {
+    setSearching(true);
+    searchInput.current?.focus({ preventScroll: true });
+  };
+  const closeSearch = () => {
+    searchInput.current?.blur();
+    setSearching(false);
+  };
   useEffect(() => {
     try {
       if (!done) localStorage.setItem(KEY, JSON.stringify(s));
@@ -253,9 +265,10 @@ export default function PublicOrder() {
   }, [s.step]);
 
   const submit = useMutation({
-    mutationFn: () => api.post<{ order_number: number | null; message: string; order_url?: string }>('/api/public/orders', payload()),
+    mutationFn: () => api.post<{ order_number: number | null; message: string; order_url?: string; returning_customer?: boolean }>('/api/public/orders', payload()),
     onSuccess: (r) => {
-      setDone({ number: r.order_number, message: r.message, url: r.order_url ?? null, email: s.email });
+      setDone({ number: r.order_number, message: r.message, url: r.order_url ?? null, email: s.email, returning: !!r.returning_customer });
+      if (r.order_number && r.order_url) rememberOrder({ number: r.order_number, url: r.order_url, at: new Date().toISOString() });
       try {
         localStorage.removeItem(KEY);
         localStorage.setItem(ME_KEY, JSON.stringify({ name: s.name, phone: s.phone, email: s.email, address: s.address || loadMe()?.address || '' }));
@@ -296,7 +309,16 @@ export default function PublicOrder() {
               Track my order
             </Link>
           )}
-          <div className="mt-8 rounded-2xl border border-line bg-surface p-4 text-left">
+          <div className="mt-8 space-y-3">
+            {done.returning && <GoogleReviewCard url={info.business.googleReviewUrl} name={info.business.name} lead={`Thanks for coming back to ${info.business.name}!`} />}
+            <InstagramCard url={info.business.instagramUrl} name={info.business.name} />
+            <DeviceOrders exclude={done.number} />
+            <Link to={`/account${done.email ? `?email=${encodeURIComponent(done.email)}` : ''}`} className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-surface p-4 text-left hover:shadow-card">
+              <span><span className="block font-semibold">See all your past orders</span><span className="block text-[13.5px] text-ink-2">{done.email ? 'We’ll email you a quick code to open them.' : 'Sign in with your email address.'} You can reorder from there too.</span></span>
+              <ChevronRight className="size-4 shrink-0 text-ink-3" />
+            </Link>
+          </div>
+          <div className="mt-3 rounded-2xl border border-line bg-surface p-4 text-left">
             <div className="font-semibold">Need to change something?</div>
             <p className="mt-1 text-[14px] text-ink-2">Message or call us with your reference number and we’ll update your order.</p>
             <div className="mt-3"><ChangeOrderButtons phone={info.business.phone} email={info.business.email} reference={done.number} name={s.name.split(' ')[0]} /></div>
@@ -371,33 +393,39 @@ export default function PublicOrder() {
             <Link to="/account" className="font-medium text-brand underline-offset-2 hover:underline">See your past orders</Link>
           </div>
 
-          {/* Search stays at the top of the screen while scrolling, and above the keyboard when typing */}
-          <div ref={searchRef} className="sticky top-0 z-20 -mx-5 mt-5 bg-bg/95 px-5 pb-2 pt-2 backdrop-blur sm:-mx-8 sm:px-8">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-[18px] -translate-y-1/2 text-ink-3" aria-hidden />
-              <Input
-                type="search"
-                enterKeyHint="search"
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onFocus={() => {
-                  // On phones, lift the search box to the top so the results fit above the keyboard
-                  if (window.matchMedia?.('(pointer: coarse)').matches)
-                    setTimeout(() => {
-                      const top = (searchRef.current?.getBoundingClientRect().top ?? 0) + window.scrollY - 4;
-                      if (Math.abs(window.scrollY - top) > 8) window.scrollTo({ top, behavior: 'smooth' });
-                    }, 250);
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
-                placeholder="Search — e.g. mince, rump, wors"
-                className="h-12 bg-surface pl-10 pr-11 text-[16px] text-ink caret-[var(--brand)] [&::-webkit-search-cancel-button]:hidden"
-                aria-label="Search products"
-              />
-              {q && <button type="button" onClick={() => setQ('')} className="absolute right-1.5 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-lg text-ink-3 hover:bg-sunken" aria-label="Clear search"><X className="size-4" /></button>}
-            </div>
+          {/* Search: on phones a full-screen panel pinned above the keyboard; on computers an inline box */}
+          <div className="sticky top-0 z-20 -mx-5 mt-5 bg-bg/95 px-5 pb-2 pt-2 backdrop-blur sm:-mx-8 sm:px-8">
+            {touch ? (
+              <button
+                type="button"
+                onClick={openSearch}
+                className="flex h-12 w-full items-center gap-2.5 rounded-[10px] border border-line-strong bg-surface px-3.5 text-left text-[16px] shadow-[inset_0_1px_1px_rgb(0_0_0/0.03)]"
+                aria-label={q ? `Search products: ${q}` : 'Search products'}
+              >
+                <Search className="size-[18px] shrink-0 text-ink-3" aria-hidden />
+                <span className={cx('min-w-0 flex-1 truncate', q ? 'text-ink' : 'text-ink-3')}>{q || 'Search — e.g. mince, rump, wors'}</span>
+                {q && (
+                  <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); setQ(''); }} className="-mr-2 flex size-10 items-center justify-center rounded-lg text-ink-3" aria-label="Clear search"><X className="size-4" /></span>
+                )}
+              </button>
+            ) : (
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 size-[18px] -translate-y-1/2 text-ink-3" aria-hidden />
+                <Input
+                  type="search"
+                  enterKeyHint="search"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
+                  placeholder="Search — e.g. mince, rump, wors"
+                  className="h-12 bg-surface pl-10 pr-11 text-[16px] text-ink [&::-webkit-search-cancel-button]:hidden"
+                  aria-label="Search products"
+                />
+                {q && <button type="button" onClick={() => setQ('')} className="absolute right-1.5 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-lg text-ink-3 hover:bg-sunken" aria-label="Clear search"><X className="size-4" /></button>}
+              </div>
+            )}
             {!words.length ? (
               <div className="-mx-5 mt-2 flex gap-2 overflow-x-auto px-5 pb-1 scrollbar-none sm:-mx-8 sm:px-8">
                 {cats.map((c) => (
@@ -671,6 +699,24 @@ export default function PublicOrder() {
         </div>
       </div>
 
+      {touch && s.step === 0 && (
+        <SearchPanel
+          open={searching}
+          inputRef={searchInput}
+          q={q}
+          setQ={setQ}
+          results={words.length ? visible : []}
+          variantsOf={variantsOf}
+          inCart={(p) => s.lines.some((l) => l.product_id === p.id || byId.get(l.product_id)?.variant_of === p.id)}
+          currency={info.currency}
+          categories={cats.filter((c) => c !== 'All')}
+          onCategory={(c) => { setCat(c); setQ(''); closeSearch(); }}
+          onPick={(p) => { closeSearch(); setAdding({ p: [p, ...(variantsOf.get(p.id) ?? [])].find((f) => !f.out_of_stock) ?? p }); }}
+          onSpecial={() => { closeSearch(); setTimeout(() => document.getElementById('special-requests')?.scrollIntoView({ behavior: 'smooth' }), 50); }}
+          onClose={closeSearch}
+        />
+      )}
+
       {adding && (
         <AddSheet
           family={[byId.get(adding.p.variant_of ?? '') ?? adding.p, ...(variantsOf.get(adding.p.variant_of ?? adding.p.id) ?? [])].filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i)}
@@ -903,6 +949,134 @@ function Shell({ children, business, cartCount, onCart, barHidden }: { children:
           Questions? Call or WhatsApp <a className="font-semibold text-ink-2" href={`tel:${business.phone.replace(/\s/g, '')}`}>{business.phone}</a>
         </footer>
       )}
+    </div>
+  );
+}
+
+/** Where the visible part of the screen is (it shrinks and can shift when the phone keyboard opens). */
+function useVisibleArea(active: boolean) {
+  const [box, setBox] = useState<{ top: number; height: number } | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    const vv = window.visualViewport;
+    const update = () => setBox(vv ? { top: vv.offsetTop, height: vv.height } : { top: 0, height: window.innerHeight });
+    update();
+    vv?.addEventListener('resize', update);
+    vv?.addEventListener('scroll', update);
+    window.addEventListener('resize', update);
+    // Keep the page behind still while the panel is open
+    const html = document.documentElement;
+    const prev = html.style.overflow;
+    html.style.overflow = 'hidden';
+    return () => {
+      vv?.removeEventListener('resize', update);
+      vv?.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+      html.style.overflow = prev;
+    };
+  }, [active]);
+  return box;
+}
+
+/**
+ * Phone search. The panel always covers exactly the part of the screen the keyboard leaves free,
+ * with the search box at the very top and results right under it, so what the customer types and
+ * what matches are always in view. It stays mounted (invisible) so a tap can focus it directly.
+ */
+function SearchPanel({ open, inputRef, q, setQ, results, variantsOf, inCart, currency, categories, onCategory, onPick, onSpecial, onClose }: {
+  open: boolean;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  q: string;
+  setQ: (v: string) => void;
+  results: CatProduct[];
+  variantsOf: Map<string, CatProduct[]>;
+  inCart: (p: CatProduct) => boolean;
+  currency: string;
+  categories: string[];
+  onCategory: (c: string) => void;
+  onPick: (p: CatProduct) => void;
+  onSpecial: () => void;
+  onClose: () => void;
+}) {
+  const box = useVisibleArea(open);
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [open, onClose]);
+  return (
+    <div
+      className={cx('fixed inset-x-0 z-[60] flex flex-col bg-bg transition-opacity duration-100', open ? 'opacity-100' : 'pointer-events-none opacity-0')}
+      style={{ top: open && box ? box.top : 0, height: open && box ? box.height : '100dvh' }}
+      role="dialog"
+      aria-modal={open || undefined}
+      aria-hidden={!open || undefined}
+      aria-label="Search products"
+    >
+      <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2.5">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-[18px] -translate-y-1/2 text-ink-3" aria-hidden />
+          <input
+            ref={inputRef}
+            type="search"
+            enterKeyHint="search"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            tabIndex={open ? 0 : -1}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
+            placeholder="Search — e.g. mince, rump, wors"
+            className="h-12 w-full rounded-[10px] border border-brand bg-surface pl-10 pr-10 text-[16px] text-ink caret-[var(--brand)] outline-none ring-3 ring-brand/15 [&::-webkit-search-cancel-button]:hidden"
+            aria-label="Search products"
+          />
+          {q && <button type="button" tabIndex={open ? 0 : -1} onClick={() => { setQ(''); inputRef.current?.focus(); }} className="absolute right-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-lg text-ink-3" aria-label="Clear search"><X className="size-4" /></button>}
+        </div>
+        <button type="button" tabIndex={open ? 0 : -1} onClick={onClose} className="h-12 shrink-0 rounded-xl px-3 text-[15px] font-semibold text-brand">Done</button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {!q.trim() ? (
+          <div className="p-4">
+            <p className="text-[14px] text-ink-3">Type what you’re looking for, or choose a section:</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {categories.map((c) => (
+                <button key={c} type="button" tabIndex={open ? 0 : -1} onClick={() => onCategory(c)} className="h-10 rounded-full border border-line-strong bg-surface px-4 text-[14px] font-medium text-ink-2">{c}</button>
+              ))}
+            </div>
+          </div>
+        ) : results.length ? (
+          <>
+            <p className="px-4 pb-1 pt-3 text-[13px] text-ink-3" aria-live="polite">{results.length} product{results.length === 1 ? '' : 's'} match “{q.trim()}”</p>
+            <ul className="divide-y divide-line">
+              {results.map((p) => {
+                const family = [p, ...(variantsOf.get(p.id) ?? [])];
+                const out = family.every((f) => f.out_of_stock);
+                return (
+                  <li key={p.id}>
+                    <button type="button" tabIndex={open ? 0 : -1} disabled={out} onClick={() => onPick(p)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-sunken disabled:opacity-60">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[16px] font-semibold">{p.name}</div>
+                        <div className="truncate text-[13px] text-ink-3">
+                          {out ? 'Out of stock' : [p.price_cents != null ? `${formatMoney(p.price_cents, currency)}/${p.price_unit}` : null, p.sale_options.length ? p.sale_options.map((o) => o.label).join(', ') : null, family.length > 1 ? family.map((f) => f.variant_label ?? f.name).join(' or ') : null].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                      {!out && <span className={cx('flex size-10 shrink-0 items-center justify-center rounded-xl', inCart(p) ? 'bg-brand text-brand-ink' : 'bg-sunken text-ink-2')} aria-hidden>{inCart(p) ? <Check className="size-4" /> : <Plus className="size-4" />}</span>}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        ) : (
+          <div className="p-4 text-[14.5px] text-ink-2" aria-live="polite">
+            Nothing on our price list matches “{q.trim()}”. Check the spelling, or{' '}
+            <button type="button" tabIndex={open ? 0 : -1} onClick={onSpecial} className="font-semibold text-brand underline">ask for it as a special request</button>.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

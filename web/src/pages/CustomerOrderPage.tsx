@@ -7,7 +7,8 @@ import { ChangeOrderButtons } from '../components/ChangeOrder';
 import { Button, Card, cx, Field, Input, Sheet, Spinner, Textarea } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { dateTime, formatMoney, longDate } from '../lib/format';
-import { REORDER_KEY } from '../lib/customer';
+import { REORDER_KEY, rememberOrder } from '../lib/customer';
+import { GoogleReviewCard, InstagramCard } from '../components/Social';
 
 /**
  * The customer's own order page, opened from the signed link in their emails. It shows where the
@@ -32,7 +33,9 @@ export default function CustomerOrderPage() {
 
   useEffect(() => {
     document.title = o ? `Order #${o.order_number}` : 'Your order';
-  }, [o]);
+    // Opened on this device (e.g. from the email): keep it in "Orders from this device"
+    if (o) rememberOrder({ number: o.order_number, url: `/o/${token}`, at: o.submitted_at });
+  }, [o, token]);
 
   // Back from PayFast: their server tells us the result; keep checking for a little while
   useEffect(() => {
@@ -197,7 +200,9 @@ export default function CustomerOrderPage() {
           </Card>
         )}
 
+        {o.status === 'completed' && <GoogleReviewCard url={o.social?.review} name={o.contact.name} lead={`Thank you for supporting ${o.contact.name}!`} />}
         {o.feedback && <Feedback o={o} token={token} onDone={setOrder} />}
+        <InstagramCard url={o.social?.instagram} name={o.contact.name} />
 
         <div className="flex flex-wrap gap-2">
           {o.can_reorder && <Button size="lg" variant="primary" icon={<RotateCcw className="size-4" />} loading={reorder.isPending} onClick={() => reorder.mutate()}>Reorder</Button>}

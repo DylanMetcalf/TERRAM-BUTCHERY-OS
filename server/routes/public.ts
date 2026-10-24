@@ -1,3 +1,4 @@
+import { isReturningCustomer } from '../domain/customer-portal.js';
 import { Hono } from 'hono';
 import { db, id, now } from '../db/db.js';
 import { formatQty } from '../../shared/quantity.js';
@@ -29,7 +30,7 @@ r.get('/info', (c) => {
   const today = localDate(new Date(), businessTz());
   const pm = paymentMethods();
   return c.json({
-    business: { name: s.business.name, tagline: s.business.tagline, phone: s.business.phone, email: s.business.email, address: s.business.address },
+    business: { name: s.business.name, tagline: s.business.tagline, phone: s.business.phone, email: s.business.email, address: s.business.address, instagramUrl: s.business.instagramUrl || null, googleReviewUrl: s.business.googleReviewUrl || null },
     // Only what the order form needs — never the internal email recipients or banking details
     form: { enabled: s.customerForm.enabled, intro: s.customerForm.intro, confirmationMessage: s.customerForm.confirmationMessage, showPrices: s.customerForm.showPrices, terms: s.customerForm.terms, noticeNote: s.customerForm.noticeNote, leadTime: s.orders.leadTimeText, packagingNote: PACKAGING_NOTE },
     fulfilment: { collectionDays: s.fulfilment.collectionDays, deliveryDays: s.fulfilment.deliveryDays, deliveryEnabled: s.fulfilment.deliveryEnabled, collectionHours: s.fulfilment.collectionHours, collectionPlace: s.fulfilment.collectionPlace, collectionAddress: s.fulfilment.collectionAddress, deliveryNotes: s.fulfilment.deliveryNotes, freeDeliveryKm: s.fulfilment.freeDeliveryKm, deliveryRatePerKmCents: s.fulfilment.deliveryRatePerKmCents, customerChooses: s.fulfilment.customerChooses, showDeliveryFees: s.fulfilment.showDeliveryFees },
@@ -229,7 +230,7 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   if (dups.length)
     raiseException({ type: 'possible_duplicate', severity: 'warning', title: `Online order #${order.order_number} may duplicate #${dups[0].order_number}`, detail: dups[0].reasons.join(', '), order_id: order.id, payload: { duplicate_of: { order_id: dups[0].order_id, order_number: dups[0].order_number } } });
   onOrderReceived(order.id, { special, notes: input.notes ?? null });
-  return c.json({ ok: true, order_number: order.order_number, order_url: `/o/${orderToken(order.id)}`, message: s.customerForm.confirmationMessage });
+  return c.json({ ok: true, order_number: order.order_number, order_url: `/o/${orderToken(order.id)}`, message: s.customerForm.confirmationMessage, returning_customer: isReturningCustomer(order.customer_id, order.id) });
 });
 
 export default r;

@@ -5,6 +5,9 @@ export interface BusinessSettings {
     name: string; tagline: string; phone: string; email: string; address: string; timezone: string; currency: string;
     /** Public address of the site, used for every link in customer emails (never localhost). */
     siteUrl: string;
+    /** Links shown to customers after ordering (blank = not shown). Never invented: entered by the farm. */
+    instagramUrl: string;
+    googleReviewUrl: string;
   };
   orders: {
     /** Kept for older installs; online orders always wait for a person to confirm them. */
@@ -82,6 +85,8 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     timezone: 'Africa/Johannesburg',
     currency: 'ZAR',
     siteUrl: 'https://www.terramfarm.co.za',
+    instagramUrl: '',
+    googleReviewUrl: '',
   },
   orders: {
     formOrdersRequireReview: true,

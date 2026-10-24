@@ -183,6 +183,11 @@ export function customerOrderView(orderId: string) {
     can_reorder: o.status === 'completed' || o.status === 'cancelled' || !!o.confirmed_at,
     feedback: s.retention.feedbackEnabled && o.status === 'completed' ? { given: fb ? { rating: fb.rating, comment: fb.comment } : null } : null,
     contact: { phone: s.business.phone, email: s.business.email, name: s.business.name },
+    // Google review invitation only once this customer has actually received an order from us
+    social: {
+      instagram: s.business.instagramUrl || null,
+      review: s.business.googleReviewUrl && (o.status === 'completed' || isReturningCustomer(o.customer_id, orderId)) ? s.business.googleReviewUrl : null,
+    },
   };
 }
 
@@ -299,13 +304,23 @@ export function verifySignInCode(emailRaw: string, codeRaw: string): { token: st
     db().prepare('UPDATE customer_codes SET attempts = attempts + 1 WHERE id = ?').run(row.id);
     return null;
   }
+  return tx(() => {
+    db().prepare('UPDATE customer_codes SET used_at = ? WHERE id = ?').run(now(), row.id);
+    return createCustomerSession(email);
+  });
+}
+
+/** A signed-in session for an email address already proven (by code or by the emailed link). */
+export function createCustomerSession(emailRaw: string): { token: string; expires: Date } {
   const token = crypto.randomBytes(32).toString('base64url');
   const expires = new Date(Date.now() + 30 * 86400_000);
-  tx(() => {
-    db().prepare('UPDATE customer_codes SET used_at = ? WHERE id = ?').run(now(), row.id);
-    db().prepare('INSERT INTO customer_sessions (id, email, created_at, expires_at) VALUES (?,?,?,?)').run(sha(token), email, now(), expires.toISOString());
-  });
+  db().prepare('INSERT INTO customer_sessions (id, email, created_at, expires_at) VALUES (?,?,?,?)').run(sha(token), emailRaw.trim().toLowerCase(), now(), expires.toISOString());
   return { token, expires };
+}
+
+/** Has this customer had an order completed before (not counting this one)? Used to invite Google reviews only from real customers. */
+export function isReturningCustomer(customerId: string, excludeOrderId?: string): boolean {
+  return !!db().prepare("SELECT 1 FROM orders WHERE customer_id = ? AND status = 'completed' AND id != ? LIMIT 1").get(customerId, excludeOrderId ?? '');
 }
 
 export function emailForSession(token: string | undefined): string | null {

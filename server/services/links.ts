@@ -73,6 +73,29 @@ export function revokeOrderLinks(orderId: string) {
 }
 
 // ── Unsubscribe links (marketing only) ───────────────────────
+/**
+ * "See all your orders" link in customer emails. Only the owner of the mailbox receives it, so it can
+ * sign them in to their order history without typing a code. Valid for 30 days.
+ */
+export function accountLinkToken(email: string, now = Date.now()): string {
+  const e = Buffer.from(email.trim().toLowerCase()).toString('base64url');
+  const exp = Math.floor(now / 1000) + 30 * 86400;
+  return `${e}.${exp}.${sign('account', e, exp)}`;
+}
+
+export function accountUrl(email: string): string {
+  return `${siteUrl()}/account?k=${accountLinkToken(email)}`;
+}
+
+export function emailFromAccountLink(token: string, now = Date.now()): string | null {
+  if (!token || token.length > 400) return null;
+  const [e, exp, mac] = token.split('.');
+  if (!e || !exp || !mac || !/^\d+$/.test(exp)) return null;
+  if (!same(mac, sign('account', e, Number(exp)))) return null;
+  if (Number(exp) * 1000 < now) return null;
+  return Buffer.from(e, 'base64url').toString('utf8');
+}
+
 export function unsubscribeUrl(customerId: string): string {
   return `${siteUrl()}/unsubscribe/${customerId}.${sign('unsub', customerId)}`;
 }
