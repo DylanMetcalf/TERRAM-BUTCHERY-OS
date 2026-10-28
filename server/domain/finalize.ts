@@ -29,6 +29,9 @@ export interface FinalLine {
   weight_g: number | null;
   unit_price_cents: number | null;
   price_unit: 'kg' | 'each' | null;
+  /** Fixed packs: how many, and the price of one pack. */
+  pack_count: number | null;
+  pack_price_cents: number | null;
   line_cents: number;
 }
 
@@ -100,6 +103,8 @@ export function finalizeOrder(orderId: string, actor: Actor, opts: { packsConfir
         weight_g: needsWeight(i.pricing) ? i.packed_weight_g : null,
         unit_price_cents: i.price_cents,
         price_unit: i.price_unit,
+        pack_count: i.sale_option_kind === 'pack' && i.qty.count ? i.qty.count : null,
+        pack_price_cents: i.sale_option_kind === 'pack' && i.qty.count ? Math.round(i.final_cents / i.qty.count) : null,
         line_cents: i.final_cents,
       };
     });

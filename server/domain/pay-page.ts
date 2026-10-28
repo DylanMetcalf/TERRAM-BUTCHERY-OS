@@ -68,7 +68,7 @@ export function payView(request: any) {
       collection: o.fulfilment_type === 'collection' ? [f.collectionPlace, f.collectionAddress, f.collectionHours].filter(Boolean).join(' · ') : null,
     },
     // The finalized lines this request was made from (never today's catalogue)
-    lines: (snapshot?.lines ?? []).map((l) => ({ name: l.name, size: l.size, qty_label: l.qty_label, preparation: l.preparation, weight_g: l.weight_g, unit_price_cents: l.unit_price_cents, price_unit: l.price_unit, pricing: l.pricing, line_cents: l.line_cents })),
+    lines: (snapshot?.lines ?? []).map((l) => ({ name: l.name, size: l.size, qty_label: l.qty_label, preparation: l.preparation, weight_g: l.weight_g, unit_price_cents: l.unit_price_cents, price_unit: l.price_unit, pricing: l.pricing, pack_count: l.pack_count ?? null, pack_price_cents: l.pack_price_cents ?? null, line_cents: l.line_cents })),
     delivery_fee_cents: snapshot?.delivery_fee_cents ?? 0,
     total_cents: snapshot?.total_cents ?? request.amount_cents,
     paid_cents: m.paid_cents,

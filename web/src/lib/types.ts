@@ -81,6 +81,7 @@ export interface OrderItem {
   price_cents: number | null;
   price_unit: 'kg' | 'each' | null;
   sale_option?: string | null;
+  sale_option_kind?: 'pack' | 'piece' | null;
   pricing?: 'exact' | 'estimate' | 'by_weight' | 'unpriced' | null;
   est_cents?: number | null;
   final_cents?: number | null;

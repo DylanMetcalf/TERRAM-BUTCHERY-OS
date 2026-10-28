@@ -226,7 +226,7 @@ function Docket({ o, items, notes, business, onePerPage }: { o: OrderSummary; it
                 </td>
                 <td className={`${cell} text-[11.5px]`}>{i.special_instructions ? <b>{i.special_instructions}</b> : <span className="text-neutral-400">—</span>}</td>
                 <td className={`${cell} text-center text-[12px] font-semibold`}>{i.packed_weight_g && (i.pricing === 'by_weight' || i.pricing === 'estimate') ? (i.packed_weight_g / 1000).toFixed(3) : i.pricing === 'exact' && final ? 'pack' : ''}</td>
-                {final && <td className={`${cell} text-right text-[11.5px]`}>{i.price_cents != null ? `${formatMoney(i.price_cents)}/${i.price_unit === 'kg' ? 'kg' : 'pack'}` : ''}</td>}
+                {final && <td className={`${cell} text-right text-[11.5px]`}>{i.sale_option_kind === 'pack' && i.qty.count && i.final_cents != null ? `${formatMoney(Math.round(i.final_cents / i.qty.count))}/pack` : i.price_cents != null ? `${formatMoney(i.price_cents)}/${i.price_unit === 'kg' ? 'kg' : 'each'}` : ''}</td>}
                 {final && <td className={`${cell} text-right text-[12px] font-semibold`}>{i.final_cents != null ? formatMoney(i.final_cents) : ''}</td>}
                 <td className={`${cell} text-center`}><Box done={!!i.packed_at} /></td>
                 {!final && <td className={cell} />}

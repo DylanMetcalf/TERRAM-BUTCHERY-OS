@@ -79,7 +79,7 @@ export default function PayPage() {
                 <div className="min-w-0">
                   <div className="font-semibold">{l.qty_label} {l.name}</div>
                   <div className="text-[13px] text-ink-2">
-                    {[l.preparation, l.weight_g ? `${kg(l.weight_g)} packed` : null, l.unit_price_cents != null ? `${formatMoney(l.unit_price_cents, 'ZAR')}/${l.price_unit === 'kg' ? 'kg' : 'pack'}` : null].filter(Boolean).join(' · ')}
+                    {[l.preparation, l.weight_g ? `${kg(l.weight_g)} packed` : null, l.pack_price_cents != null ? `${l.pack_count} × ${formatMoney(l.pack_price_cents, 'ZAR')} per pack` : l.unit_price_cents != null ? `${formatMoney(l.unit_price_cents, 'ZAR')}/${l.price_unit === 'kg' ? 'kg' : 'each'}` : null].filter(Boolean).join(' · ')}
                   </div>
                 </div>
                 <div className="shrink-0 text-right font-semibold tabular">{formatMoney(l.line_cents, 'ZAR')}</div>
@@ -151,7 +151,7 @@ function BankDetails({ p, due }: { p: Pay; due: number }) {
             <div key={k} className="flex items-center justify-between gap-3 py-2">
               <div className="min-w-0">
                 <dt className="text-[12.5px] text-ink-3">{k}</dt>
-                <dd className={cx('break-all font-semibold tabular', (k === 'Reference' || k === 'Amount') && 'text-[17px]')}>{k === 'Amount' ? `R ${v}` : v}</dd>
+                <dd className={cx('break-all font-semibold tabular', (k === 'Reference' || k === 'Amount') && 'text-[17px]')}>{k === 'Amount' ? formatMoney(due, 'ZAR') : v}</dd>
               </div>
               <CopyButton text={v!} label={k} />
             </div>

@@ -19,7 +19,7 @@ const api = (p, method, url, body) => p.evaluate(async ([method, url, body]) => 
 }, [method, url, body]);
 
 // ── 1. Customer on a phone ──────────────────────────────────
-const cctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+const cctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write'] });
 const c = await cctx.newPage();
 c.on('pageerror', (e) => fail('customer page error: ' + e.message));
 await c.goto(base + '/order');
@@ -84,6 +84,11 @@ await c.getByText(/occasional reminder/).click();
 await shot(c, '03-details-invoice');
 await c.getByRole('button', { name: 'Continue' }).click();
 await c.locator('textarea').first().fill('12 Kerk Street, Pretoria East');
+// Fresh or frozen must be chosen; fresh on a delivery shows the journey-time disclosure
+if (await c.getByRole('button', { name: 'Continue' }).isEnabled()) fail('could continue without choosing fresh or frozen');
+await c.getByRole('radio', { name: /^Fresh/ }).click();
+if (!(await c.getByText(/longer than about 2 hours/).count())) fail('fresh delivery disclosure missing');
+await c.getByRole('radio', { name: /^Frozen/ }).click();
 await c.getByRole('button', { name: 'Continue' }).click();
 await c.getByText(/Checking today’s prices/).waitFor({ state: 'detached' }).catch(() => undefined);
 await c.waitForTimeout(400);
@@ -160,54 +165,97 @@ await c.getByRole('button', { name: 'Accept change' }).click();
 await c.getByText(/You accepted a change/).waitFor();
 step('customer accepted the change on their order page');
 
-// Production: cut, pack, weigh, ready
-for (const to of ['cutting', 'cut', 'packing']) {
+// Production: cut and pack (no weights here)
+for (const to of ['cutting', 'cut']) {
   const r = await api(p, 'POST', `/api/orders/${order.id}/transition`, { to });
   if (r.status !== 200) fail(`transition ${to}: ${JSON.stringify(r.body)}`);
 }
-await p.reload();
-await p.getByRole('button', { name: 'Enter weight' }).first().waitFor();
-const weigh = p.getByRole('button', { name: 'Enter weight' });
-const nWeigh = await weigh.count();
-for (let i = 0; i < nWeigh; i++) {
-  await p.getByRole('button', { name: 'Enter weight' }).first().click();
-  await p.getByLabel('Packed weight (kg)').fill(i === 0 ? '2.135' : '1.05');
-  await p.getByRole('button', { name: 'Save weight' }).click();
-  await p.getByText('Weight saved').first().waitFor();
-  await p.waitForTimeout(300);
-}
-step(`entered ${nWeigh} packed weight(s) in the order page`);
-for (const to of ['packed', 'ready']) {
-  const r = await api(p, 'POST', `/api/orders/${order.id}/transition`, { to });
-  if (r.status !== 200 && !(to === 'ready' && r.status === 409)) fail(`transition ${to}: ${JSON.stringify(r.body)}`);
-}
-const det = await api(p, 'GET', `/api/orders/${order.id}`);
-if (det.body.order.status !== 'ready') fail('order not ready: ' + det.body.order.status);
-if (!det.body.payment.request) fail('no payment request after ready: ' + JSON.stringify(det.body.payment.blocker));
-step(`ready → payment requested for R${(det.body.payment.request?.amount_cents ?? 0) / 100}`);
+const its = (await api(p, 'GET', `/api/orders/${order.id}`)).body.items.filter((i) => i.status === 'active');
+for (const i of its) await api(p, 'POST', `/api/items/${i.id}/packed`, { packed: true });
+const packedR = await api(p, 'POST', `/api/orders/${order.id}/packed`);
+if (packedR.body?.order?.status !== 'packed' && packedR.status !== 200) fail('packing: ' + JSON.stringify(packedR.body));
+const early = await api(p, 'POST', `/api/orders/${order.id}/transition`, { to: 'ready' });
+if (early.status !== 409) fail('an unweighed, unpaid order could be released');
+step('packed — not releasable before final weighing and payment');
 
-// Customer pays by EFT and uploads proof
-await c.reload();
-await c.getByText('Pay for your order').waitFor();
-if (!(await c.getByText('62000000001').count())) fail('EFT account number not shown to the customer');
+// Final weighing on the order page → finalize → payment request preview → send
+await p.goto(base + `/orders/${order.id}`);
+await p.getByRole('button', { name: 'Final weighing' }).click();
+const weighInputs = p.getByRole('dialog').getByLabel(/^Packed weight of/);
+const nWeigh = await weighInputs.count();
+for (let i = 0; i < nWeigh; i++) {
+  await weighInputs.nth(i).fill(i === 0 ? '2.135' : '1.05');
+  await weighInputs.nth(i).press('Enter');
+  await p.waitForTimeout(500);
+}
+const packsBox = p.getByRole('dialog').getByText(/pack quantities above match/);
+if (await packsBox.count()) await packsBox.click();
+await shot(p, '09b-final-weighing');
+await p.getByRole('button', { name: /Finalize & request payment/ }).click();
+await p.getByRole('dialog').getByText('Payment page link').waitFor();
+const preview = await api(p, 'GET', `/api/orders/${order.id}/payment-request/preview`);
+const payLink = preview.body.url;
+if (!/\/pay\//.test(payLink)) fail('no payment link in preview');
+await shot(p, '09c-payment-request-preview');
+await p.getByRole('button', { name: 'Send by email' }).click();
+await p.getByText(/Payment request emailed/).first().waitFor();
+await p.waitForTimeout(1500);
+const hist = (await api(p, 'GET', `/api/orders/${order.id}/payment-request/preview`)).body.history;
+if (!hist.length) fail('send not recorded');
+if (hist.some((h) => h.status === 'sent')) fail('email marked sent although email is not configured on the QA server');
+step(`finalized at R${preview.body.request.amount_cents / 100} (${nWeigh} weight(s) entered at final weighing); request recorded as “${hist[0].status}” (email not configured here)`);
+await p.keyboard.press('Escape');
+
+// The printed docket shows the final weights, rates and the same total
+const dk = await sctx.newPage();
+await dk.goto(base + `/print/order/${order.id}`);
+await dk.getByText('Final total').waitFor();
+const dkText = (await dk.locator('article').first().innerText()).replace(/\u00a0/g, ' ');
+const fmt = (c) => (c / 100).toLocaleString('en-ZA', { minimumFractionDigits: 2 });
+if (!dkText.includes(fmt(preview.body.request.amount_cents))) fail('docket total does not match the payment amount');
+if (!/FROZEN/i.test(dkText)) fail('docket does not show frozen');
+await dk.screenshot({ path: `${out}/09d-final-docket.png`, fullPage: true });
+await dk.close();
+step('final docket shows weights, rates and the same total');
+
+// Customer: order page → secure payment page → copy details → "I've made payment" → proof
+await c.goto(orderUrl);
+await c.getByRole('link', { name: 'Open payment page' }).click();
+await c.getByText('Amount due').waitFor();
+if (!(await c.getByText('62000000001').count())) fail('EFT account number not shown on the payment page');
+await c.getByRole('button', { name: 'Copy all payment details' }).click();
+await c.getByText('Copied').first().waitFor();
+const clip = await c.evaluate(() => navigator.clipboard.readText()).catch(() => '');
+if (!clip.includes('62000000001') || !clip.includes(`Reference: ${order.order_number}`)) fail('copied details incomplete: ' + clip);
 await shot(c, '10-customer-pay');
+await c.getByRole('button', { name: 'I’ve made payment' }).click();
+await c.getByText(/I confirm I’ve made this payment/).click();
+await c.getByRole('button', { name: 'Send', exact: true }).click();
+await c.getByRole('heading', { name: 'Payment awaiting verification' }).waitFor();
 const pdf = `${out}/proof.pdf`;
 fs.writeFileSync(pdf, '%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
-await c.getByRole('button', { name: 'Upload proof of payment' }).click();
-await c.locator('input[type=file]').setInputFiles(pdf);
+await c.getByLabel('Proof of payment file').setInputFiles(pdf);
 await c.getByRole('button', { name: 'Send proof' }).click();
-await c.getByText(/Thanks for your proof of payment/).waitFor();
+await c.getByText(/being checked/).first().waitFor();
 const st = await api(c, 'GET', `/api/public${new URL(orderUrl).pathname}`);
-if (st.body.order.payment.state === 'paid') fail('proof upload marked the order paid');
-step('customer uploaded EFT proof; order is NOT marked paid yet');
+if (st.body.order.payment.state === 'paid') fail('declaration/proof marked the order paid');
+await shot(c, '10b-awaiting-verification');
+step('customer copied the details, declared payment and uploaded proof — awaiting verification, not paid');
 
-// Staff verify against the bank
+// Manager verifies against the bank → paid → released as ready
 await p.reload();
 await p.getByRole('button', { name: 'Check & verify…' }).click();
 await p.getByText(/I’ve checked the bank/).click();
 await p.getByRole('button', { name: 'Verify payment' }).click();
 await p.getByText(/Payment verified/).first().waitFor();
-step('staff verified the payment');
+const after = (await api(p, 'GET', `/api/orders/${order.id}`)).body;
+if (after.order.status !== 'ready' || after.order.payment_state !== 'paid') fail(`after verification: ${after.order.status}/${after.order.payment_state}`);
+if (!after.declarations.every((d) => d.status === 'accepted')) fail('declaration not closed');
+step('manager verified the payment → order paid and released as ready');
+await c.goto(base + new URL(payLink).pathname);
+await c.getByRole('heading', { name: 'Payment received' }).waitFor();
+step('payment page now shows payment received (no bank details)');
+await c.goto(orderUrl);
 
 await c.reload();
 await c.getByRole('button', { name: 'Receipt' }).first().click();
@@ -251,6 +299,7 @@ step('reorder loaded a draft basket (nothing sent)');
 // Send the reorder: a returning customer is invited to review on Google and follow on Instagram
 await c.getByRole('button', { name: 'Checkout' }).click();
 await c.getByRole('button', { name: 'Continue' }).click();
+await c.getByRole('radio', { name: /^Frozen/ }).click();
 await c.getByRole('button', { name: 'Continue' }).click();
 await c.getByText(/Checking today’s prices/).waitFor({ state: 'detached' }).catch(() => undefined);
 if (await c.getByRole('checkbox').count()) await c.getByRole('checkbox').check();

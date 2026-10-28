@@ -391,7 +391,7 @@ describe('payments', () => {
     const fin = await staff.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true });
     expect(fin.body.finalization.snapshot).toMatchObject({ version: 1, total_cents: 25000 + 27300 });
     expect(fin.body.finalization.snapshot.lines.find((l: any) => l.name === 'Brisket')).toMatchObject({ weight_g: 2100, unit_price_cents: 13000, price_unit: 'kg', line_cents: 27300 });
-    expect(fin.body.finalization.snapshot.lines.find((l: any) => l.name === 'Lean Mince')).toMatchObject({ weight_g: null, line_cents: 25000 });
+    expect(fin.body.finalization.snapshot.lines.find((l: any) => l.name === 'Lean Mince')).toMatchObject({ weight_g: null, pack_count: 2, pack_price_cents: 12500, line_cents: 25000 });
     // Locked: no edits, no weight changes, no going back to packing
     expect((await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2500 })).status).toBe(409);
     expect((await staff.patch(`/api/items/${brisket.id}`, { qty: kg(3000) })).body.error).toMatch(/finalized/);

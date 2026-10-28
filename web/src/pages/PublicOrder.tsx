@@ -170,7 +170,9 @@ export default function PublicOrder() {
   useEffect(() => {
     document.title = info ? `Order · ${info.business.name}` : 'Order';
   }, [info]);
-  useEffect(() => window.scrollTo({ top: 0 }), [s.step]);
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [s.step]);
   const set = (p: Partial<State>) => setS((x) => ({ ...x, ...p }));
   const products = cat?.products ?? [];
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);

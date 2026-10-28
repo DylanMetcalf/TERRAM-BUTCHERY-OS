@@ -18,11 +18,10 @@ await cust.getByRole('button', { name: /More quantity/ }).first().click();
 await cust.getByRole('button', { name: 'Thick cut' }).click();
 await cust.getByRole('button', { name: /Add to order/ }).click();
 // Search, add something by mistake, then remove it in the cart
-await cust.getByLabel('Search products').fill('droewors');
-await cust.getByRole('button', { name: /^Droewors/ }).first().click();
-await cust.getByRole('button', { name: /Add to order/ }).click();
-await cust.getByLabel('Search products').fill('');
-await cust.getByLabel('Search products').blur();
+await cust.getByRole('button', { name: /^Search products/ }).tap();
+await cust.getByRole('dialog', { name: 'Search products' }).getByRole('searchbox').fill('droewors');
+await cust.getByRole('dialog', { name: 'Search products' }).getByRole('button', { name: /^Droewors/ }).first().tap();
+await cust.getByRole('dialog').getByRole('button', { name: /Add to order/ }).click();
 await cust.getByRole('button', { name: /View order/ }).click();
 await cust.getByRole('button', { name: 'Remove Droewors' }).click();
 if (await cust.getByRole('dialog').getByText('Droewors').count()) errors.push('removing from the cart did not work');
@@ -32,6 +31,7 @@ await cust.getByLabel('Mobile number').fill('071 555 3380');
 await cust.getByRole('button', { name: 'Continue' }).click();
 // Address-only mode (the default): the family arranges collection or delivery
 if (await cust.getByText('Your address').count()) await cust.locator('textarea').first().fill('12 Kerk Street, Pretoria East');
+await cust.getByRole('radio', { name: /^Frozen/ }).click();
 await cust.getByRole('button', { name: 'Continue' }).click();
 await cust.getByRole('checkbox').check();
 await cust.screenshot({ path: `${shots}/1-customer-review.png`, fullPage: true });
@@ -116,8 +116,38 @@ for (let i = 0; i < 20; i++) {
   await btn.click();
   await p.waitForTimeout(400);
 }
-await p.getByText('No packing').waitFor();
+await p.waitForTimeout(500);
+if (await p.getByRole('button', { name: 'Packed', exact: true }).count()) errors.push('orders left unpacked');
 step('packing bench: all orders packed');
+
+// 6b. Final weighing on the packing screen (first order by hand), then finalize; payments recorded by the manager
+const api = (method, url, body) => p.evaluate(async ([method, url, body]) => { const r = await fetch(url, { method, headers: { 'x-terram': '1', ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => null) }; }, [method, url, body]);
+await p.reload();
+const weighBtn = p.getByRole('button', { name: 'Weigh' }).first();
+if (await weighBtn.count()) {
+  await weighBtn.click();
+  const inputs = p.getByRole('dialog').getByLabel(/^Packed weight of/);
+  for (let i = 0; i < (await inputs.count()); i++) { await inputs.nth(i).fill('1.2'); await inputs.nth(i).press('Enter'); await p.waitForTimeout(400); }
+  const packs = p.getByRole('dialog').getByText(/pack quantities above match/);
+  if (await packs.count()) await packs.click();
+  await p.getByRole('button', { name: /Finalize & request payment/ }).click();
+  await p.getByRole('dialog').getByText(/Payment page link|Not yet/).first().waitFor();
+  await p.keyboard.press('Escape');
+}
+const packedOrders = (await api('GET', '/api/orders?view=open&limit=200')).body.orders.filter((o) => o.status === 'packed');
+let paid = 0;
+for (const o of packedOrders) {
+  const d = (await api('GET', `/api/orders/${o.id}`)).body;
+  if (!d.order.finalized_at) {
+    for (const i of d.items.filter((x) => x.status === 'active' && (x.pricing === 'by_weight' || x.pricing === 'estimate') && !x.packed_weight_g)) await api('POST', `/api/items/${i.id}/weight`, { weight_g: 1000 });
+    const f = await api('POST', `/api/orders/${o.id}/finalize`, { packs_confirmed: true });
+    if (f.status !== 200) { errors.push(`#${o.order_number} could not be finalized: ${f.body?.error}`); continue; }
+  }
+  const due = (await api('GET', `/api/orders/${o.id}`)).body.money.balance_cents;
+  const r = await api('POST', `/api/orders/${o.id}/payments`, { method: 'cash', amount_cents: due });
+  if (r.status === 200) paid++; else errors.push(`#${o.order_number} payment: ${r.body?.error}`);
+}
+step(`final weighing: ${packedOrders.length} orders finalized; ${paid} paid and released`);
 
 // 7. Fulfilment: hand everything over
 await p.goto(base + '/fulfilment');
