@@ -17,7 +17,7 @@ interface CutLine {
   estimate_label: string | null;
   cut_items: number;
   total_items: number;
-  orders: { item_id: string; order_id: string; order_number: number; customer_name: string; requested_date: string | null; qty_label: string; special_instructions: string | null; cut: boolean }[];
+  orders: { item_id: string; order_id: string; order_number: number; customer_name: string; requested_date: string | null; qty_label: string; special_instructions: string | null; cut: boolean; storage?: 'fresh' | 'frozen' | null }[];
 }
 interface Sheet {
   from: string | null;
@@ -184,6 +184,7 @@ function CutRow({ l, canCut, onCut, busy }: { l: CutLine; canCut: boolean; onCut
               {canCut && open && <BigCheck size="md" checked={o.cut} onChange={(v) => onCut([o.item_id], v)} label={`${o.customer_name} cut`} />}
               <div className="min-w-0 flex-1">
                 <Link to={`/orders/${o.order_id}`} className="text-[14px] font-medium hover:underline">{o.customer_name}</Link>
+                {o.storage && <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[11.5px] font-semibold ${o.storage === 'frozen' ? 'bg-slate-soft text-slate-soft-ink' : 'bg-field-soft text-field-soft-ink'}`}>{o.storage === 'frozen' ? 'Frozen' : 'Fresh'}</span>}
                 <span className="ml-2 text-[12.5px] text-ink-3">#{o.order_number} · {friendlyDate(o.requested_date, today)}</span>
                 {o.special_instructions && <div className="text-[13.5px] font-medium text-ochre">“{o.special_instructions}”</div>}
               </div>

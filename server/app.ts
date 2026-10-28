@@ -28,7 +28,7 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
   app.use('*', async (c, next) => {
     await next();
     const path = c.req.path;
-    if (/^\/(o|unsubscribe)\/|^\/account$/.test(path) || /^\/api\/public\/(o|account|unsubscribe)(\/|$)/.test(path)) {
+    if (/^\/(o|unsubscribe|pay)\/|^\/account$/.test(path) || /^\/api\/public\/(o|account|unsubscribe|pay)(\/|$)/.test(path)) {
       c.header('X-Robots-Tag', 'noindex, nofollow');
       c.header('Cache-Control', 'no-store');
     }

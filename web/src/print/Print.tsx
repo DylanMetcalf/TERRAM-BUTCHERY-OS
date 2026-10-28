@@ -4,7 +4,7 @@ import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { api, qs } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { useBrand } from '../lib/brand';
-import { dateTime, friendlyDate, longDate, qtyBeforeName, todayYmd } from '../lib/format';
+import { dateTime, formatMoney, friendlyDate, longDate, qtyBeforeName, todayYmd } from '../lib/format';
 import { STATUS_LABEL, SOURCE_LABEL } from '../../../shared/workflow';
 import type { OrderItem, OrderSummary } from '../lib/types';
 
@@ -110,7 +110,7 @@ function CuttingPrint() {
                   </td>
                   <td className="py-1.5 pr-2 text-[11px] leading-snug">
                     {l.orders.map((o: any) => (
-                      <div key={o.item_id}>{o.customer_name} {o.qty_label}{o.special_instructions ? <b> — {o.special_instructions}</b> : null}</div>
+                      <div key={o.item_id}>{o.customer_name} {o.qty_label}{o.storage ? <b> [{o.storage === 'frozen' ? 'FROZEN' : 'FRESH'}]</b> : null}{o.special_instructions ? <b> — {o.special_instructions}</b> : null}</div>
                     ))}
                   </td>
                   <td className="py-1.5"><div className="mt-3.5 border-b border-dotted border-neutral-500" /></td>
@@ -153,6 +153,10 @@ function Docket({ o, items, notes, business, onePerPage }: { o: OrderSummary; it
   const how = o.fulfilment_type === 'delivery' ? 'Delivery' : o.fulfilment_type === 'collection' ? 'Collection' : 'Collection or delivery';
   const address = o.fulfilment_type !== 'collection' ? o.delivery_address : null;
   const phone = o.contact_phone ?? o.customer_phone;
+  // Once finalized, the docket carries the final weights, rates and amounts (same as the payment page)
+  const final = !!o.finalized_at;
+  const live = items.filter((i) => i.status === 'active');
+  const finalTotal = final ? live.reduce((t, i) => t + (i.final_cents ?? 0), o.delivery_fee_cents ?? 0) : null;
   return (
     <article className={`avoid mb-6 border-2 border-black text-[12px] leading-snug ${onePerPage ? 'break' : ''}`}>
       {/* Header */}
@@ -167,6 +171,7 @@ function Docket({ o, items, notes, business, onePerPage }: { o: OrderSummary; it
         <div className="flex shrink-0 flex-col items-end justify-center bg-[var(--brand,#446041)] px-4 py-2 text-white">
           <div className="text-[9.5px] font-bold uppercase tracking-[0.14em] opacity-90">Order docket</div>
           <div className="font-display text-[26px] font-extrabold leading-none">#{o.order_number}</div>
+          <div className="mt-1 rounded bg-white px-2 py-0.5 text-[12px] font-extrabold uppercase tracking-wide text-black">{o.storage === 'frozen' ? 'Frozen' : o.storage === 'fresh' ? 'Fresh' : 'Fresh/frozen?'}</div>
         </div>
       </header>
 
@@ -204,8 +209,10 @@ function Docket({ o, items, notes, business, onePerPage }: { o: OrderSummary; it
               <th className={head}>Product &amp; preparation</th>
               <th className={`${head} w-[26%]`}>Customer’s instructions</th>
               <th className={`${head} w-[62px] text-center`}>Weight kg</th>
+              {final && <th className={`${head} w-[78px] text-right`}>Rate</th>}
+              {final && <th className={`${head} w-[78px] text-right`}>Amount</th>}
               <th className={`${head} w-[38px] text-center`}>Packed</th>
-              <th className={`${head} w-[22%]`}>Blockman notes</th>
+              {!final && <th className={`${head} w-[22%]`}>Blockman notes</th>}
             </tr>
           </thead>
           <tbody>
@@ -218,16 +225,24 @@ function Docket({ o, items, notes, business, onePerPage }: { o: OrderSummary; it
                   {i.preparation_label && <div className="text-[11.5px]">{i.preparation_label}</div>}
                 </td>
                 <td className={`${cell} text-[11.5px]`}>{i.special_instructions ? <b>{i.special_instructions}</b> : <span className="text-neutral-400">—</span>}</td>
-                <td className={`${cell} text-center text-[12px] font-semibold`}>{i.packed_weight_g ? (i.packed_weight_g / 1000).toFixed(2) : ''}</td>
+                <td className={`${cell} text-center text-[12px] font-semibold`}>{i.packed_weight_g && (i.pricing === 'by_weight' || i.pricing === 'estimate') ? (i.packed_weight_g / 1000).toFixed(3) : i.pricing === 'exact' && final ? 'pack' : ''}</td>
+                {final && <td className={`${cell} text-right text-[11.5px]`}>{i.price_cents != null ? `${formatMoney(i.price_cents)}/${i.price_unit === 'kg' ? 'kg' : 'pack'}` : ''}</td>}
+                {final && <td className={`${cell} text-right text-[12px] font-semibold`}>{i.final_cents != null ? formatMoney(i.final_cents) : ''}</td>}
                 <td className={`${cell} text-center`}><Box done={!!i.packed_at} /></td>
-                <td className={cell} />
+                {!final && <td className={cell} />}
               </tr>
             ))}
             {items.length === 0 && (
-              <tr><td colSpan={7} className={`${cell} text-neutral-600`}>No items yet{o.special_request ? ' — see the special request below.' : '.'}</td></tr>
+              <tr><td colSpan={final ? 8 : 7} className={`${cell} text-neutral-600`}>No items yet{o.special_request ? ' — see the special request below.' : '.'}</td></tr>
             )}
             {/* Spare lines for anything added at the counter */}
-            {Array.from({ length: items.length < 6 ? 2 : 1 }).map((_, k) => (
+            {final && (
+              <>
+                {(o.delivery_fee_cents ?? 0) > 0 && <tr><td colSpan={6} className={`${cell} text-right`}>Delivery</td><td className={`${cell} text-right font-semibold`}>{formatMoney(o.delivery_fee_cents!)}</td><td className={cell} /></tr>}
+                <tr><td colSpan={6} className={`${cell} text-right font-bold`}>Final total</td><td className={`${cell} text-right text-[13px] font-extrabold`}>{formatMoney(finalTotal!)}</td><td className={cell} /></tr>
+              </>
+            )}
+            {!final && Array.from({ length: items.length < 6 ? 2 : 1 }).map((_, k) => (
               <tr key={`spare${k}`}>
                 <td className={`${cell} h-[26px] text-center`}><Box /></td>
                 <td className={cell} /><td className={cell} /><td className={cell} /><td className={cell} />
@@ -238,17 +253,18 @@ function Docket({ o, items, notes, business, onePerPage }: { o: OrderSummary; it
           </tbody>
         </table>
 
-        {(o.special_request || notes || o.delivery_notes) && (
+        {(o.special_request || notes || o.delivery_notes || (o.storage === 'fresh' && o.fulfilment_type !== 'collection' && address)) && (
           <div className="mt-2.5 space-y-1.5">
             {o.special_request && <div className="border-l-4 border-black bg-neutral-100 px-2.5 py-1.5"><b>Special request:</b> {o.special_request}</div>}
             {notes && <div className="border-l-4 border-black bg-neutral-100 px-2.5 py-1.5"><b>Customer’s note:</b> {notes}</div>}
             {o.delivery_notes && <div className="border-l-4 border-neutral-500 bg-neutral-100 px-2.5 py-1.5"><b>Delivery note:</b> {o.delivery_notes}</div>}
+            {o.storage === 'fresh' && o.fulfilment_type !== 'collection' && address && <div className="border-l-4 border-black bg-neutral-100 px-2.5 py-1.5"><b>Fresh on a delivery:</b> check the journey time; frozen is recommended for long journeys.</div>}
           </div>
         )}
 
         <div className="mt-3 grid grid-cols-[1fr_210px] gap-4">
           <div>
-            <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-neutral-600">Notes · extra stock needed</div>
+            <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-neutral-600">Notes · extra stock needed · all products vacuum-packed</div>
             <Lines n={3} />
           </div>
           <div className="space-y-2.5 text-[11.5px]">

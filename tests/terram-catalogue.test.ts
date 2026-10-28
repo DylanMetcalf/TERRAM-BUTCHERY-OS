@@ -143,7 +143,7 @@ describe('customer order form', () => {
     for (let i = 2; i < 10; i++) if ([2, 3, 4, 5, 6].includes(weekdayOf(addDays(today, i)))) return addDays(today, i);
     throw new Error('no day');
   };
-  const order = (ref: string, extra: any) => ({ customer: { name: 'Naledi Zulu', phone: '071 555 3380' }, items: [], fulfilment_type: 'collection', delivery_address: '12 Kerk Street, Pretoria', requested_date: day(), client_ref: ref, ...extra });
+  const order = (ref: string, extra: any) => ({ customer: { name: 'Naledi Zulu', phone: '071 555 3380' }, items: [], fulfilment_type: 'collection', delivery_address: '12 Kerk Street, Pretoria', requested_date: day(), client_ref: ref, storage: 'fresh', ...extra });
   const eggs = (count: number) => ({ product_id: productId('eggs'), qty: { kind: 'count', count, weight_g: null } });
 
   it('only takes eggs in whole trays of 30', async () => {

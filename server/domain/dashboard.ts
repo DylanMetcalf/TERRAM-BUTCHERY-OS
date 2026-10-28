@@ -30,6 +30,14 @@ export function dashboard() {
   /** Work queues for the customer platform: each count links to the list that clears it. */
   const queues = {
     awaiting_confirmation: counts.to_review,
+    in_preparation: count("SELECT COUNT(*) n FROM orders WHERE status IN ('confirmed','cutting','cut')"),
+    being_packed: count("SELECT COUNT(*) n FROM orders WHERE status = 'packing'"),
+    awaiting_weighing: count("SELECT COUNT(*) n FROM orders WHERE status = 'packed' AND finalized_at IS NULL"),
+    finalized_not_requested: count("SELECT COUNT(*) n FROM orders WHERE status = 'packed' AND finalized_at IS NOT NULL AND payment_state IN ('not_requested','failed')"),
+    requests_sent: count("SELECT COUNT(*) n FROM orders WHERE status = 'packed' AND payment_state IN ('requested','pending','partially_paid')"),
+    awaiting_verification: count("SELECT COUNT(*) n FROM orders WHERE payment_state = 'proof_submitted' AND status != 'cancelled'"),
+    paid_ready: count("SELECT COUNT(*) n FROM orders WHERE status = 'ready'"),
+    out_for_delivery: counts.out_for_delivery,
     proofs_to_verify: count("SELECT COUNT(DISTINCT order_id) n FROM payment_proofs WHERE status = 'submitted'"),
     awaiting_payment: count("SELECT COUNT(*) n FROM orders WHERE payment_state IN ('requested','pending','partially_paid','failed') AND status != 'cancelled'"),
     awaiting_customer: count("SELECT COUNT(DISTINCT order_id) n FROM order_amendments WHERE status = 'proposed' AND requires_approval = 1"),

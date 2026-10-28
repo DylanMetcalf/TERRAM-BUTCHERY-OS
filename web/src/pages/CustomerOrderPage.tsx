@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Check, CheckCircle2, Clock, Copy, CreditCard, Download, FileText, Landmark, Printer, RotateCcw, Star, Upload, X } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { AlertTriangle, Check, CheckCircle2, Clock, Download, FileText, Landmark, Printer, RotateCcw, Star, X } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PublicShell } from '../components/PublicShell';
 import { ChangeOrderButtons } from '../components/ChangeOrder';
@@ -122,6 +122,7 @@ export default function CustomerOrderPage() {
             <Row label="Timeframe">{o.lead_time}</Row>
           ) : null}
           {o.preferred_date && <Row label="Your preferred date">{longDate(o.preferred_date)}</Row>}
+          {o.storage && <Row label="Fresh or frozen">{o.storage === 'frozen' ? 'Frozen' : 'Fresh'} · vacuum-packed</Row>}
           <Row label={o.fulfilment.type === 'delivery' ? 'Delivery to' : o.fulfilment.type === 'collection' ? 'Collection' : 'Address'}>
             {o.fulfilment.collection ? [o.fulfilment.collection.place, o.fulfilment.collection.address, o.fulfilment.collection.hours].filter(Boolean).join(' · ') || 'From the farm' : o.fulfilment.address || 'We’ll contact you to arrange this.'}
           </Row>
@@ -226,7 +227,7 @@ export default function CustomerOrderPage() {
           <p className="mt-1 text-[14px] text-ink-2">Contact us with your reference number #{o.order_number}.</p>
           <div className="mt-3"><ChangeOrderButtons phone={o.contact.phone} email={o.contact.email} reference={o.order_number} name={o.customer_name?.split(' ')[0]} /></div>
         </Card>
-        <p className="text-center text-[13px] text-ink-3"><Link to="/account" className="underline underline-offset-2">See all your orders</Link></p>
+        <p className="text-center text-[13px] text-ink-3"><Link to="/account" className="underline underline-offset-2">See all your orders</Link> · <Link to="/help" className="underline underline-offset-2">Help & FAQ</Link></p>
       </div>
       {receipt && <ReceiptSheet token={token} id={receipt} onClose={() => setReceipt(null)} />}
     </PublicShell>
@@ -277,109 +278,22 @@ function Amendments({ o, token, onDone }: { o: View; token: string; onDone: (o: 
   );
 }
 
-function PayBox({ o, token, onDone }: { o: View; token: string; onDone: (o: View) => void }) {
+/** The payment step on the order page: amount and status, and the way to the secure payment page. */
+function PayBox({ o }: { o: View; token: string; onDone: (o: View) => void }) {
   const p = o.payment;
   const amount = p.request?.amount_cents ?? o.money.balance_cents;
-  const [uploading, setUploading] = useState(false);
-  const formRef = useRef<HTMLFormElement>(null);
-  const [checkout, setCheckout] = useState<{ action: string; fields: Record<string, string> } | null>(null);
-  const online = useMutation({
-    mutationFn: () => api.post<{ action: string; fields: Record<string, string>; sandbox: boolean }>(`/api/public/o/${token}/pay/online`),
-    onSuccess: (r) => setCheckout(r),
-  });
-  useEffect(() => {
-    if (checkout) formRef.current?.submit();
-  }, [checkout]);
-  const eft = p.eft;
+  const waiting = p.state === 'proof_submitted';
   return (
-    <section className="rounded-2xl border-2 border-brand/40 bg-surface p-4">
-      <h2 className="font-display text-[20px] font-bold">Pay for your order</h2>
-      {amount != null && <p className="mt-1 text-[15px]">Amount due: <b className="tabular">{formatMoney(amount, 'ZAR')}</b></p>}
-      {p.guidance && <p className="mt-1 text-[14px] text-ink-2">{p.guidance}</p>}
-      {p.state === 'proof_submitted' && <p className="mt-2 rounded-xl bg-surface-2 px-3 py-2 text-[14px] text-ink-2">We’ve received your proof of payment and will confirm once the money is in our account.</p>}
-      <div className="mt-4 space-y-4">
-        {p.online && (
-          <div className="rounded-xl border border-line p-3">
-            <div className="flex items-center gap-2 font-semibold"><CreditCard className="size-4" />Pay online</div>
-            <p className="mt-1 text-[13.5px] text-ink-2">Card, instant EFT and more through PayFast’s secure page.</p>
-            <Button className="mt-3" variant="primary" loading={online.isPending || !!checkout} onClick={() => online.mutate()}>Pay {amount != null ? formatMoney(amount, 'ZAR') : ''} online</Button>
-            {online.error && <p className="mt-2 text-[13.5px] text-danger" role="alert">{(online.error as Error).message}</p>}
-            {checkout && (
-              <form ref={formRef} action={checkout.action} method="post" className="hidden">
-                {Object.entries(checkout.fields).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
-              </form>
-            )}
-          </div>
-        )}
-        {eft && (
-          <div className="rounded-xl border border-line p-3">
-            <div className="flex items-center gap-2 font-semibold"><Landmark className="size-4" />Pay by EFT</div>
-            <dl className="mt-2 grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-[14px]">
-              {([['Account holder', eft.accountHolder], ['Bank', eft.bankName], ['Account type', eft.accountType], ['Account number', eft.accountNumber], ['Branch code', eft.branchCode], ['SWIFT', eft.swift], ['Reference', eft.reference]] as [string, string | null][]).filter(([, v]) => v).map(([k, v]) => (
-                <div key={k} className="contents">
-                  <dt className="text-ink-3">{k}</dt>
-                  <dd className="flex min-w-0 items-center gap-1.5 font-semibold tabular"><span className="break-all">{v}</span>{(k === 'Account number' || k === 'Reference' || k === 'Branch code') && <CopyBtn text={v!} label={k} />}</dd>
-                </div>
-              ))}
-            </dl>
-            {eft.referenceInstructions && <p className="mt-2 text-[13.5px] text-ink-2">{eft.referenceInstructions}</p>}
-            {eft.instructions && <p className="mt-1 whitespace-pre-line text-[13.5px] text-ink-2">{eft.instructions}</p>}
-            <Button className="mt-3" variant="secondary" icon={<Upload className="size-4" />} onClick={() => setUploading(true)}>Upload proof of payment</Button>
-            <p className="mt-2 text-[12.5px] text-ink-3">Your order is marked paid once we’ve checked the payment has arrived in our account.</p>
-          </div>
-        )}
-        {!p.online && !eft && <p className="text-[14px] text-ink-2">Please contact us to arrange payment.</p>}
-      </div>
-      {uploading && <ProofSheet token={token} amount={amount} onClose={() => setUploading(false)} onDone={(order) => { onDone(order); setUploading(false); }} />}
+    <section id="pay" className="rounded-2xl border-2 border-brand/40 bg-surface p-4">
+      <h2 className="font-display text-[20px] font-bold">{waiting ? 'Payment awaiting verification' : 'Pay for your order'}</h2>
+      {amount != null && <p className="mt-1 text-[15px]">Final amount: <b className="tabular">{formatMoney(amount, 'ZAR')}</b></p>}
+      <p className="mt-1 text-[14px] text-ink-2">{waiting ? 'Thanks — we’ll confirm as soon as the payment has reflected in our account.' : 'Pay by EFT using your secure payment page: our banking details, your reference, and a place to upload proof of payment.'}</p>
+      {p.pay_url && (
+        <Link to={p.pay_url} className="mt-3 inline-flex h-12 items-center gap-2 rounded-xl bg-brand px-5 text-[15.5px] font-semibold text-brand-ink">
+          <Landmark className="size-4" />{waiting ? 'View payment page' : 'Open payment page'}
+        </Link>
+      )}
     </section>
-  );
-}
-
-function CopyBtn({ text, label }: { text: string; label: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      type="button"
-      className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-3 hover:bg-sunken"
-      aria-label={`Copy ${label}`}
-      onClick={() => {
-        navigator.clipboard?.writeText(text).then(() => {
-          setDone(true);
-          setTimeout(() => setDone(false), 1500);
-        });
-      }}
-    >
-      {done ? <Check className="size-4 text-field" /> : <Copy className="size-4" />}
-    </button>
-  );
-}
-
-function ProofSheet({ token, amount, onClose, onDone }: { token: string; amount: number | null; onClose: () => void; onDone: (o: View) => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [paid, setPaid] = useState(amount != null ? (amount / 100).toFixed(2) : '');
-  const [note, setNote] = useState('');
-  const send = useMutation({
-    mutationFn: () => {
-      const f = new FormData();
-      f.set('file', file!);
-      if (paid) f.set('amount', paid);
-      if (note) f.set('note', note);
-      return api.upload<{ order: View }>(`/api/public/o/${token}/proof`, f);
-    },
-    onSuccess: (r) => onDone(r.order),
-  });
-  return (
-    <Sheet open onClose={onClose} title="Upload proof of payment" footer={<Button full size="lg" variant="primary" disabled={!file || (file && file.size > 5 * 1024 * 1024)} loading={send.isPending} onClick={() => send.mutate()}>Send proof</Button>}>
-      <div className="space-y-4">
-        <Field label="Your proof of payment" hint="A PDF or photo (JPG, PNG, WebP or HEIC), up to 5 MB." error={file && file.size > 5 * 1024 * 1024 ? 'That file is bigger than 5 MB.' : undefined}>
-          <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,.heic,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-[14px] file:mr-3 file:h-11 file:rounded-xl file:border-0 file:bg-sunken file:px-4 file:font-semibold" />
-        </Field>
-        <Field label="Amount you paid" optional><Input inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} className="w-40" /></Field>
-        <Field label="A note for us" optional><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
-        <p className="text-[13px] text-ink-3">Uploading proof doesn’t mark your order as paid. We check our bank account first and email you once it’s confirmed.</p>
-        {send.error && <p className="text-[14px] text-danger" role="alert">{(send.error as Error).message}</p>}
-      </div>
-    </Sheet>
   );
 }
 

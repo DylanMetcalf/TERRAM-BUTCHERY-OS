@@ -22,6 +22,7 @@ export default function Settings() {
     { value: 'orders', label: 'Orders & fulfilment' },
     { value: 'form', label: 'Customer form' },
     { value: 'payments', label: 'Payments & banking' },
+    { value: 'help', label: 'Help & FAQ' },
     ...(can('system.health') ? [{ value: 'messages', label: 'Emails & reminders' }] : []),
     { value: 'assistant', label: 'Assistant' },
     ...(can('users.manage') ? [{ value: 'team', label: 'Team' }] : []),
@@ -51,6 +52,7 @@ export default function Settings() {
               {tab === 'orders' && <OrdersSettings s={data.settings} />}
               {tab === 'form' && <FormSettings s={data.settings} env={data.environment} />}
               {tab === 'payments' && <PaymentsSettings s={data.settings} env={data.environment} />}
+              {tab === 'help' && <HelpSettings s={data.settings} />}
               {tab === 'messages' && <MessagesSettings s={data.settings} />}
               {tab === 'assistant' && <Assistant s={data.settings} env={data.environment} />}
               {tab === 'team' && <Team />}
@@ -138,7 +140,6 @@ function OrdersSettings({ s }: { s: any }) {
       <Panel title="Order rules" footer={<Button variant="primary" loading={saveO.isPending} onClick={() => saveO.mutate(o)}>Save</Button>}>
         <Field label="Lead time shown to customers" hint="On the order form and in emails."><Textarea rows={2} value={o.leadTimeText ?? ''} onChange={(e) => setO({ ...o, leadTimeText: e.target.value })} /></Field>
         <Switch checked={o.formOrdersRequireReview} onChange={(x) => setO({ ...o, formOrdersRequireReview: x })} label="Online orders need review" description="Customer form orders arrive as “To review” before they are confirmed." />
-        <Switch checked={o.autoReadyAfterPacking} onChange={(x) => setO({ ...o, autoReadyAfterPacking: x })} label="Packed means ready" description="Marking an order packed also marks it ready for collection/delivery." />
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Minimum notice (days)" hint="For the customer form."><Input type="number" min={0} value={o.leadTimeDays} onChange={(e) => setO({ ...o, leadTimeDays: Number(e.target.value) })} /></Field>
           <Field label="Duplicate window (hours)"><Input type="number" min={1} value={o.duplicateWindowHours} onChange={(e) => setO({ ...o, duplicateWindowHours: Number(e.target.value) })} /></Field>
@@ -162,6 +163,7 @@ function OrdersSettings({ s }: { s: any }) {
               <Field label="Free delivery within (km)" hint="Distance from the shop."><Input type="number" min={0} value={f.freeDeliveryKm} onChange={(e) => setF({ ...f, freeDeliveryKm: Number(e.target.value) })} /></Field>
               <Field label="Fee per km beyond that (R)" hint="0 = no distance fee. Staff enter the distance on each delivery order and the fee is worked out."><Input type="number" min={0} step="0.5" value={(f.deliveryRatePerKmCents ?? 0) / 100} onChange={(e) => setF({ ...f, deliveryRatePerKmCents: Math.round(Number(e.target.value) * 100) })} /></Field>
             </div>
+            <Field label="Fresh deliveries: longest journey (hours)" hint="Shown to customers: for longer journeys fresh can’t be guaranteed and frozen is recommended. Staff are asked to check the journey on fresh delivery orders."><Input type="number" min={0.5} max={24} step={0.5} value={f.freshMaxHours ?? 2} onChange={(e) => setF({ ...f, freshMaxHours: Number(e.target.value) })} className="w-28" /></Field>
             <Switch checked={!!f.showDeliveryFees} onChange={(x) => setF({ ...f, showDeliveryFees: x })} label="Show delivery fees on the order form" description="On: customers see “Delivery is free within 60 km; further away R… per km”. Off: nothing about fees is shown and you handle it yourselves." />
             {(f.deliveryRatePerKmCents ?? 0) > 0 && <p className="-mt-2 text-[13px] text-ink-3">Example: a delivery {f.freeDeliveryKm + 15} km away costs 15 km × R{((f.deliveryRatePerKmCents ?? 0) / 100).toFixed(2)} = R{((15 * (f.deliveryRatePerKmCents ?? 0)) / 100).toFixed(2)}.</p>}
           </>
@@ -562,12 +564,12 @@ function PaymentsSettings({ s, env }: { s: any; env: any }) {
   return (
     <div className="space-y-6">
       <Panel title="How customers pay" footer={<Button variant="primary" loading={save.isPending} onClick={() => save.mutate(v)}>Save</Button>}>
-        <Field label="When is the customer asked to pay?">
-          <Segmented full value={v.trigger} onChange={(x) => setV({ ...v, trigger: x })} options={[{ value: 'ready', label: 'When ready' }, { value: 'manual', label: 'When we send it' }]} />
-        </Field>
-        <p className="-mt-2 text-[13px] text-ink-3">A payment request is only sent once the final amount is known (weighed items packed), there are no unanswered changes, and at least one payment method below is available.</p>
+        <p className="text-[13.5px] text-ink-2">After packing, staff do the final weighing and finalize the order, then send the payment request (email, or WhatsApp by hand). Customers pay by EFT on their secure payment page and upload proof or tell you they’ve paid; staff confirm once the money has reflected.</p>
+        <Switch checked={!!v.requirePaymentBeforeRelease} onChange={(x) => setV({ ...v, requirePaymentBeforeRelease: x })} label="Release orders only once paid" description="An order can’t be marked ready for delivery or collection until its payment is confirmed." />
+        {v.requirePaymentBeforeRelease && <Switch checked={!!v.allowUnpaidRelease} onChange={(x) => setV({ ...v, allowUnpaidRelease: x })} label="Let managers release an unpaid order" description="For agreed exceptions (e.g. cash on collection). A reason is required and recorded." />}
+        <Field label="Payment links stay valid for (days)" hint="Links in payment emails. Customers can always reach the current one from their order page."><Input type="number" min={1} max={90} value={v.linkDays ?? 30} onChange={(e) => setV({ ...v, linkDays: Number(e.target.value) })} className="w-28" /></Field>
         <Switch checked={!!v.eftEnabled} onChange={(x) => setV({ ...v, eftEnabled: x })} label="Accept EFT (bank transfer)" description={missing.length ? `Needs: ${missing.join(', ')}.` : 'Customers see the banking details below on their order page and upload proof. Staff verify it against the bank.'} />
-        <Switch checked={!!v.onlineEnabled} onChange={(x) => setV({ ...v, onlineEnabled: x })} disabled={!pf.configured} label="Accept online payment (PayFast)" description={pf.configured ? `PayFast is set up on the server (${pf.mode === 'live' ? 'LIVE' : 'sandbox / test'}${pf.passphrase ? ', with passphrase' : ', no passphrase'}). Paid status comes only from PayFast’s server notice.` : 'Not available yet: the PayFast merchant details must be added to the server environment (PAYFAST_MERCHANT_ID, PAYFAST_MERCHANT_KEY, PAYFAST_PASSPHRASE, PAYFAST_MODE).'} />
+        {pf.configured && <Switch checked={!!v.onlineEnabled} onChange={(x) => setV({ ...v, onlineEnabled: x })} disabled={!pf.configured} label="Accept online payment (PayFast)" description={pf.configured ? `PayFast is set up on the server (${pf.mode === 'live' ? 'LIVE' : 'sandbox / test'}${pf.passphrase ? ', with passphrase' : ', no passphrase'}). Paid status comes only from PayFast’s server notice.` : 'Not available yet: the PayFast merchant details must be added to the server environment (PAYFAST_MERCHANT_ID, PAYFAST_MERCHANT_KEY, PAYFAST_PASSPHRASE, PAYFAST_MODE).'} />}
         <Field label="Payment guidance for customers" optional><Textarea rows={2} value={v.guidance ?? ''} onChange={set('guidance')} placeholder="e.g. Please pay before collection." /></Field>
       </Panel>
       <Panel title="Banking details for EFT" footer={<Button variant="primary" loading={save.isPending} onClick={() => save.mutate(v)}>Save</Button>}>
@@ -625,5 +627,38 @@ function MessagesSettings({ s }: { s: any }) {
         {data ? <NotificationList rows={data.notifications} canRetry /> : <LoadingBlock rows={3} />}
       </Card>
     </div>
+  );
+}
+
+/** The Help page questions. Plain text; {{leadTime}} and {{freshMaxHours}} are filled in from the settings above. */
+function HelpSettings({ s }: { s: any }) {
+  const [faq, setFaq] = useState<{ q: string; a: string }[]>(s.help?.faq ?? []);
+  const save = useSave('help');
+  const set = (i: number, k: 'q' | 'a', v: string) => setFaq(faq.map((f, j) => (j === i ? { ...f, [k]: v } : f)));
+  const move = (i: number, d: -1 | 1) => {
+    const j = i + d;
+    if (j < 0 || j >= faq.length) return;
+    const next = [...faq];
+    [next[i], next[j]] = [next[j], next[i]];
+    setFaq(next);
+  };
+  return (
+    <Panel title="Help & FAQ" footer={<Button variant="primary" loading={save.isPending} disabled={faq.some((f) => f.q.trim().length < 3 || f.a.trim().length < 3)} onClick={() => save.mutate({ faq })}>Save</Button>}>
+      <p className="text-[13.5px] text-ink-2">Shown on <a href="/help" target="_blank" rel="noreferrer" className="font-medium text-brand underline">/help</a>, linked from the order form and customer pages. Only state what’s true for the farm. Write <code>{'{{leadTime}}'}</code> or <code>{'{{freshMaxHours}}'}</code> to insert those settings.</p>
+      <div className="space-y-3">
+        {faq.map((f, i) => (
+          <Card key={i} className="space-y-2 p-3">
+            <div className="flex items-center gap-2">
+              <Input value={f.q} onChange={(e) => set(i, 'q', e.target.value)} placeholder="Question" className="font-semibold" aria-label={`Question ${i + 1}`} />
+              <Button type="button" size="sm" variant="ghost" onClick={() => move(i, -1)} aria-label="Move up" disabled={i === 0}>↑</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => move(i, 1)} aria-label="Move down" disabled={i === faq.length - 1}>↓</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setFaq(faq.filter((_, j) => j !== i))} aria-label="Remove question">✕</Button>
+            </div>
+            <Textarea rows={3} value={f.a} onChange={(e) => set(i, 'a', e.target.value)} placeholder="Answer" aria-label={`Answer ${i + 1}`} />
+          </Card>
+        ))}
+      </div>
+      <Button type="button" icon={<Plus className="size-4" />} onClick={() => setFaq([...faq, { q: '', a: '' }])}>Add a question</Button>
+    </Panel>
   );
 }

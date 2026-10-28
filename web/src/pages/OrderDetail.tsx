@@ -18,9 +18,10 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { primaryNextStep, SOURCE_LABEL, STATUS_LABEL, PAYMENT_LABEL, type OrderStatus } from '../../../shared/workflow';
+import { primaryNextStep, SOURCE_LABEL, STATUS_LABEL, type OrderStatus } from '../../../shared/workflow';
 import { ExceptionCard } from '../components/ExceptionCard';
-import { AmendmentsPanel, ConfirmSheet, CustomerLinkCard, ExpectedRow, InvoicePanel, NotificationList, PaymentPanel, TimeframeSheet, WeightButton } from '../components/OrderPlatform';
+import { AmendmentsPanel, ConfirmSheet, CustomerLinkCard, ExpectedRow, InvoicePanel, NotificationList, PaymentPanel, TimeframeSheet } from '../components/OrderPlatform';
+import { FinalizationCard, FinalWeighingSheet, PaymentRequestSheet, StorageBadge } from '../components/FinalWeighing';
 import { ItemEditor, type ItemDraft } from '../components/ItemEditor';
 import { FulfilmentLabel, SourceIcon, StageTrack, StatusPill } from '../components/order-bits';
 import { Badge, Button, Card, cx, ErrorState, Field, Input, KeyValue, LoadingBlock, SectionTitle, Segmented, Sheet, Textarea, useConfirm, useToast } from '../components/ui';
@@ -47,6 +48,11 @@ interface Detail {
   notifications: any[];
   confirmation_problems: string[];
   feedback: { rating: number | null; comment: string | null; created_at: string } | null;
+  finalization: any;
+  finalization_history: any[];
+  finalization_problems: string[];
+  declarations: any[];
+  release: { require_payment: boolean; allow_unpaid: boolean };
 }
 
 const SECONDARY_LABEL: Partial<Record<OrderStatus, string>> = {
@@ -78,6 +84,9 @@ export default function OrderDetail() {
   const [showRaw, setShowRaw] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [timeframe, setTimeframe] = useState(false);
+  const [weighing, setWeighing] = useState(false);
+  const [requesting, setRequesting] = useState(false);
+  const [releasing, setReleasing] = useState(false);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['order', id] });
@@ -224,6 +233,9 @@ export default function OrderDetail() {
                         {SECONDARY_LABEL[t] ?? STATUS_LABEL[t]}
                       </button>
                     ))}
+                    {data.release?.allow_unpaid && can('payments.write') && o.status === 'packed' && o.finalized_at && o.payment_state !== 'paid' && (
+                      <button onClick={() => { setMoreOpen(false); setReleasing(true); }} className="flex w-full items-center rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-ochre-soft-ink hover:bg-sunken">Release before payment…</button>
+                    )}
                     {can('orders.cancel') && (
                       <>
                       {(canWrite || canProduce) && secondary.length > 0 && <div className="mx-2 my-1 h-px bg-line" />}
@@ -244,7 +256,13 @@ export default function OrderDetail() {
         <Card className="mb-5 p-4 sm:p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
             <div className="flex-1"><StageTrack status={o.status} /></div>
-            {next && nextAllowed && (
+            {o.status === 'packed' && (canWrite || canProduce) ? (
+              !o.finalized_at ? (
+                <Button variant="primary" size="lg" icon={<Check className="size-5" />} className="sm:min-w-52" onClick={() => setWeighing(true)}>Final weighing</Button>
+              ) : o.payment_state !== 'paid' ? (
+                <Button variant="primary" size="lg" icon={<Check className="size-5" />} className="sm:min-w-52" onClick={() => setRequesting(true)}>{o.payment_state === 'not_requested' || o.payment_state === 'failed' ? 'Send payment request' : 'Payment request'}</Button>
+              ) : null
+            ) : next && nextAllowed && (
               <Button variant={o.status === 'ready' || o.status === 'out_for_delivery' ? 'success' : 'primary'} size="lg" loading={move.isPending} disabled={blocked && ['confirmed', 'cutting'].includes(next.to)} onClick={() => (o.status === 'packing' || o.status === 'cut' ? navigate('/packing') : next.to === 'confirmed' && !o.confirmed_at ? setConfirming(true) : move.mutate({ to: next.to }))} icon={<Check className="size-5" />} className="sm:min-w-52">
                 {o.status === 'packing' || o.status === 'cut' ? 'Go to packing' : next.label}
               </Button>
@@ -252,6 +270,8 @@ export default function OrderDetail() {
           </div>
           {blocked && <p className="mt-3 text-[13.5px] text-brand">Answer the question{openEx.length > 1 ? 's' : ''} below before this order can be confirmed or cut.</p>}
           {o.status === 'needs_clarification' && !blocked && <p className="mt-3 text-[13.5px] text-ink-2">All questions are answered. Move it back to review when ready.</p>}
+          {o.status === 'packed' && !o.finalized_at && <p className="mt-3 text-[13.5px] text-ink-2">Packed. Next: final weighing — enter the actual weights, check the packs, then finalize the amount.</p>}
+          {o.status === 'packed' && o.finalized_at && o.payment_state !== 'paid' && <p className="mt-3 text-[13.5px] text-ink-2">{o.payment_state === 'proof_submitted' ? 'The customer has paid or sent proof — check the bank, then confirm the payment below.' : 'Finalized. The order is released for ' + (o.fulfilment_type === 'collection' ? 'collection' : 'delivery') + ' once payment is confirmed.'}</p>}
         </Card>
       )}
       {o.status === 'on_hold' && <Card className="mb-5 bg-sunken p-4 text-[14.5px] text-ink-2">This order is on hold. Use “More” to put it back into the workflow.</Card>}
@@ -297,7 +317,6 @@ export default function OrderDetail() {
                     ) : (i.est_cents ?? estimateLinePrice(i.qty, i.price_cents, i.price_unit)) != null ? (
                       <div className="text-[12px] text-ink-3">{i.pricing === 'exact' ? '' : '≈ '}{formatMoney((i.est_cents ?? estimateLinePrice(i.qty, i.price_cents, i.price_unit))!)}</div>
                     ) : null}
-                    {canProduce && !['cancelled'].includes(o.status) && <div className="mt-1"><WeightButton item={i} orderId={o.id} /></div>}
                   </div>
                   {canWrite && !['completed', 'cancelled'].includes(o.status) && (
                     <div className="flex shrink-0 flex-col gap-1 sm:flex-row">
@@ -376,6 +395,19 @@ export default function OrderDetail() {
             </SectionTitle>
             <Card className="px-4 py-1.5">
               <dl className="divide-y divide-line">
+                <KeyValue label="Fresh or frozen">
+                  <span className="inline-flex flex-wrap items-center gap-2">
+                    <StorageBadge storage={o.storage} size="sm" />
+                    {canWrite && !['completed', 'cancelled'].includes(o.status) && (
+                      <span className="inline-flex gap-1">
+                        {(['fresh', 'frozen'] as const).filter((x) => x !== o.storage).map((x) => (
+                          <button key={x} type="button" className="text-[12.5px] font-medium text-brand hover:underline" onClick={() => patch.mutate({ storage: x })}>Set {x}</button>
+                        ))}
+                      </span>
+                    )}
+                  </span>
+                </KeyValue>
+                {o.storage === 'fresh' && o.fulfilment_type !== 'collection' && o.delivery_address && <p className="py-2 text-[12.5px] text-ochre-soft-ink">Fresh on a delivery: check the journey is under the fresh limit (Settings → Orders & fulfilment), or suggest frozen.</p>}
                 <KeyValue label="Type">{o.fulfilment_type === 'delivery' ? 'Delivery' : o.fulfilment_type === 'collection' ? 'Collection' : <span className="text-ochre">Not set</span>}</KeyValue>
                 <KeyValue label={o.confirmed_at ? 'Date' : 'Preferred date'}>{o.requested_date ? longDate(o.requested_date) : <span className={o.confirmed_at ? 'text-ochre' : 'text-ink-3'}>{o.confirmed_at ? 'Not set' : 'No preference'}</span>}</KeyValue>
                 <ExpectedRow order={o} canWrite={canWrite} onChange={() => setTimeframe(true)} />
@@ -445,7 +477,8 @@ export default function OrderDetail() {
             </section>
           )}
 
-          <PaymentPanel orderId={o.id} payment={data.payment} canWrite={canWrite} canPay={can('payments.write')} />
+          <FinalizationCard order={o} finalization={data.finalization} history={data.finalization_history ?? []} canReopen={can('payments.write')} />
+          <PaymentPanel orderId={o.id} payment={data.payment} declarations={data.declarations ?? []} finalized={!!o.finalized_at} canWrite={canWrite} canPay={can('payments.write')} />
           <InvoicePanel orderId={o.id} invoice={data.invoice} canWrite={canWrite} canPay={can('payments.write')} />
           {can('payments.write') && (
             <Card className="p-4">
@@ -502,6 +535,9 @@ export default function OrderDetail() {
 
       <ItemEditor open={!!editing} onClose={() => setEditing(null)} initial={editing ? { product_id: editing.product_id, qty: editing.qty, preparation: editing.preparation, special_instructions: editing.special_instructions } : null} saving={saveItem.isPending} onSave={(d) => editing && saveItem.mutate({ itemId: editing.id, d })} title={editing?.product_name} />
       <ItemEditor open={adding} onClose={() => setAdding(false)} saving={saveItem.isPending} onSave={(d) => saveItem.mutate({ d })} title="Add item" />
+      <FinalWeighingSheet order={o} items={items} problems={data.finalization_problems ?? []} open={weighing} onClose={() => setWeighing(false)} onFinalized={() => { setWeighing(false); setRequesting(true); }} />
+      <PaymentRequestSheet orderId={o.id} open={requesting} onClose={() => setRequesting(false)} />
+      {releasing && <ReleaseUnpaidSheet order={o} onClose={() => setReleasing(false)} />}
       {confirming && <ConfirmSheet order={o} problems={data.confirmation_problems ?? []} open onClose={() => setConfirming(false)} />}
       {timeframe && <TimeframeSheet order={o} open onClose={() => setTimeframe(false)} />}
       <FulfilmentSheet open={fulfilOpen} onClose={() => setFulfilOpen(false)} order={o} saving={patch.isPending} onSave={(v) => patch.mutate(v)} />
@@ -600,3 +636,28 @@ function FulfilmentSheet({ open, onClose, order, onSave, saving }: { open: boole
   );
 }
 
+
+/** Manager override (only if switched on in Settings → Payments): release an unpaid order with a recorded reason. */
+function ReleaseUnpaidSheet({ order, onClose }: { order: OrderSummary; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const go = useMutation({
+    mutationFn: () => api.post(`/api/orders/${order.id}/transition`, { to: 'ready', unpaid_reason: reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['order', order.id] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      toast({ tone: 'success', title: 'Released before payment', body: 'The reason is recorded in the history.' });
+      onClose();
+    },
+    onError: (e) => toast({ tone: 'error', title: e instanceof ApiError ? e.message : 'That did not work.' }),
+  });
+  return (
+    <Sheet open onClose={onClose} title="Release before payment?" footer={<Button full size="lg" variant="danger" disabled={reason.trim().length < 3} loading={go.isPending} onClick={() => go.mutate()}>Release unpaid</Button>}>
+      <div className="space-y-4 text-[14.5px]">
+        <p className="text-ink-2">Payment for #{order.order_number} hasn’t been confirmed. Only release it if you’ve agreed another arrangement with the customer.</p>
+        <Field label="Reason (kept in the history)"><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Pays cash on collection" /></Field>
+      </div>
+    </Sheet>
+  );
+}

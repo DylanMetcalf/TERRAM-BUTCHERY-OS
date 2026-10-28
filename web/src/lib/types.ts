@@ -53,6 +53,9 @@ export interface OrderSummary {
   confirmed_total_cents?: number | null;
   final_total_cents?: number | null;
   amount_paid_cents?: number | null;
+  storage?: 'fresh' | 'frozen' | null;
+  finalized_at?: string | null;
+  finalized_version?: number;
 }
 
 export type PaymentState = 'not_requested' | 'requested' | 'pending' | 'proof_submitted' | 'partially_paid' | 'paid' | 'failed' | 'refunded';

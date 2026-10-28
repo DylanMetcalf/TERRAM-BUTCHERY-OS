@@ -53,6 +53,8 @@ const PublicPrivacy = lazy(() => import('./pages/PublicPrivacy'));
 const CustomerOrderPage = lazy(() => import('./pages/CustomerOrderPage'));
 const CustomerAccount = lazy(() => import('./pages/CustomerAccount'));
 const Unsubscribe = lazy(() => import('./pages/Unsubscribe'));
+const PayPage = lazy(() => import('./pages/PayPage'));
+const HelpPage = lazy(() => import('./pages/Help'));
 
 function FullSpinner() {
   return (
@@ -77,13 +79,15 @@ function Routed() {
     return <Suspense fallback={<FullSpinner />}><PublicPrivacy /></Suspense>;
   }
   // Customer pages: the order page behind a signed link, order history, reminder preferences
-  if (/^\/(o|unsubscribe)\/[^/]+/.test(loc.pathname) || loc.pathname === '/account') {
+  if (/^\/(o|unsubscribe|pay)\/[^/]+/.test(loc.pathname) || loc.pathname === '/account' || loc.pathname === '/help') {
     return (
       <Suspense fallback={<FullSpinner />}>
         <Routes>
           <Route path="/o/:token" element={<CustomerOrderPage />} />
           <Route path="/account" element={<CustomerAccount />} />
           <Route path="/unsubscribe/:token" element={<Unsubscribe />} />
+          <Route path="/pay/:token" element={<PayPage />} />
+          <Route path="/help" element={<HelpPage />} />
         </Routes>
       </Suspense>
     );

@@ -32,9 +32,14 @@ r.get('/info', (c) => {
   return c.json({
     business: { name: s.business.name, tagline: s.business.tagline, phone: s.business.phone, email: s.business.email, address: s.business.address, instagramUrl: s.business.instagramUrl || null, googleReviewUrl: s.business.googleReviewUrl || null },
     // Only what the order form needs — never the internal email recipients or banking details
-    form: { enabled: s.customerForm.enabled, intro: s.customerForm.intro, confirmationMessage: s.customerForm.confirmationMessage, showPrices: s.customerForm.showPrices, terms: s.customerForm.terms, noticeNote: s.customerForm.noticeNote, leadTime: s.orders.leadTimeText, packagingNote: PACKAGING_NOTE },
+    form: { enabled: s.customerForm.enabled, intro: s.customerForm.intro, confirmationMessage: s.customerForm.confirmationMessage, showPrices: s.customerForm.showPrices, terms: s.customerForm.terms, noticeNote: s.customerForm.noticeNote, leadTime: s.orders.leadTimeText, packagingNote: PACKAGING_NOTE, freshMaxHours: s.fulfilment.freshMaxHours },
     fulfilment: { collectionDays: s.fulfilment.collectionDays, deliveryDays: s.fulfilment.deliveryDays, deliveryEnabled: s.fulfilment.deliveryEnabled, collectionHours: s.fulfilment.collectionHours, collectionPlace: s.fulfilment.collectionPlace, collectionAddress: s.fulfilment.collectionAddress, deliveryNotes: s.fulfilment.deliveryNotes, freeDeliveryKm: s.fulfilment.freeDeliveryKm, deliveryRatePerKmCents: s.fulfilment.deliveryRatePerKmCents, customerChooses: s.fulfilment.customerChooses, showDeliveryFees: s.fulfilment.showDeliveryFees },
     payments: { online: pm.online, eft: pm.eft, guidance: s.payments.guidance },
+    // Help page: the farm's own answers, with live values (lead time, fresh/frozen threshold) filled in
+    help: {
+      faq: s.help.faq.map((f) => ({ q: f.q, a: f.a.replace(/\{\{leadTime\}\}/g, s.orders.leadTimeText).replace(/\{\{freshMaxHours\}\}/g, String(s.fulfilment.freshMaxHours)) })),
+      whatsapp: s.business.phone ? `https://wa.me/${s.business.phone.replace(/\D/g, '').replace(/^0/, '27')}` : null,
+    },
     earliest_date: addDays(today, s.orders.leadTimeDays),
     today,
     currency: s.business.currency,
@@ -204,6 +209,18 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   // Reminders only with a clear yes; never taken away by ordering without ticking it
   if (input.marketing_consent) db().prepare('UPDATE customers SET marketing_consent = 1, marketing_consent_at = ? WHERE id = ?').run(now(), order.customer_id);
   if (input.customer.email) db().prepare('UPDATE customers SET email = COALESCE(email, ?) WHERE id = ?').run(input.customer.email.toLowerCase(), order.customer_id);
+  db().prepare('UPDATE orders SET storage = ? WHERE id = ?').run(input.storage, order.id);
+  // Fresh on a delivery: staff check the journey time (no route service, so nothing is guessed)
+  if (input.storage === 'fresh' && fulfilmentType !== 'collection' && input.delivery_address) {
+    raiseException({
+      type: 'delivery_check',
+      severity: 'info',
+      title: `Fresh order #${order.order_number} for delivery — check the journey time`,
+      detail: `${input.customer.name} chose fresh. If the delivery journey to “${input.delivery_address}” is longer than about ${s.fulfilment.freshMaxHours} hours, we can’t guarantee fresh products stay in the required condition: suggest frozen before confirming.`,
+      order_id: order.id,
+      dedupe_key: `fresh-delivery:${order.id}`,
+    });
+  }
   if (special) {
     db().prepare('UPDATE orders SET special_request = ? WHERE id = ?').run(special, order.id);
     raiseException({

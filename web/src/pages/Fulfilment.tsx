@@ -1,3 +1,4 @@
+import { StorageBadge } from '../components/FinalWeighing';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, CheckCircle2, MapPin, MessageCircle, Phone, Printer, Store, Truck } from 'lucide-react';
 import { useState } from 'react';
@@ -103,6 +104,7 @@ function ReadyCard({ o, today }: { o: FOrder; today: string }) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <Link to={`/orders/${o.id}`} className="text-[18px] font-semibold hover:underline">{o.customer_name}</Link>
+            <span className="ml-2 align-middle"><StorageBadge storage={o.storage} size="sm" /></span>
             <div className="text-[13.5px] text-ink-3">#{o.order_number} · <span className={cx(overdue && 'font-semibold text-danger')}>{friendlyDate(o.requested_date, today)}</span>{o.time_window ? ` · ${o.time_window}` : ''}</div>
           </div>
           <div className="flex flex-col items-end gap-1">
@@ -138,7 +140,6 @@ function ReadyCard({ o, today }: { o: FOrder; today: string }) {
           )}
           <div className="ml-auto flex gap-2">
             {delivery && o.status === 'ready' && <Button size="md" icon={<Truck className="size-4" />} loading={move.isPending && move.variables === 'out_for_delivery'} onClick={() => move.mutate('out_for_delivery')}>Out for delivery</Button>}
-            {o.status === 'packed' && <Button size="md" onClick={() => move.mutate('ready')}>Mark ready</Button>}
             {(o.status === 'ready' || o.status === 'out_for_delivery') && (
               <Button variant="success" size="md" icon={<Check className="size-4" strokeWidth={3} />} loading={move.isPending && move.variables === 'completed'} onClick={() => move.mutate('completed')}>
                 {delivery ? 'Delivered' : 'Collected'}

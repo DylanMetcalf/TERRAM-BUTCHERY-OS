@@ -88,6 +88,7 @@ export const PublicOrderSchema = z.object({
     .optional(),
   /** Optional, unticked by default: occasional reorder reminders. Ordering never depends on it. */
   marketing_consent: z.boolean().optional(),
+  storage: z.enum(['fresh', 'frozen'], { message: 'Choose fresh or frozen.' }),
   /** The total the customer was shown; if prices changed since, they're asked to look again. */
   seen_total_cents: z.number().int().min(0).nullable().optional(),
   website: z.string().max(0).optional(), // honeypot — must stay empty

@@ -20,16 +20,19 @@ import { payPathFor } from './pay-page.js';
  * has proved their email address with a one-time code.
  */
 
-export type Stage = 'received' | 'confirmed' | 'preparing' | 'ready' | 'on_the_way' | 'completed';
+export type Stage = 'received' | 'confirmed' | 'preparing' | 'weighing' | 'payment' | 'ready' | 'on_the_way' | 'completed';
 const STAGES: { key: Stage; label: string }[] = [
   { key: 'received', label: 'Received' },
   { key: 'confirmed', label: 'Confirmed' },
   { key: 'preparing', label: 'Being prepared' },
+  { key: 'weighing', label: 'Final weighing' },
+  { key: 'payment', label: 'Payment' },
   { key: 'ready', label: 'Ready' },
   { key: 'completed', label: 'Completed' },
 ];
 
-export function stageOf(status: OrderStatus): Stage {
+export function stageOf(status: OrderStatus, o?: { finalized_at?: string | null; payment_state?: string | null }): Stage {
+  if (status === 'packed') return o?.finalized_at ? 'payment' : 'weighing';
   switch (status) {
     case 'review':
     case 'needs_clarification':
@@ -39,7 +42,6 @@ export function stageOf(status: OrderStatus): Stage {
     case 'cutting':
     case 'cut':
     case 'packing':
-    case 'packed':
       return 'preparing';
     case 'ready':
       return 'ready';
@@ -57,14 +59,16 @@ function nextStep(o: OrderSummary, pendingChanges: number, pay: ReturnType<typeo
   if (o.status === 'cancelled') return { who: 'done', text: 'This order was cancelled.' };
   if (o.status === 'completed') return { who: 'done', text: 'This order is complete. Thank you!' };
   if (pendingChanges) return { who: 'you', text: 'We’ve suggested a change to your order. Please accept or decline it below.' };
-  if (pay.request && pay.state !== 'paid' && pay.state !== 'proof_submitted') return { who: 'you', text: `Please pay ${(pay.request.amount_cents / 100).toLocaleString('en-ZA', { style: 'currency', currency: 'ZAR' })} using one of the options below.` };
-  if (pay.state === 'proof_submitted') return { who: 'terram', text: 'Thanks for your proof of payment. We’ll confirm once we’ve checked that the payment has arrived.' };
+  if (pay.request && pay.state !== 'paid' && pay.state !== 'proof_submitted') return { who: 'you', text: `Your order is packed and weighed. Please pay ${(pay.request.amount_cents / 100).toLocaleString('en-ZA', { style: 'currency', currency: 'ZAR' })} using your secure payment page. Payment must reflect before your order is released.` };
+  if (pay.state === 'proof_submitted') return { who: 'terram', text: 'Thanks — your payment is awaiting verification. We’ll confirm as soon as it has reflected in our account.' };
+  if (o.status === 'packed' && !o.finalized_at) return { who: 'terram', text: 'Your order is packed. We’re doing the final weighing and will send you the final amount to pay.' };
+  if (o.status === 'packed' && o.finalized_at) return { who: 'terram', text: 'Your order is packed and weighed. We’ll send you a payment request with the final amount shortly.' };
   if (o.status === 'needs_clarification') return { who: 'terram', text: 'We need to check something about your order and will contact you shortly.' };
   if (o.status === 'on_hold') return { who: 'terram', text: 'Your order is on hold for the moment. We’ll be in touch.' };
   if (o.status === 'review') return { who: 'terram', text: 'We’re reviewing your products, quantities and availability, and will confirm your order soon.' };
   if (o.status === 'confirmed' || o.status === 'cutting' || o.status === 'cut' || o.status === 'packing' || o.status === 'packed')
     return { who: 'terram', text: 'Your order is confirmed and in our preparation queue. We’ll let you know when it’s ready.' };
-  if (o.status === 'ready') return { who: 'terram', text: o.fulfilment_type === 'delivery' ? 'Your order is ready. We’ll be in touch about delivery.' : o.fulfilment_type === 'collection' ? 'Your order is ready for collection.' : 'Your order is ready. We’ll be in touch to arrange collection or delivery.' };
+  if (o.status === 'ready') return { who: 'terram', text: o.fulfilment_type === 'delivery' ? 'Payment received — your order is ready for delivery. We’ll be in touch to arrange it.' : o.fulfilment_type === 'collection' ? 'Your order is ready for collection.' : 'Your order is ready. We’ll be in touch to arrange collection or delivery.' };
   if (o.status === 'out_for_delivery') return { who: 'terram', text: 'Your order is on its way to you.' };
   return { who: 'terram', text: STATUS_LABEL[o.status] };
 }
@@ -119,8 +123,8 @@ export function customerOrderView(orderId: string) {
   const amendments = listAmendments(orderId).filter((a) => a.status !== 'withdrawn');
   const pay = paymentSummary(orderId, { forCustomer: true });
   const pending = amendments.filter((a) => a.status === 'proposed' && a.requires_approval).length;
-  const stage = stageOf(o.status);
-  const steps = (o.fulfilment_type === 'delivery' ? [...STAGES.slice(0, 4), { key: 'on_the_way' as Stage, label: 'On the way' }, STAGES[4]] : STAGES).map((x) => x);
+  const stage = stageOf(o.status, o);
+  const steps = (o.fulfilment_type === 'delivery' ? [...STAGES.slice(0, 6), { key: 'on_the_way' as Stage, label: 'On the way' }, STAGES[6]] : STAGES).map((x) => x);
   const idx = steps.findIndex((x) => x.key === stage);
   const methods = paymentMethods();
   const showPay = !!pay.request && o.payment_state !== 'paid';
@@ -141,6 +145,7 @@ export function customerOrderView(orderId: string) {
     confirmed_at: o.confirmed_at,
     completed_at: o.completed_at,
     preferred_date: o.requested_date && !o.confirmed_at ? o.requested_date : null,
+    storage: o.storage,
     expected: o.expected_from ? { from: o.expected_from, to: o.expected_to, label: formatTimeframe(o.expected_from, o.expected_to) } : null,
     lead_time: s.orders.leadTimeText,
     fulfilment: {
@@ -263,7 +268,7 @@ const CODE_MINUTES = 15;
 export function ordersForEmail(email: string) {
   return db()
     .prepare(
-      `SELECT o.id, o.order_number, o.status, o.created_at, o.completed_at, o.estimated_total_cents, o.final_total_cents, o.payment_state, o.expected_from, o.expected_to,
+      `SELECT o.id, o.order_number, o.status, o.created_at, o.completed_at, o.estimated_total_cents, o.final_total_cents, o.payment_state, o.expected_from, o.expected_to, o.finalized_at,
          (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id AND i.status = 'active') AS item_count
        FROM orders o JOIN customers c ON c.id = o.customer_id
        WHERE o.customer_email = ? COLLATE NOCASE OR (o.customer_email IS NULL AND c.email = ? COLLATE NOCASE)
@@ -338,7 +343,7 @@ export function endCustomerSession(token: string | undefined) {
 }
 
 export function accountView(email: string) {
-  const orders = ordersForEmail(email).map((o) => ({ ...o, stage: stageOf(o.status), status_label: STATUS_LABEL[o.status as OrderStatus], link: `/o/${orderToken(o.id)}`, money: orderMoney(o.id) }));
+  const orders = ordersForEmail(email).map((o) => ({ ...o, stage: stageOf(o.status, o), status_label: STATUS_LABEL[o.status as OrderStatus], link: `/o/${orderToken(o.id)}`, money: orderMoney(o.id) }));
   const consent = db().prepare('SELECT MAX(marketing_consent) c FROM customers WHERE email = ? COLLATE NOCASE').get(email) as { c: number | null };
   return { email, orders, preferences: { reminders: !!consent?.c } };
 }

@@ -31,6 +31,7 @@ export interface CutLine {
     qty_label: string;
     special_instructions: string | null;
     cut: boolean;
+    storage: 'fresh' | 'frozen' | null;
   }[];
 }
 
@@ -47,7 +48,7 @@ export function cuttingSheet(opts: { from?: string | null; to?: string | null; i
   const rows = db()
     .prepare(
       `SELECT i.id AS item_id, i.product_id, i.qty_kind, i.count, i.weight_g, i.preparation_label, i.special_instructions, i.cut_at,
-              o.id AS order_id, o.order_number, o.requested_date, c.name AS customer_name,
+              o.id AS order_id, o.order_number, o.requested_date, o.storage, c.name AS customer_name,
               p.canonical_name, p.category, p.piece_noun, p.typical_piece_g, p.sort_order
        FROM order_items i JOIN orders o ON o.id = i.order_id JOIN customers c ON c.id = o.customer_id JOIN products p ON p.id = i.product_id
        WHERE ${where.join(' AND ')}
@@ -98,6 +99,7 @@ export function cuttingSheet(opts: { from?: string | null; to?: string | null; i
       qty_label: formatQty(qty, r.piece_noun),
       special_instructions: r.special_instructions,
       cut: !!r.cut_at,
+      storage: r.storage ?? null,
     });
   }
   const out: CutLine[] = [...lines.values()].map((l) => {
@@ -127,7 +129,7 @@ export interface PackOrder extends OrderSummary {
   items: ReturnType<typeof getItems>;
 }
 
-export function packingQueue(): { ready_to_pack: PackOrder[]; still_cutting: OrderSummary[] } {
+export function packingQueue(): { ready_to_pack: PackOrder[]; still_cutting: OrderSummary[]; final_weighing: PackOrder[]; awaiting_payment: OrderSummary[] } {
   const ids = db()
     .prepare(
       `SELECT id FROM orders WHERE status IN ('cut','packing')
@@ -137,16 +139,21 @@ export function packingQueue(): { ready_to_pack: PackOrder[]; still_cutting: Ord
   const cutting = db()
     .prepare("SELECT id FROM orders WHERE status IN ('cutting') ORDER BY requested_date, order_number")
     .all() as { id: string }[];
+  const weigh = db().prepare("SELECT id FROM orders WHERE status = 'packed' AND finalized_at IS NULL ORDER BY requested_date, order_number").all() as { id: string }[];
+  const unpaid = db().prepare("SELECT id FROM orders WHERE status = 'packed' AND finalized_at IS NOT NULL ORDER BY requested_date, order_number").all() as { id: string }[];
   return {
     ready_to_pack: ids.map((r) => ({ ...getOrderSummary(r.id)!, items: getItems(r.id) })),
     still_cutting: cutting.map((r) => getOrderSummary(r.id)!),
+    // Packed → final weighing (weights, finalize) → payment; released to fulfilment once paid
+    final_weighing: weigh.map((r) => ({ ...getOrderSummary(r.id)!, items: getItems(r.id) })),
+    awaiting_payment: unpaid.map((r) => getOrderSummary(r.id)!),
   };
 }
 
 export function fulfilmentBoard(date: string) {
   const ready = db()
     .prepare(
-      `SELECT id FROM orders WHERE status IN ('ready','out_for_delivery','packed')
+      `SELECT id FROM orders WHERE status IN ('ready','out_for_delivery')
        ORDER BY CASE WHEN requested_date IS NULL THEN 1 ELSE 0 END, requested_date, time_window, order_number`,
     )
     .all() as { id: string }[];

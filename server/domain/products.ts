@@ -382,7 +382,7 @@ export function seedCatalogue(catalogue: SeedProduct[] = CATALOGUE) {
   applyOrderingRules(true);
 }
 
-const ORDERING_RULES_VERSION = 1;
+const ORDERING_RULES_VERSION = 2;
 
 /**
  * One-time defaults for how customers order (packs, whole/half pieces, variants, dry-aged surcharge,
@@ -401,8 +401,10 @@ export function applyOrderingRules(force = false) {
       if (rule.variant_of && !p.variant_of && bySlug.get(rule.variant_of)) db().prepare('UPDATE products SET variant_of = ? WHERE id = ?').run(bySlug.get(rule.variant_of).id, p.id);
       if (rule.variant_label && !p.variant_label) db().prepare('UPDATE products SET variant_label = ? WHERE id = ?').run(rule.variant_label, p.id);
     }
-    // Everything is vacuum packed as standard: packaging is no longer a customer choice
-    db().prepare("UPDATE product_preparations SET customer_visible = 0 WHERE group_name = 'Packing'").run();
+    // Everything is vacuum packed: "individually packed" and other packing choices are retired for
+    // customers and staff alike (rows kept, switched off, so past orders still read correctly)
+    db().prepare("UPDATE product_preparations SET customer_visible = 0, active = 0 WHERE group_name = 'Packing'").run();
+    db().prepare("UPDATE products SET packaging = 'Vacuum-packed' WHERE packaging IS NULL OR packaging != 'Vacuum-packed'").run();
     db().prepare("UPDATE product_preparations SET surcharge_pct = ? WHERE group_name = 'Ageing' AND name = 'Dry-aged' AND surcharge_pct = 0").run(DRY_AGED_SURCHARGE_PCT);
     db()
       .prepare("INSERT INTO settings (key, value, updated_at) VALUES ('ordering_rules_version', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")

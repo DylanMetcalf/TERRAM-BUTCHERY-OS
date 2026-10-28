@@ -45,6 +45,7 @@ const form = (items: any[], extra: any = {}) => ({
   delivery_address: '12 Kerk Street, Pretoria',
   requested_date: weekday(),
   client_ref: `test-ref-${Date.now()}-${++ref}`,
+  storage: 'frozen',
   ...extra,
 });
 const pub = () => new Client(buildApp());
@@ -749,5 +750,76 @@ describe('reviews, Instagram and finding past orders', () => {
     await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 1 } }]));
     await flush();
     expect(mail(/received your/)[0].html).toContain('/account?k=');
+  });
+});
+
+describe('fresh or frozen, vacuum packing, mince packs, help and status', () => {
+  it('fresh or frozen must be chosen, is kept on the order, and fresh deliveries are flagged for a journey check', async () => {
+    const { storage: _s, ...noStorage } = form([{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2 } }]);
+    expect((await send(noStorage)).body.error).toMatch(/fresh or frozen/i);
+    const r = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2 } }], { storage: 'fresh' }));
+    const id = orderFromToken(tokenPath(r.body.order_url))!;
+    expect(requireOrder(id).storage).toBe('fresh');
+    const ex = db().prepare("SELECT title, detail FROM exceptions WHERE order_id = ? AND type = 'delivery_check'").get(id) as any;
+    expect(ex.detail).toMatch(/longer than about 2 hours/);
+    const frozen = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2 } }], { storage: 'frozen' }));
+    const fid = orderFromToken(tokenPath(frozen.body.order_url))!;
+    expect(db().prepare("SELECT 1 FROM exceptions WHERE order_id = ? AND type = 'delivery_check'").get(fid)).toBeUndefined();
+    expect((await pub().get(`/api/public/o/${tokenPath(r.body.order_url)}`)).body.order.storage).toBe('fresh');
+    expect((await pub().get('/api/public/info')).body.form.freshMaxHours).toBe(2);
+  });
+
+  it('everything is vacuum packed: no packing choice for customers or staff; mince only in the approved packs', async () => {
+    const rump = (await (await signedIn('staff')).get(`/api/products/${productId('beef_rump')}`)).body.product;
+    expect(rump.preparations.filter((o: any) => o.group_name === 'Packing' && o.active)).toHaveLength(0);
+    expect(rump.packaging).toBe('Vacuum-packed');
+    const cat = (await pub().get('/api/public/catalogue')).body.products;
+    const mince = cat.find((p: any) => p.name === 'Lean Mince');
+    expect(mince.sale_options.map((o: any) => [o.id, o.grams])).toEqual([['500g', 500], ['1kg', 1000]]); // 500 g first = the default
+    // 2 kg as 4 × 500 g packs is exact; a made-up pack size is refused
+    const q = await pub().post('/api/public/quote', { items: [{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 4 } }] });
+    expect(q.body.lines[0]).toMatchObject({ ok: true, pricing: 'exact', cents: 25000 });
+    expect((await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '750g', qty: { kind: 'count', count: 1 } }]))).status).toBe(400);
+    expect((await send(form([{ product_id: productId('beef_mince_lean'), qty: kg(1300) }]))).status).toBe(400);
+  });
+
+  it('the help page answers come from settings, with live values filled in', async () => {
+    const help = (await pub().get('/api/public/info')).body.help;
+    expect(help.faq.length).toBeGreaterThan(10);
+    const lead = help.faq.find((f: any) => /How long/.test(f.q)).a;
+    expect(lead).toContain('1–2 weeks');
+    expect(lead).not.toContain('{{');
+    expect(help.whatsapp).toMatch(/^https:\/\/wa\.me\/27/);
+    const admin = await signedIn('admin');
+    expect((await admin.req('PUT', '/api/admin/settings/help', { faq: [{ q: 'Do you deliver to Cape Town?', a: 'Ask us on WhatsApp.' }] })).status).toBe(200);
+    expect((await pub().get('/api/public/info')).body.help.faq).toEqual([{ q: 'Do you deliver to Cape Town?', a: 'Ask us on WhatsApp.' }]);
+  });
+
+  it('the customer sees final weighing, then payment, then ready; staff queues follow the order', async () => {
+    bankSettings();
+    const staff = await signedIn('staff');
+    const o = readyOrder();
+    const t = orderToken(o.id);
+    const step = async () => (await pub().get(`/api/public/o/${t}`)).body.order;
+    expect((await step()).stage).toBe('weighing');
+    let q = (await staff.get('/api/production/dashboard')).body.queues;
+    expect(q.awaiting_weighing).toBe(1);
+    const brisket = getItems(o.id).find((i) => i.name_snapshot === 'Brisket')!;
+    await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2000 });
+    await staff.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true });
+    q = (await staff.get('/api/production/dashboard')).body.queues;
+    expect(q).toMatchObject({ awaiting_weighing: 0, finalized_not_requested: 1 });
+    await staff.get(`/api/orders/${o.id}/payment-request/preview`);
+    const v = await step();
+    expect(v.stage).toBe('payment');
+    expect(v.payment.pay_url).toMatch(/^\/pay\//);
+    expect(v.next.who).toBe('you');
+    q = (await staff.get('/api/production/dashboard')).body.queues;
+    expect(q).toMatchObject({ finalized_not_requested: 0, requests_sent: 1 });
+    const manager = await signedIn('manager');
+    await manager.post(`/api/orders/${o.id}/payments`, { method: 'eft', amount_cents: 51000 });
+    expect((await step()).stage).toBe('ready');
+    q = (await staff.get('/api/production/dashboard')).body.queues;
+    expect(q).toMatchObject({ requests_sent: 0, paid_ready: 1 });
   });
 });

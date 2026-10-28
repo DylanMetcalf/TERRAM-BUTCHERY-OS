@@ -96,6 +96,7 @@ describe('customer order form', () => {
     delivery_address: '12 Kerk Street, Pretoria',
     requested_date: nextCollectionDay(),
     client_ref: ref,
+    storage: 'fresh',
     ...extra,
   });
 

@@ -29,7 +29,8 @@ function truthKeys(t: Truth[]) {
     const p = getProduct(productId(slug))!;
     // Only non-default choices appear in the label; compute it the same way the engine does
     const groups = new Map<string, { name: string; def: boolean }[]>();
-    for (const o of p.preparations) (groups.get(o.group_name) ?? groups.set(o.group_name, []).get(o.group_name)!).push({ name: o.name, def: o.is_default });
+    // Packing choices are retired (everything is vacuum packed), so they're never expected on a line
+    for (const o of p.preparations.filter((x) => x.group_name !== 'Packing')) (groups.get(o.group_name) ?? groups.set(o.group_name, []).get(o.group_name)!).push({ name: o.name, def: o.is_default });
     const label = [...groups.entries()].map(([g, opts]) => (prep?.[g] && !opts.find((o) => o.name === prep[g])?.def ? prep[g] : null)).filter(Boolean).join(' · ');
     return key(slug, toQty(q), label);
   }).sort();
@@ -132,8 +133,8 @@ describe('50-order acceptance test', () => {
     // Anna 3kg + Marius 1kg + Yvonne 1kg
     expect(mince.total_weight_g).toBe(5000);
     const rump = sheet.lines.find((l) => l.product_name === 'Rump Steak' && !l.preparation_label)!;
-    // Anna 4 + Vusi 5 + Izak 2 + Riaan 4
-    expect(rump.total_count).toBe(15);
+    // Anna 4 + Vusi 5 + Izak 2 + Riaan 4 + Lindi 6 (her “vacuum packed” is now just how everything is packed)
+    expect(rump.total_count).toBe(21);
     const items = (db().prepare("SELECT COUNT(*) n FROM order_items i JOIN orders o ON o.id = i.order_id WHERE i.status = 'active' AND o.status = 'confirmed'").get() as any).n;
     expect(sheet.lines.reduce((a, l) => a + l.total_items, 0)).toBe(items);
   });

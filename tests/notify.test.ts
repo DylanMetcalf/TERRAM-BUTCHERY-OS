@@ -27,6 +27,7 @@ const order = (ref: string, extra: any = {}) => ({
   delivery_address: '12 Kerk Street, Pretoria',
   requested_date: day(),
   client_ref: ref,
+  storage: 'frozen',
   ...extra,
 });
 const flush = () => new Promise((r) => setTimeout(r, 20));

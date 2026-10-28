@@ -27,7 +27,7 @@ export function PublicShell({ children, subtitle }: { children: ReactNode; subti
         <footer className="mx-auto max-w-3xl px-5 pb-12 text-center text-[13px] text-ink-3 sm:px-8 print:hidden">
           Questions? Call or WhatsApp <a className="font-semibold text-ink-2" href={`tel:${b.phone.replace(/\s/g, '')}`}>{b.phone}</a>
           {b.email && <> · <a className="font-semibold text-ink-2" href={`mailto:${b.email}`}>{b.email}</a></>}
-          <div className="mt-2"><a href="/privacy" className="underline underline-offset-2">Privacy notice</a></div>
+          <div className="mt-2"><Link to="/help" className="underline underline-offset-2">Help & FAQ</Link> · <a href="/privacy" className="underline underline-offset-2">Privacy notice</a></div>
         </footer>
       )}
     </div>

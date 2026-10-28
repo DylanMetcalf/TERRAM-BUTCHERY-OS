@@ -24,7 +24,8 @@ export type ExceptionType =
   | 'import_failure'
   | 'integration_failure'
   | 'payment_issue'
-  | 'amendment_declined';
+  | 'amendment_declined'
+  | 'delivery_check';
 
 export type Severity = 'blocking' | 'warning' | 'info';
 
