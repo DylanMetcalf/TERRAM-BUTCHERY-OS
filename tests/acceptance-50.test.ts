@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { freshDb, productId, STAFF } from './helpers';
+import { freshDb, productId, STAFF, weighFinalizeAndPay } from './helpers';
 import { buildChat, ORDERS, type Truth } from './fixtures/fifty-orders';
 import { analyseImport, commitBatch, getBatch } from '../server/intelligence/imports';
 import { completePacking, getItems, requireOrder, setItemPacked, setItemsCut, transition } from '../server/domain/orders';
@@ -138,14 +138,15 @@ describe('50-order acceptance test', () => {
     expect(sheet.lines.reduce((a, l) => a + l.total_items, 0)).toBe(items);
   });
 
-  it('cutting → packing → ready → collected/delivered → completed', () => {
+  it('cutting → packing → final weighing → paid → ready → collected/delivered → completed', async () => {
     const sheet = cuttingSheet({});
     for (const l of sheet.lines) setItemsCut(l.orders.map((o) => o.item_id), true, STAFF);
     const cut = (db().prepare("SELECT id FROM orders WHERE status = 'cut'").all() as any[]).map((r) => r.id);
     expect(cut).toHaveLength(49);
     for (const id of cut) {
       for (const it of getItems(id)) setItemPacked(it.id, true, STAFF);
-      expect(completePacking(id, STAFF).status).toBe('ready');
+      expect(completePacking(id, STAFF).status).toBe('packed');
+      expect((await weighFinalizeAndPay(id)).status).toBe('ready');
     }
     for (const id of cut) {
       const o = requireOrder(id);

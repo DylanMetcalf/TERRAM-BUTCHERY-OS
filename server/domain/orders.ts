@@ -149,6 +149,12 @@ export interface OrderSummary {
   invoice_sent_at: string | null;
   confirmed_at: string | null;
   completed_at: string | null;
+  /** Fresh or frozen, as the customer chose. */
+  storage: 'fresh' | 'frozen' | null;
+  /** Set when final weighing is done: the order is locked at its final amount. */
+  finalized_at: string | null;
+  finalized_by: string | null;
+  finalized_version: number;
   status_changed_at: string;
   created_at: string;
   updated_at: string;
@@ -358,7 +364,9 @@ export function orderMoney(orderId: string) {
   const o = db().prepare('SELECT estimated_total_cents, confirmed_total_cents, final_total_cents, amount_paid_cents, delivery_fee_cents FROM orders WHERE id = ?').get(orderId) as any;
   const items = db().prepare("SELECT pricing, est_cents FROM order_items WHERE order_id = ? AND status = 'active'").all(orderId) as any[];
   const t = totalOf(items.map((i) => ({ pricing: i.pricing, cents: i.est_cents })), o?.delivery_fee_cents ?? 0);
-  const due = o?.final_total_cents ?? (t.exact && items.length ? t.estimateCents : null);
+  const fin = db().prepare('SELECT total_cents FROM order_finalizations WHERE order_id = ? AND superseded_at IS NULL ORDER BY version DESC LIMIT 1').get(orderId) as { total_cents: number } | undefined;
+  // Once finalized, the amount owed is the finalized snapshot — nothing else
+  const due = fin ? fin.total_cents : (o?.final_total_cents ?? (t.exact && items.length ? t.estimateCents : null));
   return {
     estimated_cents: o?.estimated_total_cents ?? null,
     estimate_is_exact: t.exact && items.length > 0,
@@ -367,6 +375,8 @@ export function orderMoney(orderId: string) {
     final_cents: o?.final_total_cents ?? null,
     delivery_fee_cents: o?.delivery_fee_cents ?? null,
     paid_cents: o?.amount_paid_cents ?? 0,
+    /** The locked, finalized amount (null until final weighing is done). */
+    finalized_cents: fin ? fin.total_cents : null,
     /** What is owed now; null until the amount is known for certain. */
     due_cents: due,
     balance_cents: due == null ? null : Math.max(0, due - (o?.amount_paid_cents ?? 0)),
@@ -486,7 +496,7 @@ export function deleteOrder(orderId: string, actor: Actor): { order_number: numb
   return { order_number: o.order_number };
 }
 
-export function transition(orderId: string, to: OrderStatus, actor: Actor, role: Role | null, opts: { note?: string; system?: boolean; confirm?: { expected_from: string | null; expected_to: string | null } } = {}): OrderSummary {
+export function transition(orderId: string, to: OrderStatus, actor: Actor, role: Role | null, opts: { note?: string; system?: boolean; confirm?: { expected_from: string | null; expected_to: string | null }; unpaidReason?: string; silent?: boolean } = {}): OrderSummary {
   const order = requireOrder(orderId);
   const from = order.status;
   if (from === to) return order;
@@ -501,6 +511,19 @@ export function transition(orderId: string, to: OrderStatus, actor: Actor, role:
     if (blocking.c > 0) throw conflict('Resolve the open questions on this order first.');
   }
   if (to === 'out_for_delivery' && order.fulfilment_type !== 'delivery') throw conflict('This order is for collection, not delivery.');
+  if (order.finalized_at && ['packing', 'cut', 'cutting', 'confirmed'].includes(to)) throw conflict('This order has been finalized. Use “Reopen for changes” (with a reason) first.');
+  // Release for collection/delivery only once the finalized amount has been paid (or an allowed manager override)
+  if (to === 'ready' && ['cut', 'packing', 'packed'].includes(from)) {
+    const pay = getSettings().payments;
+    if (!order.finalized_at) throw conflict('Do the final weighing and finalize the order first.');
+    if (pay.requirePaymentBeforeRelease && order.payment_state !== 'paid') {
+      const reason = opts.unpaidReason?.trim();
+      if (!reason) throw conflict('Payment hasn’t been confirmed yet. The order is released once the payment has reflected and been verified.');
+      if (!pay.allowUnpaidRelease) throw conflict('Releasing unpaid orders is switched off (Settings → Payments).');
+      if (!can(role, 'payments.write')) throw forbidden('Only a manager can release an unpaid order.');
+      opts = { ...opts, note: `released before payment: ${reason}` };
+    }
+  }
   // A first confirmation is a decision: the customer is told, so it needs the expected timeframe
   const firstConfirmation = to === 'confirmed' && !order.confirmed_at;
   if (firstConfirmation && !opts.system && !opts.confirm) throw conflict('Use “Confirm order” so the customer gets the expected timeframe.');
@@ -543,7 +566,7 @@ export function transition(orderId: string, to: OrderStatus, actor: Actor, role:
   });
   publish(['orders'], { orderId });
   if (firstConfirmation) onOrderConfirmed(orderId, actor);
-  else onOrderStatusChanged(orderId, from, to, actor);
+  else if (!opts.silent) onOrderStatusChanged(orderId, from, to, actor);
   return requireOrder(orderId);
 }
 
@@ -641,6 +664,7 @@ function productionWarning(order: OrderSummary): string | null {
 
 function assertAmendable(order: OrderSummary) {
   if (order.status === 'completed' || order.status === 'cancelled') throw conflict(`This order is ${STATUS_LABEL[order.status].toLowerCase()} and can no longer be changed.`);
+  if (order.finalized_at) throw conflict('This order has been finalized at its weighed amount. Use “Reopen for changes” (with a reason) first.');
 }
 
 export interface AmendContext {
@@ -771,6 +795,7 @@ export interface OrderPatch {
   accounting_ref?: string | null;
   customer_id?: string;
   customer_email?: string | null;
+  storage?: 'fresh' | 'frozen' | null;
 }
 
 const PATCH_LABEL: Record<keyof OrderPatch, string> = {
@@ -786,6 +811,7 @@ const PATCH_LABEL: Record<keyof OrderPatch, string> = {
   accounting_ref: 'Accounting reference',
   customer_id: 'Customer',
   customer_email: 'Email for updates',
+  storage: 'Fresh or frozen',
 };
 
 export function updateOrder(orderId: string, patch: OrderPatch, actor: Actor, role: Role | null, ctx: AmendContext = {}): OrderSummary {
@@ -798,6 +824,8 @@ export function updateOrder(orderId: string, patch: OrderPatch, actor: Actor, ro
     if (k === 'requested_date' && v && !isValidYmd(v)) throw badRequest('That date is not valid.');
     if (k === 'fulfilment_type' && v && !['collection', 'delivery'].includes(v)) throw badRequest('Choose collection or delivery.');
     if (k === 'payment_status' && !['unpaid', 'pending', 'paid'].includes(v)) throw badRequest('Unknown payment status.');
+    if (k === 'storage' && v && !['fresh', 'frozen'].includes(v)) throw badRequest('Choose fresh or frozen.');
+    if (k === 'delivery_km' && order.finalized_at) throw conflict('The delivery fee is part of the finalized amount. Reopen the order for changes first.');
     if ((k === 'payment_status' || k === 'accounting_ref') && !can(role, 'payments.write') && !ctx.reason) throw forbidden('Only a manager can change payment details.');
     if (k === 'customer_id') requireCustomer(v);
     if (k === 'customer_email' && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw badRequest('That email address doesn’t look right.');
@@ -900,7 +928,7 @@ export function setItemPacked(itemId: string, packed: boolean, actor: Actor, pac
   const it = getItem(itemId);
   const o = requireOrder(it.order_id);
   if (!['cut', 'packing', 'cutting'].includes(o.status)) throw conflict('This order is not waiting to be packed.');
-  if (packedWeightG != null && (!Number.isFinite(packedWeightG) || packedWeightG <= 0 || packedWeightG > 500000)) throw badRequest('That weight is not valid.');
+  if (packedWeightG != null) throw badRequest('Weights are entered at final weighing, once the order is packed.');
   tx(() => {
     db().prepare('UPDATE order_items SET packed_at = ?, packed_by = ?, packed_weight_g = COALESCE(?, packed_weight_g) WHERE id = ?').run(packed ? now() : null, packed ? actor.userId : null, packedWeightG ?? null, itemId);
     if (packedWeightG != null) {
@@ -916,13 +944,12 @@ export function setItemPacked(itemId: string, packed: boolean, actor: Actor, pac
   publish(['orders'], { orderId: o.id });
 }
 
-/** "Packed" — completes packing and (by default) marks the order ready. */
+/** "Packed" — completes packing. Next comes final weighing (weights, then finalize and request payment). */
 export function completePacking(orderId: string, actor: Actor): OrderSummary {
   const o = requireOrder(orderId);
   if (!['cut', 'packing'].includes(o.status)) throw conflict('This order is not waiting to be packed.');
   if (o.items_packed < o.item_count) throw conflict('Tick every item before marking the order packed.');
-  transition(orderId, 'packed', actor, null, { system: true });
-  if (getSettings().orders.autoReadyAfterPacking) transition(orderId, 'ready', actor, null, { system: true, note: 'packed and ready' });
+  transition(orderId, 'packed', actor, null, { system: true, note: 'ready for final weighing' });
   return requireOrder(orderId);
 }
 
@@ -930,7 +957,9 @@ export function completePacking(orderId: string, actor: Actor): OrderSummary {
 export function setItemWeight(itemId: string, weightG: number | null, actor: Actor) {
   const it = getItem(itemId);
   const o = requireOrder(it.order_id);
-  if (['completed', 'cancelled'].includes(o.status)) throw conflict('This order is finished.');
+  if (o.status !== 'packed') throw conflict('Weights are entered at final weighing, once the order is packed.');
+  if (o.finalized_at) throw conflict('This order has been finalized. Use “Reopen for changes” (with a reason) to correct a weight.');
+  if (it.status !== 'active') throw conflict('That item has been removed.');
   if (weightG != null && (!Number.isFinite(weightG) || weightG <= 0 || weightG > 500000)) throw badRequest('That weight is not valid.');
   if ((it.packed_weight_g ?? null) === weightG) return it;
   tx(() => {

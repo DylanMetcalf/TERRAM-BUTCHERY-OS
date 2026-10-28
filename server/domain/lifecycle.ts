@@ -7,7 +7,6 @@ import { notify } from '../services/notify.js';
 import { orderUrl, siteUrl, accountUrl } from '../services/links.js';
 import { formatTimeframe, layout, money, signOff, type EmailLine } from '../services/templates.js';
 import { addEvent, getItems, orderMoney, requireOrder, type OrderItem, type OrderSummary } from './orders.js';
-import { requestPaymentWhenReady } from './payments.js';
 
 /**
  * ORDER LIFECYCLE → MESSAGES. One place decides who hears about what:
@@ -196,8 +195,6 @@ export function onOrderStatusChanged(orderId: string, from: OrderStatus, to: Ord
   if (to === 'cutting' && from === 'confirmed' && s.notifications.notifyPreparation) {
     send(`We've started preparing your order #${o.order_number}`, 'Your order is being prepared.', [`Your order #${o.order_number} is now being prepared by our butchery team. We'll let you know as soon as it's ready.`]);
   } else if (to === 'ready' && !['out_for_delivery', 'completed'].includes(from)) {
-    // Ask for payment now if Terram works that way and the amount is known; the request travels in this one email
-    const pay = requestPaymentWhenReady(orderId, actor);
     const f = s.fulfilment;
     const how =
       o.fulfilment_type === 'delivery'
@@ -206,21 +203,17 @@ export function onOrderStatusChanged(orderId: string, from: OrderStatus, to: Ord
           ? `It's ready for collection from ${[f.collectionPlace, f.collectionAddress].filter(Boolean).join(', ')}${f.collectionHours ? ` (${f.collectionHours})` : ''}.`
           : "We'll be in touch to arrange collection or delivery.";
     const items = getItems(orderId);
-    const blocks = [{ heading: 'Your order', lines: items.map((i) => lineFor(i, true)), paragraphs: [totalLine(orderId, true)].filter(Boolean) as string[] }];
-    if (pay.request) {
-      blocks.push({ heading: 'Payment', paragraphs: [`Amount due: ${money(pay.request.amount_cents)}`, 'You can pay online or by EFT from your order page. Your order shows as paid once the payment has been verified.'], lines: [] });
-    }
     if (!c.email) return;
     const e = layout({
-      subject: pay.request ? `Your order #${o.order_number} is ready — payment due ${money(pay.request.amount_cents)}` : `Your order #${o.order_number} is ready`,
+      subject: `Your order #${o.order_number} is ready`,
       preheader: how,
       greeting: `Hi ${c.firstName},`,
       intro: [`Your order #${o.order_number} is packed and ready. ${how}`],
-      blocks,
-      cta: { label: pay.request ? 'View order and pay' : 'View my order', url: orderUrl(orderId) },
+      blocks: [{ heading: 'Your order', lines: items.map((i) => lineFor(i, true)), paragraphs: [totalLine(orderId, true)].filter(Boolean) as string[] }],
+      cta: { label: 'View my order', url: orderUrl(orderId) },
       closing: signOff(),
     });
-    notify({ key: pay.request ? `payment_requested:${pay.request.id}` : key, kind: pay.request ? 'payment_requested' : 'order_ready', audience: 'customer', to: [c.email], ...e, replyTo: s.business.email || null, orderId, customerId: c.customerId });
+    notify({ key, kind: 'order_ready', audience: 'customer', to: [c.email], ...e, replyTo: s.business.email || null, orderId, customerId: c.customerId });
   } else if (to === 'out_for_delivery') {
     send(`Your order #${o.order_number} is on its way`, 'Out for delivery.', [`Your order #${o.order_number} is out for delivery${o.delivery_address ? ` to ${o.delivery_address}` : ''}.`]);
   } else if (to === 'completed') {

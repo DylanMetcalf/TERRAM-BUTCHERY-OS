@@ -59,6 +59,7 @@ export const OrderPatchSchema = z.object({
   accounting_ref: optStr(100),
   customer_id: z.string().max(64).optional(),
   customer_email: z.string().trim().max(200).email('Enter a valid email').nullable().optional().or(z.literal('').transform(() => null)),
+  storage: z.enum(['fresh', 'frozen']).nullable().optional(),
 });
 
 export const PublicOrderSchema = z.object({

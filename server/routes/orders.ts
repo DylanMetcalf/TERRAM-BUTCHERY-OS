@@ -1,3 +1,5 @@
+import { getSettings } from '../services/settings.js';
+import { rateLimit } from '../http/security.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db/db.js';
@@ -33,6 +35,8 @@ import {
   setItemWeight,
 } from '../domain/orders.js';
 import { listAmendments, proposeAmendment, withdrawAmendment } from '../domain/amendments.js';
+import { finalizationHistory, finalizationProblems, finalizeOrder, latestFinalization, reopenFinalized } from '../domain/finalize.js';
+import { paymentRequestPreview, recordWhatsAppHandoff, reviewDeclaration, sendPaymentRequest } from '../domain/pay-page.js';
 import { createPaymentRequest, openRequest, paymentSummary, reversePayment, reviewProof, recordVerifiedPayment, sendPaymentRequestEmail } from '../domain/payments.js';
 import { INVOICE_LABEL, listInvoiceRequests, requestInvoice, updateInvoiceRequest } from '../domain/invoices.js';
 import { listNotifications, notificationProblemCount, retryNotification } from '../services/notify.js';
@@ -185,6 +189,11 @@ r.get('/:id', requirePerm('orders.read'), (c) => {
     invoice: { status: order.invoice_status, status_label: INVOICE_LABEL[order.invoice_status], details: json(inv?.invoice_details, null), reference: order.invoice_ref, issued_on: order.invoice_issued_on, sent_at: order.invoice_sent_at, file: invoiceFile },
     notifications: listNotifications({ orderId: order.id, limit: 50 }),
     confirmation_problems: ['review', 'needs_clarification', 'on_hold'].includes(order.status) ? confirmationProblems(order.id) : [],
+    finalization: latestFinalization(order.id),
+    finalization_history: finalizationHistory(order.id),
+    finalization_problems: order.status === 'packed' && !order.finalized_at ? finalizationProblems(order.id) : [],
+    declarations: db().prepare('SELECT d.*, u.name AS reviewed_by_name FROM payment_declarations d LEFT JOIN users u ON u.id = d.reviewed_by WHERE d.order_id = ? ORDER BY d.created_at DESC').all(order.id),
+    release: { require_payment: getSettings().payments.requirePaymentBeforeRelease, allow_unpaid: getSettings().payments.allowUnpaidRelease },
     feedback,
   });
 });
@@ -196,10 +205,10 @@ r.patch('/:id', requirePerm('orders.write'), async (c) => {
 });
 
 r.post('/:id/transition', requirePerm('orders.write'), async (c) => {
-  const { to, note } = await body(c, z.object({ to: z.enum(ORDER_STATUSES), note: z.string().max(500).optional() }));
+  const { to, note, unpaid_reason } = await body(c, z.object({ to: z.enum(ORDER_STATUSES), note: z.string().max(500).optional(), unpaid_reason: z.string().max(300).optional() }));
   const role = roleOf(c);
   if (['cutting', 'cut', 'packing', 'packed', 'ready', 'out_for_delivery', 'completed'].includes(to) && !can(role, 'production.write')) throw badRequest('You cannot move orders through production.');
-  const order = transition(c.req.param('id'), to as OrderStatus, actorOf(c), role, { note });
+  const order = transition(c.req.param('id'), to as OrderStatus, actorOf(c), role, { note, unpaidReason: unpaid_reason });
   return c.json({ order });
 });
 
@@ -239,18 +248,27 @@ r.post('/:id/amendments', requirePerm('orders.write'), async (c) => {
 });
 
 // ── Payments ─────────────────────────────────────────────────
-r.post('/:id/payment-request', requirePerm('orders.write'), (c) => {
-  const res = createPaymentRequest(c.req.param('id'), actorOf(c));
-  return c.json({ created: res.created, payment: paymentSummary(c.req.param('id')) });
+// Final weighing: finalize at the weighed amount, or reopen (with a reason) to change it
+r.post('/:id/finalize', requirePerm('orders.write'), async (c) => {
+  const input = await body(c, z.object({ packs_confirmed: z.boolean().default(false) }));
+  const fin = finalizeOrder(c.req.param('id'), actorOf(c), { packsConfirmed: input.packs_confirmed });
+  return c.json({ finalization: fin });
 });
 
-r.post('/:id/payment-request/resend', requirePerm('orders.write'), (c) => {
-  const req = openRequest(c.req.param('id'));
-  if (!req) throw badRequest('There is no open payment request to send again.');
-  const n = (db().prepare("SELECT COUNT(*) n FROM notifications WHERE event_key LIKE ?").get(`payment_requested:${req.id}%`) as { n: number }).n;
-  sendPaymentRequestEmail(c.req.param('id'), req, n);
-  return c.json({ ok: true });
+r.post('/:id/reopen-final', requirePerm('payments.write'), async (c) => {
+  const { reason } = await body(c, z.object({ reason: z.string().trim().min(3, 'Say why the order needs to change').max(500) }));
+  return c.json({ order: reopenFinalized(c.req.param('id'), reason, actorOf(c)) });
 });
+
+// Payment request: preview (recipients, amount, link, messages), then send by email and/or hand off to WhatsApp
+r.get('/:id/payment-request/preview', requirePerm('orders.write'), (c) => c.json(paymentRequestPreview(c.req.param('id'), actorOf(c))));
+
+r.post('/:id/payment-request/send', requirePerm('orders.write'), rateLimit('pay-request-send', 30, 10 * 60_000), async (c) => {
+  const input = await body(c, z.object({ email: z.boolean(), resend: z.boolean().default(false) }));
+  return c.json({ history: sendPaymentRequest(c.req.param('id'), input, actorOf(c)) });
+});
+
+r.post('/:id/payment-request/whatsapp', requirePerm('orders.write'), (c) => c.json({ history: recordWhatsAppHandoff(c.req.param('id'), actorOf(c)) }));
 
 r.post('/:id/payments', requirePerm('payments.write'), async (c) => {
   const input = await body(c, z.object({ method: z.enum(['eft', 'cash', 'card', 'other']), amount_cents: z.number().int().positive().max(100_000_000), note: z.string().max(500).nullable().optional() }));
@@ -369,6 +387,12 @@ export const staffPayments = new Hono<Env>();
 staffPayments.post('/proofs/:id/review', requirePerm('payments.write'), async (c) => {
   const input = await body(c, z.discriminatedUnion('accept', [z.object({ accept: z.literal(true), amount_cents: z.number().int().positive().max(100_000_000), note: z.string().max(500).nullable().optional() }), z.object({ accept: z.literal(false), reason: z.string().trim().min(1, 'Give a reason').max(500) })]));
   const payment = reviewProof(c.req.param('id'), input as any, actorOf(c));
+  return c.json({ ok: true, payment });
+});
+
+staffPayments.post('/declarations/:id/review', requirePerm('payments.write'), async (c) => {
+  const input = await body(c, z.discriminatedUnion('accept', [z.object({ accept: z.literal(true), amount_cents: z.number().int().positive().max(100_000_000), note: z.string().max(500).nullable().optional() }), z.object({ accept: z.literal(false), reason: z.string().trim().min(1, 'Say what’s missing').max(500) })]));
+  const payment = reviewDeclaration(c.req.param('id'), input as any, actorOf(c));
   return c.json({ ok: true, payment });
 });
 

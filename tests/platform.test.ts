@@ -6,8 +6,9 @@ import { db } from '../server/db/db';
 import { outbox, memoryFail } from '../server/services/email';
 import { processOutbox, retryNotification } from '../server/services/notify';
 import { updateSettings } from '../server/services/settings';
-import { accountLinkToken, emailFromAccountLink, orderFromToken, orderToken } from '../server/services/links';
-import { createOrder, getItems, requireOrder, transition, updateItem, completePacking, setItemsCut } from '../server/domain/orders';
+import { accountLinkToken, emailFromAccountLink, orderFromToken, orderToken, payToken } from '../server/services/links';
+import { recordVerifiedPayment } from '../server/domain/payments';
+import { createOrder, getItems, requireOrder, transition, updateItem, completePacking, setItemsCut, setItemPacked } from '../server/domain/orders';
 import { updateProduct } from '../server/domain/products';
 import { handleItn, phpUrlencode, signFields } from '../server/domain/payfast';
 import { runReorderReminders } from '../server/domain/retention';
@@ -20,6 +21,11 @@ import { priceLine, withSurcharge } from '../shared/pricing';
  * Email goes to an in-memory outbox; PayFast is mocked. Nothing real is contacted or charged.
  */
 
+const openRequestFor = (orderId: string) => (db().prepare("SELECT id FROM payment_requests WHERE order_id = ? AND status = 'open'").get(orderId) as any).id as string;
+const signPay = (rid: string, exp: number) => {
+  const tok = payToken({ id: rid, link_version: (db().prepare('SELECT link_version FROM payment_requests WHERE id = ?').get(rid) as any).link_version }, exp * 1000);
+  return tok.split('.')[2];
+};
 const flush = async () => {
   for (let i = 0; i < 5; i++) {
     await new Promise((r) => setTimeout(r, 15));
@@ -127,8 +133,15 @@ describe('product rules and prices', () => {
     expect(requireOrder(o.id)).toMatchObject({ estimated_total_cents: 26000, final_total_cents: null });
     const staff = await signedIn('staff');
     const item = getItems(o.id)[0];
+    // Weights belong to final weighing only: refused while the order is still being prepared
+    expect((await staff.post(`/api/items/${item.id}/weight`, { weight_g: 2135 })).status).toBe(409);
+    setItemsCut([item.id], true, STAFF);
+    setItemPacked(item.id, true, STAFF);
+    completePacking(o.id, STAFF);
+    expect(requireOrder(o.id).status).toBe('packed');
     expect((await staff.post(`/api/items/${item.id}/weight`, { weight_g: 2135 })).status).toBe(200);
     expect(requireOrder(o.id).final_total_cents).toBe(27755); // 2.135 kg × R130 = R277.55
+    expect((await staff.post(`/api/items/${item.id}/weight`, { weight_g: -5 })).status).toBe(400);
   });
 
   it('a price change in the catalogue never rewrites an existing order', () => {
@@ -345,77 +358,169 @@ function bankSettings() {
 function readyOrder(email = 'pay@example.com') {
   const o = createOrder({ customer: { new: { name: 'Payer', email } }, source: 'phone', status: 'confirmed', customer_email: email, fulfilment_type: 'collection', items: [{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 2, weight_g: null } }, { product_id: productId('beef_brisket'), qty: kg(2000) }] }, STAFF);
   setItemsCut(getItems(o.id).map((i) => i.id), true, STAFF);
+  for (const i of getItems(o.id)) setItemPacked(i.id, true, STAFF);
+  completePacking(o.id, STAFF); // → packed: the final-weighing stage
   return o;
 }
 
+/** Packed, brisket weighed at 2 kg, finalized at R250 + R260 = R510. */
+async function finalOrder(staff: Client, email?: string) {
+  const o = readyOrder(email);
+  const brisket = getItems(o.id).find((i) => i.name_snapshot === 'Brisket')!;
+  await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2000 });
+  const f = await staff.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true });
+  expect(f.status).toBe(200);
+  return o;
+}
+const payPath = (url: string) => new URL(url).pathname.replace(/^\/pay\//, '');
+
 describe('payments', () => {
-  it('asks for payment only once the final amount is known, after packing', async () => {
+  it('final weighing: weights at the end, finalize locks the amount, and only then can payment be requested', async () => {
     bankSettings();
     const o = readyOrder();
     const staff = await signedIn('staff');
+    expect(requireOrder(o.id).status).toBe('packed');
+    // Not released, not payable: nothing is weighed or finalized yet
+    expect((await staff.post(`/api/orders/${o.id}/transition`, { to: 'ready' })).body.error).toMatch(/final weighing/);
+    expect((await staff.get(`/api/orders/${o.id}/payment-request/preview`)).body.blocker).toMatch(/finalize/);
+    expect((await staff.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true })).body.error).toMatch(/packed weight of .*Brisket/);
     const brisket = getItems(o.id).find((i) => i.name_snapshot === 'Brisket')!;
-    for (const i of getItems(o.id)) await staff.post(`/api/items/${i.id}/packed`, { packed: true });
-    completePacking(o.id, STAFF); // → ready; weight unknown, so no request yet
-    expect(requireOrder(o.id).status).toBe('ready');
-    expect(requireOrder(o.id).payment_state).toBe('not_requested');
-    expect((db().prepare("SELECT COUNT(*) n FROM exceptions WHERE type = 'payment_issue' AND order_id = ?").get(o.id) as any).n).toBe(1);
-    expect((await staff.post(`/api/orders/${o.id}/payment-request`)).body.error).toMatch(/packed weight/);
     await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2100 });
-    const r = await staff.post(`/api/orders/${o.id}/payment-request`);
-    expect(r.status).toBe(200);
-    expect(r.body.payment.request.amount_cents).toBe(25000 + 27300); // 2 × 1 kg mince + 2.1 kg brisket
-    expect((await staff.post(`/api/orders/${o.id}/payment-request`)).body.created).toBe(false); // same amount: no duplicate
+    expect((await staff.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: false })).body.error).toMatch(/pack quantities/);
+    const fin = await staff.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true });
+    expect(fin.body.finalization.snapshot).toMatchObject({ version: 1, total_cents: 25000 + 27300 });
+    expect(fin.body.finalization.snapshot.lines.find((l: any) => l.name === 'Brisket')).toMatchObject({ weight_g: 2100, unit_price_cents: 13000, price_unit: 'kg', line_cents: 27300 });
+    expect(fin.body.finalization.snapshot.lines.find((l: any) => l.name === 'Lean Mince')).toMatchObject({ weight_g: null, line_cents: 25000 });
+    // Locked: no edits, no weight changes, no going back to packing
+    expect((await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2500 })).status).toBe(409);
+    expect((await staff.patch(`/api/items/${brisket.id}`, { qty: kg(3000) })).body.error).toMatch(/finalized/);
+    expect((await staff.post(`/api/orders/${o.id}/transition`, { to: 'packing' })).status).toBe(409);
+    // Preview: nothing is sent until staff choose to
+    const pv = (await staff.get(`/api/orders/${o.id}/payment-request/preview`)).body;
+    expect(pv.request.amount_cents).toBe(52300);
+    expect(pv.url).toMatch(/^https:\/\/www\.terramfarm\.co\.za\/pay\//);
+    expect(pv.email).toMatchObject({ available: true, to: 'pay@example.com' });
+    expect(pv.whatsapp.connected).toBe(false);
+    expect(pv.whatsapp.text).toMatch(/R\s?523[.,]00/);
     await flush();
-    expect(mail(/Payment for your order/)).toHaveLength(1);
+    expect(mail(/Payment for your order/)).toHaveLength(0);
+    expect((await staff.get(`/api/orders/${o.id}/payment-request/preview`)).body.request.id).toBe(pv.request.id); // no duplicate request
+    expect((await staff.post(`/api/orders/${o.id}/payment-request/send`, { email: true })).status).toBe(200);
+    expect((await staff.post(`/api/orders/${o.id}/payment-request/send`, { email: true })).body.error).toMatch(/already been emailed/);
+    expect((await staff.post(`/api/orders/${o.id}/payment-request/send`, { email: true, resend: true })).status).toBe(200);
+    const wa = await staff.post(`/api/orders/${o.id}/payment-request/whatsapp`);
+    expect(wa.body.history.find((h: any) => h.channel === 'whatsapp').status).toBe('manual'); // never claimed as delivered
+    await flush();
+    const sent = mail(/Payment for your order/);
+    expect(sent).toHaveLength(2);
+    expect(sent[0].html).toContain(pv.url);
+    expect(sent[0].text).toMatch(/R\s?523[.,]00/);
+    expect(requireOrder(o.id).payment_state).toBe('requested');
   });
 
-  it('a changed total withdraws the old request so it can’t be paid', async () => {
+  it('reopening a finalized order needs a manager and a reason, keeps the old version and withdraws the request', async () => {
     bankSettings();
-    const o = readyOrder();
     const staff = await signedIn('staff');
+    const o = await finalOrder(staff);
+    const pv = (await staff.get(`/api/orders/${o.id}/payment-request/preview`)).body;
+    await staff.post(`/api/orders/${o.id}/payment-request/send`, { email: true });
+    await flush();
+    expect((await staff.post(`/api/orders/${o.id}/reopen-final`, { reason: 'Brisket weighed wrong' })).status).toBe(403);
+    const manager = await signedIn('manager');
+    expect((await manager.post(`/api/orders/${o.id}/reopen-final`, { reason: '' })).status).toBe(400);
+    expect((await manager.post(`/api/orders/${o.id}/reopen-final`, { reason: 'Brisket weighed wrong' })).status).toBe(200);
+    expect((db().prepare('SELECT status FROM payment_requests WHERE id = ?').get(pv.request.id) as any).status).toBe('superseded');
+    // The old link now shows the request as replaced, with no amount payable
+    const old = (await pub().get(`/api/public/pay/${payPath(pv.url)}`)).body.pay;
+    expect(old).toMatchObject({ status: 'superseded', amount_due_cents: null, bank: null });
+    await flush();
+    expect(mail(/Update to the payment/)).toHaveLength(1);
     const brisket = getItems(o.id).find((i) => i.name_snapshot === 'Brisket')!;
-    await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2000 });
-    const first = (await staff.post(`/api/orders/${o.id}/payment-request`)).body.payment.request;
     await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2500 });
-    expect((db().prepare('SELECT status FROM payment_requests WHERE id = ?').get(first.id) as any).status).toBe('superseded');
-    expect(requireOrder(o.id).payment_state).toBe('not_requested');
+    const v2 = (await staff.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true })).body.finalization;
+    expect(v2.snapshot).toMatchObject({ version: 2, total_cents: 25000 + 32500 });
+    const hist = (await staff.get(`/api/orders/${o.id}`)).body.finalization_history;
+    expect(hist.map((h: any) => [h.version, !!h.superseded_at])).toEqual([[2, false], [1, true]]);
+    expect((await staff.get(`/api/orders/${o.id}/payment-request/preview`)).body.request.amount_cents).toBe(57500);
+    // Once paid, it can't be reopened
+    const req2 = openRequestFor(o.id);
+    recordVerifiedPayment(o.id, { method: 'eft', amount_cents: 57500, request_id: req2 }, STAFF, 'staff');
+    expect((await manager.post(`/api/orders/${o.id}/reopen-final`, { reason: 'again' })).body.error).toMatch(/payment has already been verified|already been released/);
   });
 
-  it('EFT proof is checked by staff before the order counts as paid; receipts are private', async () => {
+  it('the payment page: secure link, exact finalized lines, declare or upload proof — never paid until staff verify', async () => {
     bankSettings();
-    const o = readyOrder();
     const staff = await signedIn('staff');
-    const brisket = getItems(o.id).find((i) => i.name_snapshot === 'Brisket')!;
-    await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2000 });
-    await staff.post(`/api/orders/${o.id}/payment-request`);
-    const t = orderToken(o.id);
-    const page = (await pub().get(`/api/public/o/${t}`)).body.order;
-    expect(page.payment.eft).toMatchObject({ bankName: 'FNB', accountNumber: '62000000001', reference: `${o.order_number}` });
-    // Wrong file type, then a real image
-    expect((await pub().upload(`/api/public/o/${t}/proof`, { name: 'proof.png', bytes: Buffer.from('not really a picture') })).status).toBe(400);
-    const up = await pub().upload(`/api/public/o/${t}/proof`, { name: 'proof.png', bytes: PNG, type: 'image/png' }, { amount: '510.00' });
+    const o = await finalOrder(staff);
+    const pv = (await staff.get(`/api/orders/${o.id}/payment-request/preview`)).body;
+    const tok = payPath(pv.url);
+    const page = (await pub().get(`/api/public/pay/${tok}`)).body.pay;
+    expect(page).toMatchObject({ status: 'awaiting_payment', amount_due_cents: 51000, total_cents: 51000, reference: `${o.order_number}` });
+    expect(page.bank).toMatchObject({ bankName: 'FNB', accountNumber: '62000000001', branchCode: '250655' });
+    expect(page.lines.find((l: any) => l.name === 'Brisket')).toMatchObject({ weight_g: 2000, unit_price_cents: 13000, line_cents: 26000 });
+    expect(JSON.stringify(page)).not.toMatch(/notes|internal/i);
+    // Tampered, foreign and expired links open nothing
+    const [rid, exp, mac] = tok.split('.');
+    expect((await pub().get(`/api/public/pay/${rid}.${Number(exp) + 1}.${mac}`)).status).toBe(404);
+    expect((await pub().get(`/api/public/pay/${o.id}.${exp}.${mac}`)).status).toBe(404);
+    db().prepare('UPDATE payment_requests SET link_version = link_version + 1 WHERE id = ?').run(rid);
+    expect((await pub().get(`/api/public/pay/${tok}`)).status).toBe(404); // revoked
+    db().prepare('UPDATE payment_requests SET link_version = link_version - 1 WHERE id = ?').run(rid);
+    const expired = `${rid}.${Math.floor(Date.now() / 1000) - 60}.${signPay(rid, Math.floor(Date.now() / 1000) - 60)}`;
+    expect((await pub().get(`/api/public/pay/${expired}`)).status).toBe(410);
+    // The customer says they've paid: awaiting verification, not paid
+    expect((await pub().post(`/api/public/pay/${tok}/declare`, { confirm: false })).status).toBe(400);
+    const d = await pub().post(`/api/public/pay/${tok}/declare`, { confirm: true, amount_cents: 51000, paid_on: today() });
+    expect(d.body.pay.status).toBe('awaiting_verification');
+    expect(requireOrder(o.id)).toMatchObject({ payment_state: 'proof_submitted', status: 'packed' });
+    // A proof upload: wrong type refused, real image accepted, still not paid
+    expect((await pub().upload(`/api/public/pay/${tok}/proof`, { name: 'proof.png', bytes: Buffer.from('not really a picture') })).status).toBe(400);
+    const up = await pub().upload(`/api/public/pay/${tok}/proof`, { name: 'proof.png', bytes: PNG, type: 'image/png' }, { amount: '510.00' });
     expect(up.status).toBe(200);
-    expect(requireOrder(o.id).payment_state).toBe('proof_submitted'); // NOT paid
-    expect(requireOrder(o.id).payment_status).toBe('pending');
+    expect(requireOrder(o.id).payment_state).toBe('proof_submitted');
     const proof = db().prepare('SELECT id, file_id FROM payment_proofs WHERE order_id = ?').get(o.id) as any;
-    // Staff can open the file; the public can't reach it
     expect((await staff.raw(`/api/files/${proof.file_id}`)).status).toBe(200);
     expect((await pub().raw(`/api/files/${proof.file_id}`)).status).toBe(401);
-    // Only managers verify
+    // Staff can't verify; a manager checks the bank and confirms
+    const decl = db().prepare('SELECT id FROM payment_declarations WHERE order_id = ?').get(o.id) as any;
+    expect((await staff.post(`/api/declarations/${decl.id}/review`, { accept: true, amount_cents: 51000 })).status).toBe(403);
     expect((await staff.post(`/api/proofs/${proof.id}/review`, { accept: true, amount_cents: 51000 })).status).toBe(403);
     const manager = await signedIn('manager');
     const v = await manager.post(`/api/proofs/${proof.id}/review`, { accept: true, amount_cents: 51000 });
     expect(v.status).toBe(200);
-    expect(requireOrder(o.id)).toMatchObject({ payment_state: 'paid', payment_status: 'paid', amount_paid_cents: 51000 });
-    const pay = db().prepare("SELECT id, receipt_number, verified_by FROM payments WHERE order_id = ?").get(o.id) as any;
-    expect(pay.receipt_number).toBeGreaterThan(0);
+    // Paid → released as ready, with who and when on record; the declaration is closed
+    expect(requireOrder(o.id)).toMatchObject({ payment_state: 'paid', payment_status: 'paid', amount_paid_cents: 51000, status: 'ready' });
+    const pay = db().prepare("SELECT id, receipt_number, verified_by, created_at FROM payments WHERE order_id = ?").get(o.id) as any;
     expect(pay.verified_by).toBeTruthy();
-    const rc = await pub().get(`/api/public/o/${t}/receipt/${pay.id}`);
-    expect(rc.body.receipt).toMatchObject({ amount_cents: 51000, method: 'EFT', balance_cents: 0 });
-    const other = createOrder({ customer: { new: { name: 'Other' } }, source: 'phone', status: 'review', items: [{ product_id: productId('beef_rump'), qty: kg(1000) }] }, STAFF);
-    expect((await pub().get(`/api/public/o/${orderToken(other.id)}/receipt/${pay.id}`)).status).toBe(404);
+    expect(pay.created_at).toBeTruthy();
+    expect((db().prepare('SELECT status FROM payment_declarations WHERE id = ?').get(decl.id) as any).status).toBe('accepted');
+    expect((await manager.post(`/api/proofs/${proof.id}/review`, { accept: true, amount_cents: 51000 })).status).toBe(409); // no double confirmation
+    expect((await pub().get(`/api/public/pay/${tok}`)).body.pay).toMatchObject({ status: 'paid', bank: null, amount_due_cents: null });
+    expect((await pub().post(`/api/public/pay/${tok}/declare`, { confirm: true })).status).toBe(409);
+    const t = orderToken(o.id);
+    expect((await pub().get(`/api/public/o/${t}/receipt/${pay.id}`)).body.receipt).toMatchObject({ amount_cents: 51000, balance_cents: 0 });
     await flush();
-    expect(mail(/Payment received/)).toHaveLength(1);
+    expect(mail(/Payment received — order #\d+ is ready/)).toHaveLength(1);
+  });
+
+  it('unpaid orders are not released unless the business allows a manager override', async () => {
+    bankSettings();
+    const staff = await signedIn('staff');
+    const o = await finalOrder(staff);
+    expect((await staff.post(`/api/orders/${o.id}/transition`, { to: 'ready' })).body.error).toMatch(/Payment hasn’t been confirmed/);
+    const manager = await signedIn('manager');
+    expect((await manager.post(`/api/orders/${o.id}/transition`, { to: 'ready', unpaid_reason: 'Pays cash on collection' })).body.error).toMatch(/switched off/);
+    updateSettings('payments', { allowUnpaidRelease: true }, null);
+    expect((await staff.post(`/api/orders/${o.id}/transition`, { to: 'ready', unpaid_reason: 'x' })).status).toBe(403);
+    const r = await manager.post(`/api/orders/${o.id}/transition`, { to: 'ready', unpaid_reason: 'Pays cash on collection' });
+    expect(r.body.order.status).toBe('ready');
+    expect((db().prepare("SELECT summary FROM order_events WHERE order_id = ? AND type = 'status_changed' ORDER BY created_at DESC LIMIT 1").get(o.id) as any).summary).toMatch(/released before payment: Pays cash/);
+  });
+
+  it('EFT is not offered until the banking details are complete', async () => {
+    const staff = await signedIn('staff');
+    const o = await finalOrder(staff);
+    expect((await staff.get(`/api/orders/${o.id}/payment-request/preview`)).body.blocker).toMatch(/No payment method/);
   });
 
   it('PayFast: signed form, verified notification only, duplicates and mismatches handled', async () => {
@@ -427,7 +532,8 @@ describe('payments', () => {
     const staff = await signedIn('staff');
     const brisket = getItems(o.id).find((i) => i.name_snapshot === 'Brisket')!;
     await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2000 });
-    await staff.post(`/api/orders/${o.id}/payment-request`);
+    await staff.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true });
+    await staff.get(`/api/orders/${o.id}/payment-request/preview`);
     const t = orderToken(o.id);
     const checkout = (await pub().post(`/api/public/o/${t}/pay/online`)).body;
     expect(checkout.action).toBe('https://sandbox.payfast.co.za/eng/process');

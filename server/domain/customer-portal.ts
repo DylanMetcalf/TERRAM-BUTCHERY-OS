@@ -12,6 +12,7 @@ import { listAmendments } from './amendments.js';
 import { paymentSummary } from './payments.js';
 import { staffEmails } from './lifecycle.js';
 import { requireProduct } from './products.js';
+import { payPathFor } from './pay-page.js';
 
 /**
  * What a customer sees about their own order — and nothing more. No staff notes, no internal
@@ -164,6 +165,8 @@ export function customerOrderView(orderId: string) {
     money: orderMoney(orderId),
     payment: {
       ...pay,
+      pay_url: showPay ? payPathFor(orderId) : null,
+      finalized: !!o.finalized_at,
       show_options: showPay,
       online: showPay && methods.online,
       eft: showPay && methods.eft ? { ...eftDetails(), reference: `${o.order_number}` } : null,

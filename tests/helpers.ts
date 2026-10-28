@@ -86,3 +86,20 @@ export async function signedIn(role: Role, app = buildApp()) {
   if (r.status !== 200) throw new Error('login failed');
   return c;
 }
+
+/**
+ * Final weighing → finalize → staff-verified payment, as the business does it after packing.
+ * Weighed lines get their ordered weight (or 1 kg) as the "actual" weight. The order ends up ready.
+ */
+export async function weighFinalizeAndPay(orderId: string, actor: Actor = { userId: null, kind: 'user', name: 'Test staff' }) {
+  const { getItems, setItemWeight, orderMoney, requireOrder } = await import('../server/domain/orders');
+  const { finalizeOrder } = await import('../server/domain/finalize');
+  const { recordVerifiedPayment } = await import('../server/domain/payments');
+  for (const it of getItems(orderId)) {
+    if (it.pricing === 'by_weight' || it.pricing === 'estimate') setItemWeight(it.id, it.qty.weight_g ? it.qty.weight_g * (it.qty.kind === 'portions' ? it.qty.count ?? 1 : 1) : 1000, actor);
+  }
+  finalizeOrder(orderId, actor, { packsConfirmed: true });
+  const due = orderMoney(orderId).balance_cents!;
+  recordVerifiedPayment(orderId, { method: 'cash', amount_cents: due }, actor, 'staff');
+  return requireOrder(orderId);
+}

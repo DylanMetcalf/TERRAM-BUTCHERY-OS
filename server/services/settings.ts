@@ -36,6 +36,8 @@ export interface BusinessSettings {
     showDeliveryFees: boolean;
     /** …and each km beyond it costs this much (cents). 0 = no distance fee. */
     deliveryRatePerKmCents: number;
+    /** Fresh meat on a delivery journey longer than this (hours) can't be guaranteed; frozen is recommended. */
+    freshMaxHours: number;
   };
   ai: {
     enabled: boolean;
@@ -60,7 +62,15 @@ export interface BusinessSettings {
     eftInstructions: string;
     paymentContact: string;
     guidance: string;
+    /** Orders are only released for collection/delivery once payment is verified. */
+    requirePaymentBeforeRelease: boolean;
+    /** Lets a manager release an unpaid order anyway (with a reason). Off unless the business switches it on. */
+    allowUnpaidRelease: boolean;
+    /** How long a payment-page link in an email keeps working. */
+    linkDays: number;
   };
+  /** Questions and answers on the Help page. Edited in Settings. */
+  help: { faq: { q: string; a: string }[] };
   /** Reorder reminders and feedback after an order is completed. */
   retention: { remindersEnabled: boolean; reminderDays: number; feedbackEnabled: boolean };
   /** Who is told what (customer emails are always the essential ones; these are optional extras). */
@@ -108,6 +118,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     deliveryRatePerKmCents: 0,
     customerChooses: false,
     showDeliveryFees: false,
+    freshMaxHours: 2,
   },
   ai: { enabled: true, model: 'claude-opus-5', effort: 'low', learningThreshold: 2 },
   printing: { showPrices: false, paper: 'A4' },
@@ -122,9 +133,31 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     branchCode: '',
     swift: '',
     referenceInstructions: 'Please use your order number as the payment reference.',
-    eftInstructions: 'Pay by EFT into the account below, then upload your proof of payment on this page. Your order shows as paid once we have checked that the money is in our account.',
+    eftInstructions: 'Pay by EFT using the details on this page, then upload your proof of payment or tell us you’ve paid. Your order shows as paid once we have checked that the money is in our account.',
     paymentContact: '',
     guidance: 'We’ll ask for payment once your order is packed and we know the final amount.',
+    requirePaymentBeforeRelease: true,
+    allowUnpaidRelease: false,
+    linkDays: 30,
+  },
+  help: {
+    faq: [
+      { q: 'How does ordering work?', a: 'Choose your products on the order form, add your details and send the order. Sending an order doesn’t commit you to pay yet: we first check the products, quantities and availability, then confirm the order with you.' },
+      { q: 'When is my order confirmed?', a: 'Your order is only confirmed once we’ve reviewed it. You’ll get an email with the confirmation and the expected timeframe, and your order page shows the latest status.' },
+      { q: 'How long does an order take?', a: '{{leadTime}} We’ll give you the expected date when we confirm your order.' },
+      { q: 'Why can the final price differ from the estimate?', a: 'Many cuts are priced per kilogram, and every piece weighs slightly differently. We weigh your order once it is packed and the final amount is based on the actual weights. Fixed packs, like mince, have a set price per pack.' },
+      { q: 'When do I pay?', a: 'Once your order is packed and weighed, we send you a payment request with the final amount and a secure payment page. Payment must reflect in our account before your order is released for delivery or collection.' },
+      { q: 'How do I pay by EFT?', a: 'Your payment page shows our banking details, the exact amount and your payment reference (your order number). Pay from your banking app, then upload your proof of payment or tap “I’ve made payment” on the same page.' },
+      { q: 'Does uploading proof of payment mean my order is paid?', a: 'Not yet. We check that the money has reflected in our bank account first. Your order page shows “awaiting verification” until then, and we let you know as soon as it’s confirmed.' },
+      { q: 'Should I choose fresh or frozen?', a: 'Choose fresh if you’ll collect or if delivery is a short trip. For delivery journeys longer than about {{freshMaxHours}} hours we can’t guarantee fresh products stay in the right condition, so we recommend frozen. If you’re not sure, chat to us before you order.' },
+      { q: 'How are the products packed?', a: 'Packaged products are prepared using our standard vacuum packaging to help maintain freshness.' },
+      { q: 'What mince pack sizes are there?', a: 'Mince comes in 500 g vacuum packs, and in 1 kg packs where we offer them. For 2 kg of mince, for example, choose 4 × 500 g packs.' },
+      { q: 'How does delivery work?', a: 'Tell us your address when you order. We’ll confirm how and when your order reaches you, and any delivery cost, when we confirm the order. Orders are released once payment has reflected.' },
+      { q: 'What if something isn’t available?', a: 'If we can’t supply something exactly as ordered, we’ll suggest a change on your order page. Nothing changes until you accept it.' },
+      { q: 'Can I change or cancel my order?', a: 'Before we confirm it, you can cancel on your order page. After that, message us with your order number and we’ll help.' },
+      { q: 'Can I get an invoice?', a: 'Yes. Choose “I need an invoice” when you order (or ask us), and we’ll prepare it and send it to you.' },
+      { q: 'How do I contact Terram Farm?', a: 'Chat to us on WhatsApp or call us on the number below, or reply to any of our emails. Have your order number handy.' },
+    ],
   },
   retention: { remindersEnabled: true, reminderDays: 14, feedbackEnabled: true },
   notifications: { staffEmails: [], notifyPreparation: false, invoiceReadyEmail: true },

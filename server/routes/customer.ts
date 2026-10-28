@@ -12,6 +12,7 @@ import { respondToAmendment } from '../domain/amendments.js';
 import { buildCheckout } from '../domain/payfast.js';
 import { METHOD_LABEL, submitProof } from '../domain/payments.js';
 import { requireOrder } from '../domain/orders.js';
+import { declarePayment, payView, requestFromPayToken, requestRow } from '../domain/pay-page.js';
 import {
   accountView,
   CUSTOMER_COOKIE,
@@ -63,8 +64,8 @@ r.post('/o/:token/amendments/:aid', linkLimit, async (c) => {
 
 r.post('/o/:token/pay/online', rateLimit('pay-online', 20, 10 * 60_000), (c) => c.json(buildCheckout(orderFor(c))));
 
-r.post('/o/:token/proof', rateLimit('proof-upload', 10, 60 * 60_000), async (c) => {
-  const orderId = orderFor(c);
+/** Proof of payment upload, shared by the order page and the payment page. Validated by content, stored privately. */
+async function uploadProof(c: Context, orderId: string) {
   const len = Number(c.req.header('content-length') ?? 0);
   if (len > 6 * 1024 * 1024) throw badRequest('The file is too big. The limit is 5 MB.');
   const form = await c.req.parseBody();
@@ -76,7 +77,37 @@ r.post('/o/:token/proof', rateLimit('proof-upload', 10, 60 * 60_000), async (c) 
   const o = requireOrder(orderId);
   const stored = storeFile('proof', orderId, file.name, Buffer.from(await file.arrayBuffer()), { userId: null, kind: 'customer', name: o.customer_name });
   submitProof(orderId, stored.id, { amount_cents: amount, note: typeof form.note === 'string' ? form.note : null });
+}
+
+r.post('/o/:token/proof', rateLimit('proof-upload', 10, 60 * 60_000), async (c) => {
+  const orderId = orderFor(c);
+  await uploadProof(c, orderId);
   return c.json({ ok: true, order: customerOrderView(orderId) });
+});
+
+// ── Secure payment page ──────────────────────────────────────
+
+const PAY_EXPIRED = 'This payment link has expired. Open your order from our latest email, or sign in to see your orders, and we’ll show you the current payment page.';
+function payRequestFor(c: Context) {
+  const r = requestFromPayToken(c.req.param('token') ?? '');
+  if ('expired' in r) throw new AppError(410, PAY_EXPIRED, 'link_expired');
+  return r.request;
+}
+
+r.get('/pay/:token', linkLimit, (c) => c.json({ pay: payView(payRequestFor(c)) }));
+
+r.post('/pay/:token/declare', rateLimit('pay-declare', 10, 60 * 60_000), async (c) => {
+  const req = payRequestFor(c);
+  const input = await body(c, z.object({ confirm: z.literal(true, { message: 'Tick the box to confirm you’ve made the payment.' }), amount_cents: z.number().int().positive().max(100_000_000).nullable().optional(), paid_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), note: z.string().max(500).nullable().optional() }));
+  declarePayment(req, { amount_cents: input.amount_cents ?? null, paid_on: input.paid_on ?? null, note: input.note ?? null });
+  return c.json({ pay: payView(requestRow(req.id)) });
+});
+
+r.post('/pay/:token/proof', rateLimit('proof-upload', 10, 60 * 60_000), async (c) => {
+  const req = payRequestFor(c);
+  if (req.status !== 'open') throw new AppError(409, 'This payment request is no longer open. Please use the latest one we sent you.', 'conflict');
+  await uploadProof(c, req.order_id);
+  return c.json({ pay: payView(requestRow(req.id)) });
 });
 
 r.get('/o/:token/invoice', linkLimit, (c) => {
