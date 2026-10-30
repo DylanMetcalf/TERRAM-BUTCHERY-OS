@@ -336,6 +336,7 @@ export function DeclarationsList({ orderId, declarations, due, canPay }: { order
         <div key={d.id} className="rounded-xl border-2 border-ochre/50 bg-ochre-soft/40 p-3 text-[14px]">
           <div className="font-semibold">Customer says they’ve paid</div>
           <div className="text-ink-2">{[d.amount_cents ? formatMoney(d.amount_cents) : null, d.paid_on ? `on ${d.paid_on}` : null, dateTime(d.created_at)].filter(Boolean).join(' · ')}</div>
+          {d.payer_reference && <div className="text-ink-2">Shows on the statement as: <b>{d.payer_reference}</b></div>}
           {d.note && <div className="text-ink-2">“{d.note}”</div>}
           {canPay && <Button size="sm" className="mt-2" variant="primary" onClick={() => { setChecking(d); setAmount(((d.amount_cents ?? due ?? 0) / 100).toFixed(2)); setChecked(false); setReason(''); }}>Check & confirm…</Button>}
         </div>

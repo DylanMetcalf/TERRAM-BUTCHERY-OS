@@ -719,4 +719,12 @@ CREATE TABLE payment_declarations (
 CREATE INDEX idx_declarations_order ON payment_declarations(order_id, status);
 `,
   },
+  {
+    id: 9,
+    name: 'payment-declaration-reference',
+    sql: `
+-- "I've paid": the name or reference the payment came from, so staff can find it on the statement
+ALTER TABLE payment_declarations ADD COLUMN payer_reference TEXT;
+`,
+  },
 ];

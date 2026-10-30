@@ -5,7 +5,7 @@ import { publish } from '../services/realtime.js';
 import { getSettings } from '../services/settings.js';
 import { notify } from '../services/notify.js';
 import { orderUrl, payUrl, siteUrl } from '../services/links.js';
-import { layout, money, signOff } from '../services/templates.js';
+import { formatTimeframe, layout, money, signOff } from '../services/templates.js';
 import { paymentMethods } from '../services/payment-config.js';
 import { raiseException } from './exceptions.js';
 import { addEvent, orderMoney, requireOrder, transition, type PaymentState } from './orders.js';
@@ -121,8 +121,8 @@ export function paymentRequestMessage(orderId: string, request: any) {
   const whatsapp = [
     `Hi ${c.firstName}, your ${s.business.name} order #${o.order_number} has been packed and weighed.`,
     `Amount due: ${money(request.amount_cents)}`,
-    `Pay by EFT using your secure payment page (banking details, reference and proof upload): ${url}`,
-    `Please use ${o.order_number} as your payment reference. Payment must reflect in our account before your order is released for ${o.fulfilment_type === 'collection' ? 'collection' : 'delivery'}.`,
+    `Pay by EFT using the banking details on your secure payment page: ${url}`,
+    `Please use ${o.order_number} as your payment reference. Once you've paid, open the same link and tap “Already paid?” on your payment page — no proof of payment needed. We'll confirm as soon as it reflects; your order is released for ${o.fulfilment_type === 'collection' ? 'collection' : 'delivery'} once payment is confirmed.`,
     `Thank you!`,
   ].join('\n\n');
   const email = layout({
@@ -132,7 +132,7 @@ export function paymentRequestMessage(orderId: string, request: any) {
     intro: [`Your order #${o.order_number} has been packed and weighed, and the final amount is ready.`],
     blocks: [
       { facts: [['Amount due', money(request.amount_cents)], ['Payment reference', `${o.order_number}`]] },
-      { heading: 'How to pay', paragraphs: ['Open your secure payment page for our banking details. Pay by EFT from your banking app using your order number as the reference, then upload your proof of payment (or tap “I’ve made payment”) on the same page.', `Payment must reflect in our account before your order is released for ${o.fulfilment_type === 'collection' ? 'collection' : 'delivery'}. We’ll let you know as soon as it has been verified.`] },
+      { heading: 'How to pay', paragraphs: ['Open your secure payment page for our banking details. Pay by EFT from your banking app using your order number as the reference.', 'Once you’ve paid, open your payment page again and tap “Already paid?” there. No proof of payment is needed (you can upload one if you have it).', `Payment must reflect in our account before your order is released for ${o.fulfilment_type === 'collection' ? 'collection' : 'delivery'}. We’ll let you know as soon as it has been verified.`] },
     ],
     cta: { label: 'Open my payment page', url },
     closing: [`Questions? ${support || 'Reply to this email'} with your order number #${o.order_number}.`, ...signOff()],
@@ -207,10 +207,14 @@ export function recordVerifiedPayment(orderId: string, input: RecordPaymentInput
   const after = requireOrder(orderId);
   if (c.email) {
     const f = s.fulfilment;
+    // The customer's day: the expected date we confirmed (or their preferred date), if there is one
+    const day = after.expected_from ? formatTimeframe(after.expected_from, after.expected_to) : after.requested_date ? formatTimeframe(after.requested_date, null) : null;
     const next = released
       ? after.fulfilment_type === 'collection'
-        ? `Your order is now ready for collection from ${[f.collectionPlace, f.collectionAddress].filter(Boolean).join(', ')}${f.collectionHours ? ` (${f.collectionHours})` : ''}.`
-        : 'Your order is now ready, and we’ll be in touch to arrange delivery.'
+        ? `Your order is now ready for collection from ${[f.collectionPlace, f.collectionAddress].filter(Boolean).join(', ')}${f.collectionHours ? ` (${f.collectionHours})` : ''}${day ? `, from ${day}` : ''}.`
+        : day
+          ? `Your order is confirmed for delivery and will be out for delivery on ${day}. We’ll be in touch if anything changes.`
+          : 'Your order is now ready, and we’ll be in touch to arrange your delivery day.'
       : null;
     const e = layout({
       subject: released ? `Payment received — order #${o.order_number} is ready` : `Payment received for order #${o.order_number} — thank you`,

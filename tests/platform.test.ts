@@ -471,8 +471,10 @@ describe('payments', () => {
     expect((await pub().get(`/api/public/pay/${expired}`)).status).toBe(410);
     // The customer says they've paid: awaiting verification, not paid
     expect((await pub().post(`/api/public/pay/${tok}/declare`, { confirm: false })).status).toBe(400);
-    const d = await pub().post(`/api/public/pay/${tok}/declare`, { confirm: true, amount_cents: 51000, paid_on: today() });
+    const d = await pub().post(`/api/public/pay/${tok}/declare`, { confirm: true, amount_cents: 51000, paid_on: today(), payer_reference: 'ZULU CATERING' });
     expect(d.body.pay.status).toBe('awaiting_verification');
+    expect(d.body.pay.declarations[0].payer_reference).toBe('ZULU CATERING');
+    expect((await staff.get(`/api/orders/${o.id}`)).body.declarations[0].payer_reference).toBe('ZULU CATERING');
     expect(requireOrder(o.id)).toMatchObject({ payment_state: 'proof_submitted', status: 'packed' });
     // A proof upload: wrong type refused, real image accepted, still not paid
     expect((await pub().upload(`/api/public/pay/${tok}/proof`, { name: 'proof.png', bytes: Buffer.from('not really a picture') })).status).toBe(400);
@@ -821,5 +823,38 @@ describe('fresh or frozen, vacuum packing, mince packs, help and status', () => 
     expect((await step()).stage).toBe('ready');
     q = (await staff.get('/api/production/dashboard')).body.queues;
     expect(q).toMatchObject({ requests_sent: 0, paid_ready: 1 });
+  });
+});
+
+describe('“I’ve paid” without proof', () => {
+  it('the customer just ticks “I’ve paid”; a manager confirms it; the customer is told their delivery day', async () => {
+    bankSettings();
+    const staff = await signedIn('staff');
+    const o = await finalOrder(staff);
+    db().prepare("UPDATE orders SET fulfilment_type = 'delivery', delivery_address = '12 Kerk Street', expected_from = '2026-11-12', expected_to = NULL WHERE id = ?").run(o.id);
+    const pv = (await staff.get(`/api/orders/${o.id}/payment-request/preview`)).body;
+    await staff.post(`/api/orders/${o.id}/payment-request/send`, { email: true });
+    await flush();
+    const req = mail(/Payment for your order/)[0];
+    expect(req.html).toContain(pv.url); // the email only links to the portal…
+    expect(req.html).not.toContain('?paid=1'); // …"I've paid" is done in the portal, not from the email
+    expect(req.text).toMatch(/no proof of payment is needed/i);
+    expect(pv.whatsapp.text).toMatch(/Already paid?/);
+    const tok = payPath(pv.url);
+    // No file at all: just the tick (and an optional name the payment came from)
+    const d = await pub().post(`/api/public/pay/${tok}/declare`, { confirm: true, payer_reference: 'N Zulu' });
+    expect(d.status).toBe(200);
+    expect(requireOrder(o.id).payment_state).toBe('proof_submitted'); // awaiting verification, not paid
+    expect(db().prepare('SELECT 1 FROM payment_proofs WHERE order_id = ?').get(o.id)).toBeUndefined();
+    await flush();
+    expect(mail(/says they’ve paid/)[0].html).toContain('N Zulu');
+    const decl = (await staff.get(`/api/orders/${o.id}`)).body.declarations[0];
+    const manager = await signedIn('manager');
+    expect((await manager.post(`/api/declarations/${decl.id}/review`, { accept: true, amount_cents: 51000 })).status).toBe(200);
+    expect(requireOrder(o.id)).toMatchObject({ payment_state: 'paid', status: 'ready' });
+    await flush();
+    const done = mail(/Payment received — order #\d+ is ready/)[0];
+    expect(done.text).toMatch(/out for delivery on Thursday,? 12 November 2026/);
+    expect((await pub().get(`/api/public/o/${orderToken(o.id)}`)).body.order.next.text).toMatch(/out for delivery on Thursday,? 12 November 2026/);
   });
 });

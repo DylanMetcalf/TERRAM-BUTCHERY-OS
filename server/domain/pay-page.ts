@@ -52,7 +52,7 @@ export function payView(request: any) {
   const payable = status === 'awaiting_payment' || status === 'awaiting_verification';
   const methods = paymentMethods();
   const wa = (s.business.phone ?? '').replace(/\D/g, '').replace(/^0/, '27');
-  const declarations = db().prepare('SELECT id, amount_cents, paid_on, status, review_note, created_at FROM payment_declarations WHERE order_id = ? ORDER BY created_at DESC').all(o.id) as any[];
+  const declarations = db().prepare('SELECT id, amount_cents, paid_on, payer_reference, status, review_note, created_at FROM payment_declarations WHERE order_id = ? ORDER BY created_at DESC').all(o.id) as any[];
   const proofs = db().prepare("SELECT p.id, p.amount_claimed_cents, p.status, p.review_note, p.created_at, f.filename FROM payment_proofs p JOIN files f ON f.id = p.file_id WHERE p.order_id = ? ORDER BY p.created_at DESC").all(o.id) as any[];
   const payments = db().prepare("SELECT id, amount_cents, method, receipt_number, created_at FROM payments WHERE order_id = ? AND status = 'verified' ORDER BY created_at").all(o.id) as any[];
   return {
@@ -86,7 +86,7 @@ export function payView(request: any) {
 }
 
 /** "I've made payment": recorded and passed to staff to check. Never marks the order paid. */
-export function declarePayment(request: any, input: { amount_cents: number | null; paid_on: string | null; note: string | null }) {
+export function declarePayment(request: any, input: { amount_cents: number | null; paid_on: string | null; note: string | null; payer_reference?: string | null }) {
   const o = requireOrder(request.order_id);
   if (request.status !== 'open') throw conflict('This payment request is no longer open. Please use the latest one we sent you.');
   if (o.payment_state === 'paid') throw conflict('This order is already paid. Thank you!');
@@ -97,14 +97,15 @@ export function declarePayment(request: any, input: { amount_cents: number | nul
   const did = id('pdc_');
   const customer: Actor = { userId: null, kind: 'customer', name: o.customer_name };
   tx(() => {
-    db().prepare("INSERT INTO payment_declarations (id, order_id, request_id, amount_cents, paid_on, note, status, created_at) VALUES (?,?,?,?,?,?,'submitted',?)").run(did, o.id, request.id, input.amount_cents, input.paid_on, input.note?.trim().slice(0, 500) || null, now());
-    addEvent(o.id, 'payment_declared', `Customer says they’ve paid${input.amount_cents ? ` ${money(input.amount_cents)}` : ''}${input.paid_on ? ` on ${input.paid_on}` : ''} — check the bank`, customer, { declaration_id: did });
+    const ref = input.payer_reference?.trim().slice(0, 120) || null;
+    db().prepare("INSERT INTO payment_declarations (id, order_id, request_id, amount_cents, paid_on, note, payer_reference, status, created_at) VALUES (?,?,?,?,?,?,?,'submitted',?)").run(did, o.id, request.id, input.amount_cents, input.paid_on, input.note?.trim().slice(0, 500) || null, ref, now());
+    addEvent(o.id, 'payment_declared', `Customer says they’ve paid${input.amount_cents ? ` ${money(input.amount_cents)}` : ''}${input.paid_on ? ` on ${input.paid_on}` : ''}${input.payer_reference?.trim() ? ` (shows on the statement as “${input.payer_reference.trim().slice(0, 120)}”)` : ''} — check the bank`, customer, { declaration_id: did });
     recomputePayment(o.id);
   });
-  raiseException({ type: 'payment_issue', severity: 'info', title: `Check the bank for #${o.order_number}`, detail: `${o.customer_name} says they’ve paid${input.amount_cents ? ` ${money(input.amount_cents)}` : ''}. Check that it has reflected, then confirm the payment on the order.`, order_id: o.id, dedupe_key: `declared:${did}` });
+  raiseException({ type: 'payment_issue', severity: 'info', title: `Check the bank for #${o.order_number}`, detail: `${o.customer_name} says they’ve paid${input.amount_cents ? ` ${money(input.amount_cents)}` : ''}${input.payer_reference?.trim() ? `, from “${input.payer_reference.trim().slice(0, 120)}”` : ''}. Look for reference ${o.order_number} on the bank statement, then confirm the payment on the order.`, order_id: o.id, dedupe_key: `declared:${did}` });
   const staff = staffEmails();
   if (staff.length) {
-    const e = layout({ subject: `${o.customer_name} says they’ve paid #${o.order_number} — please check the bank`, preheader: money(request.amount_cents), intro: [`${o.customer_name} says they’ve paid${input.amount_cents ? ` ${money(input.amount_cents)}` : ''} for order #${o.order_number} (amount due ${money(request.amount_cents)}).`, 'The order is NOT marked paid until someone checks the money is in the account and confirms it in Terram.'], cta: { label: 'Open the order', url: `${siteUrl()}/orders/${o.id}` } });
+    const e = layout({ subject: `${o.customer_name} says they’ve paid #${o.order_number} — please check the bank`, preheader: money(request.amount_cents), intro: [`${o.customer_name} says they’ve paid${input.amount_cents ? ` ${money(input.amount_cents)}` : ''} for order #${o.order_number} (amount due ${money(request.amount_cents)}).${input.payer_reference?.trim() ? ` It should show on the statement as “${input.payer_reference.trim().slice(0, 120)}”.` : ''} Reference used: ${o.order_number}.`, 'The order is NOT marked paid until someone checks the money is in the account and confirms it in Terram.'], cta: { label: 'Open the order', url: `${siteUrl()}/orders/${o.id}` } });
     notify({ key: `staff_declared:${did}`, kind: 'staff_declared', audience: 'staff', to: staff, ...e, orderId: o.id });
   }
   const c = customerContact(o.id);

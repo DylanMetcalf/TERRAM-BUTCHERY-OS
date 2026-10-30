@@ -68,7 +68,7 @@ function nextStep(o: OrderSummary, pendingChanges: number, pay: ReturnType<typeo
   if (o.status === 'review') return { who: 'terram', text: 'We’re reviewing your products, quantities and availability, and will confirm your order soon.' };
   if (o.status === 'confirmed' || o.status === 'cutting' || o.status === 'cut' || o.status === 'packing' || o.status === 'packed')
     return { who: 'terram', text: 'Your order is confirmed and in our preparation queue. We’ll let you know when it’s ready.' };
-  if (o.status === 'ready') return { who: 'terram', text: o.fulfilment_type === 'delivery' ? 'Payment received — your order is ready for delivery. We’ll be in touch to arrange it.' : o.fulfilment_type === 'collection' ? 'Your order is ready for collection.' : 'Your order is ready. We’ll be in touch to arrange collection or delivery.' };
+  if (o.status === 'ready') return { who: 'terram', text: o.fulfilment_type === 'delivery' ? (o.expected_from ? `Payment received — your order will be out for delivery on ${formatTimeframe(o.expected_from, o.expected_to)}.` : 'Payment received — your order is ready for delivery. We’ll be in touch to arrange your delivery day.') : o.fulfilment_type === 'collection' ? 'Your order is ready for collection.' : 'Your order is ready. We’ll be in touch to arrange collection or delivery.' };
   if (o.status === 'out_for_delivery') return { who: 'terram', text: 'Your order is on its way to you.' };
   return { who: 'terram', text: STATUS_LABEL[o.status] };
 }

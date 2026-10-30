@@ -98,8 +98,8 @@ r.get('/pay/:token', linkLimit, (c) => c.json({ pay: payView(payRequestFor(c)) }
 
 r.post('/pay/:token/declare', rateLimit('pay-declare', 10, 60 * 60_000), async (c) => {
   const req = payRequestFor(c);
-  const input = await body(c, z.object({ confirm: z.literal(true, { message: 'Tick the box to confirm you’ve made the payment.' }), amount_cents: z.number().int().positive().max(100_000_000).nullable().optional(), paid_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), note: z.string().max(500).nullable().optional() }));
-  declarePayment(req, { amount_cents: input.amount_cents ?? null, paid_on: input.paid_on ?? null, note: input.note ?? null });
+  const input = await body(c, z.object({ confirm: z.literal(true, { message: 'Tick the box to confirm you’ve made the payment.' }), amount_cents: z.number().int().positive().max(100_000_000).nullable().optional(), paid_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), note: z.string().max(500).nullable().optional(), payer_reference: z.string().max(120).nullable().optional() }));
+  declarePayment(req, { amount_cents: input.amount_cents ?? null, paid_on: input.paid_on ?? null, note: input.note ?? null, payer_reference: input.payer_reference ?? null });
   return c.json({ pay: payView(requestRow(req.id)) });
 });
 

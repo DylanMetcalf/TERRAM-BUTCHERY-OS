@@ -228,9 +228,12 @@ await c.getByText('Copied').first().waitFor();
 const clip = await c.evaluate(() => navigator.clipboard.readText()).catch(() => '');
 if (!clip.includes('62000000001') || !clip.includes(`Reference: ${order.order_number}`)) fail('copied details incomplete: ' + clip);
 await shot(c, '10-customer-pay');
-await c.getByRole('button', { name: 'I’ve made payment' }).click();
-await c.getByText(/I confirm I’ve made this payment/).click();
-await c.getByRole('button', { name: 'Send', exact: true }).click();
+// In the portal: "Already paid?" opens the I've-paid form — no proof needed
+await c.getByRole('button', { name: 'Already paid? Tap here' }).click();
+await c.getByLabel(/Name or reference the payment came from/).fill('ZULU CATERING');
+await c.getByText(/I’ve paid Terram Farm using reference/).click();
+await shot(c, '10a-ive-paid');
+await c.getByRole('button', { name: 'Send — I’ve paid' }).click();
 await c.getByRole('heading', { name: 'Payment awaiting verification' }).waitFor();
 const pdf = `${out}/proof.pdf`;
 fs.writeFileSync(pdf, '%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');

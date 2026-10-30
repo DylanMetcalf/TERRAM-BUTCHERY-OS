@@ -287,11 +287,14 @@ function PayBox({ o }: { o: View; token: string; onDone: (o: View) => void }) {
     <section id="pay" className="rounded-2xl border-2 border-brand/40 bg-surface p-4">
       <h2 className="font-display text-[20px] font-bold">{waiting ? 'Payment awaiting verification' : 'Pay for your order'}</h2>
       {amount != null && <p className="mt-1 text-[15px]">Final amount: <b className="tabular">{formatMoney(amount, 'ZAR')}</b></p>}
-      <p className="mt-1 text-[14px] text-ink-2">{waiting ? 'Thanks — we’ll confirm as soon as the payment has reflected in our account.' : 'Pay by EFT using your secure payment page: our banking details, your reference, and a place to upload proof of payment.'}</p>
+      <p className="mt-1 text-[14px] text-ink-2">{waiting ? 'Thanks — we’ll confirm as soon as the payment has reflected in our account.' : 'Pay by EFT using the banking details and reference on your secure payment page. Once you’ve paid, just tap “I’ve paid” — no proof of payment needed.'}</p>
       {p.pay_url && (
         <Link to={p.pay_url} className="mt-3 inline-flex h-12 items-center gap-2 rounded-xl bg-brand px-5 text-[15.5px] font-semibold text-brand-ink">
           <Landmark className="size-4" />{waiting ? 'View payment page' : 'Open payment page'}
         </Link>
+      )}
+      {p.pay_url && !waiting && (
+        <Link to={`${p.pay_url}?paid=1`} className="ml-0 mt-2 block text-[14.5px] font-semibold text-brand underline underline-offset-2 sm:ml-3 sm:mt-0 sm:inline">Already paid? Tell us — no proof needed</Link>
       )}
     </section>
   );

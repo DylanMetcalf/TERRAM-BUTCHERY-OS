@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Check, CheckCircle2, Clock, Copy, Landmark, MessageCircle, Upload } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { PublicShell } from '../components/PublicShell';
 import { Button, Card, cx, Field, Input, Spinner, Textarea } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -25,6 +25,17 @@ export default function PayPage() {
   const { data, error, isLoading } = useQuery({ queryKey: key, queryFn: () => api.get<{ pay: Pay }>(`/api/public/pay/${token}`), retry: false });
   const p = data?.pay;
   const set = (pay: Pay) => qc.setQueryData(key, { pay });
+  // The order page's "Already paid?" link (?paid=1) opens straight on the "I've paid" form
+  const [params] = useSearchParams();
+  const [declaring, setDeclaring] = useState(params.get('paid') === '1');
+  const openDeclare = () => {
+    setDeclaring(true);
+    setTimeout(() => document.getElementById('ive-paid')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
+  useEffect(() => {
+    if (declaring && p?.status === 'awaiting_payment') setTimeout(() => document.getElementById('ive-paid')?.scrollIntoView({ block: 'start' }), 100);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p?.status]);
   useEffect(() => {
     document.title = p ? `Pay order #${p.order.number}` : 'Payment';
   }, [p]);
@@ -62,13 +73,18 @@ export default function PayPage() {
             <div className="text-[13px] font-semibold uppercase tracking-wide text-ink-3">Amount due</div>
             <div className="mt-1 font-display text-[40px] font-semibold leading-none tabular">{formatMoney(due, 'ZAR')}</div>
             <div className="mt-2 text-[14px] text-ink-2">Payment reference: <b className="tabular">{p.reference}</b></div>
+            {p.status === 'awaiting_payment' && (
+              <button type="button" onClick={openDeclare} className="mt-4 inline-flex h-11 items-center gap-2 rounded-xl border border-brand/40 bg-brand-soft px-4 text-[15px] font-semibold text-brand-soft-ink">
+                <Check className="size-4" />Already paid? Tap here
+              </button>
+            )}
           </Card>
         )}
 
         {p.bank && due != null && <BankDetails p={p} due={due} />}
         {p.eft_unavailable && <p className="rounded-xl bg-ochre-soft px-4 py-3 text-[14px] text-ochre-soft-ink">EFT details aren’t available right now. Please contact us to arrange payment.</p>}
 
-        {p.status === 'awaiting_payment' && <Declare token={token} due={due} onDone={set} />}
+        {p.status === 'awaiting_payment' && <Declare token={token} due={due} reference={p.reference} open={declaring} setOpen={setDeclaring} onDone={set} />}
         {(p.status === 'awaiting_payment' || p.status === 'awaiting_verification') && <ProofUpload token={token} due={due} onDone={set} />}
 
         <section>
@@ -100,7 +116,7 @@ export default function PayPage() {
             <Card className="divide-y divide-line text-[14px]">
               {p.payments.map((x: any) => <div key={x.id} className="px-4 py-3"><b className="text-field">Received {formatMoney(x.amount_cents, 'ZAR')}</b> · {x.method} · receipt {x.receipt} · {dateTime(x.created_at)}</div>)}
               {p.proofs.map((x: any) => <div key={x.id} className="px-4 py-3">Proof of payment ({x.filename}) · {dateTime(x.created_at)} — <span className={x.status === 'rejected' ? 'font-medium text-danger' : 'text-ink-2'}>{x.status === 'submitted' ? 'being checked' : x.status === 'accepted' ? 'confirmed' : `not matched${x.review_note ? `: ${x.review_note}` : ''}`}</span></div>)}
-              {p.declarations.map((x: any) => <div key={x.id} className="px-4 py-3">You told us you paid{x.amount_cents ? ` ${formatMoney(x.amount_cents, 'ZAR')}` : ''} · {dateTime(x.created_at)} — <span className={x.status === 'rejected' ? 'font-medium text-danger' : 'text-ink-2'}>{x.status === 'submitted' ? 'being checked' : x.status === 'accepted' ? 'confirmed' : `not found yet${x.review_note ? `: ${x.review_note}` : ''}`}</span></div>)}
+              {p.declarations.map((x: any) => <div key={x.id} className="px-4 py-3">You told us you paid{x.amount_cents ? ` ${formatMoney(x.amount_cents, 'ZAR')}` : ''}{x.payer_reference ? ` from “${x.payer_reference}”` : ''} · {dateTime(x.created_at)} — <span className={x.status === 'rejected' ? 'font-medium text-danger' : 'text-ink-2'}>{x.status === 'submitted' ? 'being checked' : x.status === 'accepted' ? 'confirmed' : `not found yet${x.review_note ? `: ${x.review_note}` : ''}`}</span></div>)}
             </Card>
           </section>
         )}
@@ -123,8 +139,8 @@ function StatusBanner({ p }: { p: Pay }) {
   const box = (tone: string, icon: ReactNode, children: ReactNode) => <div className={cx('flex gap-3 rounded-2xl p-4 text-[15px] leading-relaxed', tone)} role="status">{icon}<div>{children}</div></div>;
   if (p.status === 'paid') return box('bg-field-soft text-field-soft-ink', <CheckCircle2 className="mt-0.5 size-5 shrink-0" />, <>Thank you — your payment has been received and verified. We’ll let you know when your order is on its way.</>);
   if (p.status === 'superseded') return box('bg-ochre-soft text-ochre-soft-ink', <AlertTriangle className="mt-0.5 size-5 shrink-0" />, <>Your order was updated, so this payment request no longer applies. <b>Please don’t pay this amount.</b> Use the latest payment request we sent you, or <Link to={p.order_url} className="font-semibold underline">open your order</Link>.</>);
-  if (p.status === 'awaiting_verification') return box('bg-surface-2 text-ink-2', <Clock className="mt-0.5 size-5 shrink-0" />, <>Thanks — we’ve received your payment details. We’ll confirm as soon as the money has reflected in our account. Your order is released once payment is confirmed.</>);
-  return box('bg-surface-2 text-ink-2', <Landmark className="mt-0.5 size-5 shrink-0" />, <>Your order has been packed and weighed. Pay by EFT from your banking app using the details below, then tell us you’ve paid or upload your proof of payment. Payment must reflect before your order is released.</>);
+  if (p.status === 'awaiting_verification') return box('bg-surface-2 text-ink-2', <Clock className="mt-0.5 size-5 shrink-0" />, <>Thanks for letting us know. We’ll confirm as soon as the payment reflects in our account, and then let you know your delivery or collection day.</>);
+  return box('bg-surface-2 text-ink-2', <Landmark className="mt-0.5 size-5 shrink-0" />, <>Your order has been packed and weighed. Pay by EFT from your banking app using the details below, then tap “I’ve paid” — no proof needed. Payment must reflect before your order is released.</>);
 }
 
 /** Banking details with one-tap copy for each value, and everything at once. */
@@ -191,35 +207,45 @@ function CopyButton({ text, label, big }: { text: string; label: string; big?: b
   );
 }
 
-function Declare({ token, due, onDone }: { token: string; due: number | null; onDone: (p: Pay) => void }) {
-  const [open, setOpen] = useState(false);
+/** "I've paid": the main way to tell us — no proof of payment needed. Staff check the bank and confirm. */
+function Declare({ token, due, reference, open, setOpen, onDone }: { token: string; due: number | null; reference: string; open: boolean; setOpen: (v: boolean) => void; onDone: (p: Pay) => void }) {
   const [confirm, setConfirm] = useState(false);
   const [amount, setAmount] = useState(due != null ? (due / 100).toFixed(2) : '');
   const [date, setDate] = useState(todayYmd());
+  const [payer, setPayer] = useState('');
   const [note, setNote] = useState('');
   const send = useMutation({
-    mutationFn: () => api.post<{ pay: Pay }>(`/api/public/pay/${token}/declare`, { confirm: true, amount_cents: amount ? Math.round(Number(amount.replace(',', '.')) * 100) : null, paid_on: date || null, note: note || null }),
+    mutationFn: () => api.post<{ pay: Pay }>(`/api/public/pay/${token}/declare`, { confirm: true, amount_cents: amount ? Math.round(Number(amount.replace(',', '.')) * 100) : null, paid_on: date || null, payer_reference: payer || null, note: note || null }),
     onSuccess: (r) => onDone(r.pay),
   });
-  if (!open) return <Button full size="lg" variant="secondary" icon={<Check className="size-4" />} onClick={() => setOpen(true)}>I’ve made payment</Button>;
   return (
-    <Card className="space-y-4 p-4">
-      <h2 className="font-semibold">Tell us you’ve paid</h2>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Amount paid (R)"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
-        <Field label="Date paid"><Input type="date" max={todayYmd()} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-      </div>
-      <Field label="Anything we should know?" optional><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
-      <label className="flex items-start gap-3 text-[14.5px]">
-        <input type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} className="mt-0.5 size-5 shrink-0 accent-[var(--brand)]" />
-        <span>I confirm I’ve made this payment to Terram Farm using the reference shown above. I understand my order is marked paid only once the payment has reflected.</span>
-      </label>
-      {send.error && <p className="text-[14px] text-danger" role="alert">{(send.error as Error).message}</p>}
-      <div className="flex gap-2">
-        <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-        <Button variant="primary" full disabled={!confirm} loading={send.isPending} onClick={() => send.mutate()}>Send</Button>
-      </div>
-    </Card>
+    <section id="ive-paid" className="scroll-mt-4 rounded-2xl border-2 border-brand/40 bg-surface p-4">
+      <h2 className="font-display text-[20px] font-bold">Paid already?</h2>
+      <p className="mt-1 text-[14.5px] text-ink-2">Just let us know — <b>no proof of payment needed</b>. We’ll check our bank, confirm your payment and let you know your delivery or collection day.</p>
+      {!open ? (
+        <Button className="mt-3" full size="lg" variant="primary" icon={<Check className="size-4" />} onClick={() => setOpen(true)}>I’ve paid</Button>
+      ) : (
+        <div className="mt-4 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Amount paid (R)"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+            <Field label="Date paid"><Input type="date" max={todayYmd()} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+          </div>
+          <Field label="Name or reference the payment came from" optional hint="E.g. the account holder’s name or business name, if it’s not yours. It helps us find the payment.">
+            <Input value={payer} onChange={(e) => setPayer(e.target.value)} maxLength={120} autoComplete="off" />
+          </Field>
+          <Field label="Anything else?" optional><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+          <label className="flex items-start gap-3 text-[14.5px]">
+            <input type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} className="mt-0.5 size-5 shrink-0 accent-[var(--brand)]" />
+            <span>I’ve paid Terram Farm using reference <b>{reference}</b>. I understand my order is confirmed as paid once the payment reflects.</span>
+          </label>
+          {send.error && <p className="text-[14px] text-danger" role="alert">{(send.error as Error).message}</p>}
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button variant="primary" full disabled={!confirm} loading={send.isPending} onClick={() => send.mutate()}>Send — I’ve paid</Button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -241,8 +267,8 @@ function ProofUpload({ token, due, onDone }: { token: string; due: number | null
   });
   return (
     <Card className="space-y-3 p-4">
-      <h2 className="flex items-center gap-2 font-semibold"><Upload className="size-4" />Upload proof of payment</h2>
-      <p className="text-[13.5px] text-ink-2">A PDF, JPG or PNG from your banking app, up to 5 MB. Optional, but it helps us confirm your payment sooner.</p>
+      <h2 className="flex items-center gap-2 font-semibold"><Upload className="size-4" />Have a proof of payment? <span className="font-normal text-ink-3">(optional)</span></h2>
+      <p className="text-[13.5px] text-ink-2">If your banking app gives you one, you can upload it here (PDF, JPG or PNG, up to 5 MB). Not needed if you’ve tapped “I’ve paid”.</p>
       <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,.heic,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-[14px] file:mr-3 file:h-11 file:rounded-xl file:border-0 file:bg-sunken file:px-4 file:font-semibold" aria-label="Proof of payment file" />
       {tooBig && <p className="text-[13.5px] text-danger">That file is bigger than 5 MB.</p>}
       <Field label="Amount paid (R)" optional><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-40" /></Field>
