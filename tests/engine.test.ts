@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { freshDb, productId, STAFF } from './helpers';
+import { freshDb, productId, STAFF, weighFinalizeAndPay } from './helpers';
 import { completePacking, createOrder, getItems, requireOrder, setItemPacked, setItemsCut, transition, updateItem } from '../server/domain/orders';
 import { raiseException, listExceptions } from '../server/domain/exceptions';
 import { resolveExceptionAction } from '../server/domain/exception-actions';
@@ -47,7 +47,7 @@ describe('state machine', () => {
     expect(() => transition(o.id, 'confirmed', STAFF, 'staff')).toThrow(/Resolve/);
   });
 
-  it('moves orders through production as physical work is recorded', () => {
+  it('moves orders through production as physical work is recorded', async () => {
     const o = order();
     const items = getItems(o.id);
     setItemsCut([items[0].id], true, STAFF);
@@ -57,8 +57,12 @@ describe('state machine', () => {
     setItemPacked(items[0].id, true, STAFF);
     expect(requireOrder(o.id).status).toBe('packing');
     expect(() => completePacking(o.id, STAFF)).toThrow(/Tick every item/);
-    setItemPacked(items[1].id, true, STAFF, 2080);
-    expect(completePacking(o.id, STAFF).status).toBe('ready');
+    expect(() => setItemPacked(items[1].id, true, STAFF, 2080)).toThrow(/final weighing/);
+    setItemPacked(items[1].id, true, STAFF);
+    // Packed is the final-weighing stage: not released until weighed, finalized and paid
+    expect(completePacking(o.id, STAFF).status).toBe('packed');
+    expect(() => transition(o.id, 'ready', STAFF, 'staff')).toThrow(/final weighing/);
+    expect((await weighFinalizeAndPay(o.id)).status).toBe('ready');
     expect(transition(o.id, 'completed', STAFF, 'staff').status).toBe('completed');
   });
 });

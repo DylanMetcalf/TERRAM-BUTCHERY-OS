@@ -82,6 +82,7 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
     customerChooses: z.boolean(),
     showDeliveryFees: z.boolean(),
     deliveryRatePerKmCents: z.number().int().min(0).max(100000),
+    freshMaxHours: z.number().min(0.5).max(24),
   }).partial(),
   ai: z.object({
     enabled: z.boolean(),
@@ -106,8 +107,12 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
       eftInstructions: z.string().trim().max(1000),
       paymentContact: z.string().trim().max(200),
       guidance: z.string().trim().max(500),
+      requirePaymentBeforeRelease: z.boolean(),
+      allowUnpaidRelease: z.boolean(),
+      linkDays: z.number().int().min(1).max(90),
     })
     .partial(),
+  help: z.object({ faq: z.array(z.object({ q: z.string().trim().min(3).max(200), a: z.string().trim().min(3).max(2000) })).max(40) }),
   retention: z.object({ remindersEnabled: z.boolean(), reminderDays: z.number().int().min(3).max(120), feedbackEnabled: z.boolean() }).partial(),
   notifications: z.object({ staffEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), notifyPreparation: z.boolean(), invoiceReadyEmail: z.boolean() }).partial(),
   customerForm: z.object({ enabled: z.boolean(), intro: z.string().max(600), confirmationMessage: z.string().max(600), showPrices: z.boolean(), terms: z.string().max(3000), noticeNote: z.string().max(400), notifyEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), emailCustomer: z.boolean() }).partial(),

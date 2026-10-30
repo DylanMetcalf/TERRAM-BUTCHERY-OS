@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Ban, CalendarClock, Check, Copy, ExternalLink, FileText, Mail, Plus, RotateCcw, Scale, Send, X } from 'lucide-react';
+import { Ban, CalendarClock, Check, Copy, ExternalLink, FileText, Mail, Plus, RotateCcw, Send, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { ItemEditor, type ItemDraft } from './ItemEditor';
+import { DeclarationsList, PaymentRequestSheet } from './FinalWeighing';
 import { Badge, Button, Card, cx, Field, Input, KeyValue, SectionTitle, Select, Sheet, Textarea, useToast, type Tone } from './ui';
 import { api, ApiError } from '../lib/api';
 import { addDays, dateTime, formatMoney, longDate, todayYmd } from '../lib/format';
@@ -150,43 +151,13 @@ export function MoneyCard({ money }: { money: any }) {
   );
 }
 
-/** Weighed lines: the packed weight sets the final price. */
-export function WeightButton({ item, orderId }: { item: OrderItem; orderId: string }) {
-  const a = useOrderAction(orderId);
-  const [open, setOpen] = useState(false);
-  const [kg, setKg] = useState(item.packed_weight_g ? String(item.packed_weight_g / 1000) : '');
-  const save = useMutation({
-    mutationFn: () => api.post(`/api/items/${item.id}/weight`, { weight_g: kg ? Math.round(Number(kg.replace(',', '.')) * 1000) : null }),
-    onSuccess: () => {
-      a.done('Weight saved');
-      setOpen(false);
-    },
-    onError: a.fail,
-  });
-  if (!item.pricing || item.pricing === 'exact' || item.pricing === 'unpriced') return null;
-  const n = Number(kg.replace(',', '.'));
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} className={cx('inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[12.5px] font-semibold', item.final_cents != null ? 'text-field hover:bg-field-soft' : 'bg-ochre-soft text-ochre-soft-ink')}>
-        <Scale className="size-3.5" />{item.final_cents != null ? `${((item.packed_weight_g ?? 0) / 1000).toFixed(3)} kg · ${formatMoney(item.final_cents)}` : 'Enter weight'}
-      </button>
-      <Sheet open={open} onClose={() => setOpen(false)} title={`Weight: ${item.product_name}`} subtitle={item.qty_label} footer={<Button full size="lg" variant="primary" disabled={!!kg && !(n > 0 && n < 500)} loading={save.isPending} onClick={() => save.mutate()}>Save weight</Button>}>
-        <Field label="Packed weight (kg)" hint={item.unit_price_cents ?? item.price_cents ? `At ${formatMoney((item.unit_price_cents ?? item.price_cents)!)}/${item.price_unit}${n > 0 && item.price_unit === 'kg' ? ` = ${formatMoney(Math.round((item.unit_price_cents ?? item.price_cents)! * n))}` : ''}` : undefined}>
-          <Input inputMode="decimal" value={kg} onChange={(e) => setKg(e.target.value)} className="w-40" autoFocus />
-        </Field>
-      </Sheet>
-    </>
-  );
-}
-
 // ── Payments ─────────────────────────────────────────────────
 
-export function PaymentPanel({ orderId, payment, canWrite, canPay }: { orderId: string; payment: any; canWrite: boolean; canPay: boolean }) {
+export function PaymentPanel({ orderId, payment, declarations = [], finalized, canWrite, canPay }: { orderId: string; payment: any; declarations?: any[]; finalized: boolean; canWrite: boolean; canPay: boolean }) {
   const a = useOrderAction(orderId);
   const [recording, setRecording] = useState(false);
   const [reviewing, setReviewing] = useState<any | null>(null);
-  const request = useMutation({ mutationFn: () => api.post<{ created: boolean }>(`/api/orders/${orderId}/payment-request`), onSuccess: (r) => a.done(r.created ? 'Payment request sent to the customer' : 'A request for this amount is already open'), onError: a.fail });
-  const resend = useMutation({ mutationFn: () => api.post(`/api/orders/${orderId}/payment-request/resend`), onSuccess: () => a.done('Payment request sent again'), onError: a.fail });
+  const [sending, setSending] = useState(false);
   const reverse = useMutation({ mutationFn: (v: { id: string; reason: string }) => api.post(`/api/payments/${v.id}/reverse`, { reason: v.reason }), onSuccess: () => a.done('Payment reversed'), onError: a.fail });
   if (!payment) return null;
   const pendingProofs = payment.proofs.filter((p: any) => p.status === 'submitted');
@@ -201,14 +172,13 @@ export function PaymentPanel({ orderId, payment, canWrite, canPay }: { orderId: 
         <MoneyCard money={payment.money} />
         {payment.method_problems?.length > 0 && <p className="rounded-xl bg-ochre-soft px-3 py-2 text-[13px] text-ochre-soft-ink">{payment.method_problems.join(' ')}</p>}
         {canWrite && payment.state !== 'paid' && (
-          payment.request ? (
-            <Button full variant="secondary" icon={<Mail className="size-4" />} loading={resend.isPending} onClick={() => resend.mutate()}>Send the payment request again</Button>
+          finalized && !payment.blocker ? (
+            <Button full variant={payment.request ? 'secondary' : 'primary'} icon={payment.request ? <Mail className="size-4" /> : <Send className="size-4" />} onClick={() => setSending(true)}>{payment.request ? 'Payment request & history…' : 'Send payment request…'}</Button>
           ) : payment.blocker ? (
             <p className="text-[13px] text-ink-3">Payment request: {payment.blocker}</p>
-          ) : (
-            <Button full variant="primary" icon={<Send className="size-4" />} loading={request.isPending} onClick={() => request.mutate()}>Request payment</Button>
-          )
+          ) : null
         )}
+        <DeclarationsList orderId={orderId} declarations={declarations} due={payment.money.balance_cents} canPay={canPay} />
         {pendingProofs.length > 0 && (
           <div className="space-y-2">
             {pendingProofs.map((p: any) => (
@@ -245,6 +215,7 @@ export function PaymentPanel({ orderId, payment, canWrite, canPay }: { orderId: 
       </Card>
       {recording && <RecordPaymentSheet orderId={orderId} due={payment.money.balance_cents} onClose={() => setRecording(false)} />}
       {reviewing && <ReviewProofSheet orderId={orderId} proof={reviewing} due={payment.money.balance_cents} onClose={() => setReviewing(null)} />}
+      <PaymentRequestSheet orderId={orderId} open={sending} onClose={() => setSending(false)} />
     </section>
   );
 }

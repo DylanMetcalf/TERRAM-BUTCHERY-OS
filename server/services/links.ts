@@ -74,6 +74,31 @@ export function revokeOrderLinks(orderId: string) {
 
 // ── Unsubscribe links (marketing only) ───────────────────────
 /**
+ * Payment-page links: `<request id>.<expiry>.<signature>`. Nothing secret is stored; the link
+ * dies when it expires, when the request is superseded or paid, or when link_version is bumped.
+ */
+export function payToken(req: { id: string; link_version?: number | null }, expiresAtMs: number): string {
+  const exp = Math.floor(expiresAtMs / 1000);
+  return `${req.id}.${exp}.${sign('pay', req.id, req.link_version ?? 1, exp)}`;
+}
+
+export function payUrl(req: { id: string; link_version?: number | null; expires_at?: string | null }, expiresAtMs?: number): string {
+  const exp = expiresAtMs ?? (req.expires_at ? Date.parse(req.expires_at) : Date.now() + 30 * 86400_000);
+  return `${siteUrl()}/pay/${payToken(req, exp)}`;
+}
+
+/** The request a payment link opens, or why not. Wrong signatures look the same as unknown ids. */
+export function readPayToken(token: string, lookup: (id: string) => { link_version: number } | undefined, now = Date.now()): { requestId: string } | { error: 'invalid' | 'expired' } {
+  if (!token || token.length > 200) return { error: 'invalid' };
+  const [rid, exp, mac] = token.split('.');
+  if (!rid || !exp || !mac || !/^\d+$/.test(exp)) return { error: 'invalid' };
+  const row = lookup(rid);
+  if (!row || !same(mac, sign('pay', rid, row.link_version, Number(exp)))) return { error: 'invalid' };
+  if (Number(exp) * 1000 < now) return { error: 'expired' };
+  return { requestId: rid };
+}
+
+/**
  * "See all your orders" link in customer emails. Only the owner of the mailbox receives it, so it can
  * sign them in to their order history without typing a code. Valid for 30 days.
  */

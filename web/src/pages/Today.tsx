@@ -223,8 +223,14 @@ function Pill({ icon, label }: { icon: React.ReactNode; label: string }) {
 function Queues({ q, canPay, canHealth }: { q: Record<string, number>; canPay: boolean; canHealth: boolean }) {
   const rows = [
     { n: q.awaiting_confirmation, label: 'Awaiting confirmation', to: '/orders?view=review', show: true },
-    { n: q.proofs_to_verify, label: 'Proofs of payment to check', to: '/orders?view=proofs', show: true, urgent: true },
-    { n: q.awaiting_payment, label: 'Awaiting payment', to: '/orders?view=awaiting_payment', show: true },
+    { n: q.awaiting_weighing, label: 'Packed · awaiting final weighing', to: '/packing', show: true, urgent: true },
+    { n: q.finalized_not_requested, label: 'Finalized · payment request not sent', to: '/orders?view=to_request', show: true, urgent: true },
+    { n: q.awaiting_verification, label: 'Payments to verify', to: '/orders?view=verify', show: true, urgent: true },
+    { n: q.requests_sent, label: 'Payment requested · waiting', to: '/orders?view=requested', show: true },
+    { n: q.paid_ready, label: 'Paid · ready for delivery or collection', to: '/fulfilment', show: true },
+    { n: q.out_for_delivery, label: 'Out for delivery', to: '/fulfilment', show: true },
+    { n: q.in_preparation, label: 'In preparation', to: '/cutting', show: true },
+    { n: q.being_packed, label: 'Being packed', to: '/packing', show: true },
     { n: q.awaiting_customer, label: 'Waiting for the customer to answer', to: '/orders?view=awaiting_customer', show: true },
     { n: q.invoices_outstanding, label: 'Invoices to prepare', to: '/invoices', show: canPay },
     { n: q.failed_notifications, label: 'Emails that didn’t send', to: '/settings?tab=messages', show: canHealth, urgent: true },

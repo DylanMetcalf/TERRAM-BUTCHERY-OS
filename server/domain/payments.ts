@@ -4,11 +4,11 @@ import { audit, type Actor } from '../services/audit.js';
 import { publish } from '../services/realtime.js';
 import { getSettings } from '../services/settings.js';
 import { notify } from '../services/notify.js';
-import { orderUrl, siteUrl } from '../services/links.js';
-import { layout, money, signOff } from '../services/templates.js';
+import { orderUrl, payUrl, siteUrl } from '../services/links.js';
+import { formatTimeframe, layout, money, signOff } from '../services/templates.js';
 import { paymentMethods } from '../services/payment-config.js';
 import { raiseException } from './exceptions.js';
-import { addEvent, orderMoney, requireOrder, type PaymentState } from './orders.js';
+import { addEvent, orderMoney, requireOrder, transition, type PaymentState } from './orders.js';
 import { customerContact, staffEmails } from './lifecycle.js';
 
 /**
@@ -27,7 +27,7 @@ export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {
   not_requested: 'Not requested yet',
   requested: 'Payment requested',
   pending: 'Online payment in progress',
-  proof_submitted: 'Proof of payment received — checking',
+  proof_submitted: 'Awaiting verification',
   partially_paid: 'Partly paid',
   paid: 'Paid',
   failed: 'Payment failed',
@@ -45,7 +45,9 @@ export function recomputePayment(orderId: string): PaymentState {
   const paid = (db().prepare("SELECT COALESCE(SUM(amount_cents),0) s FROM payments WHERE order_id = ? AND status = 'verified'").get(orderId) as { s: number }).s;
   const m = orderMoney(orderId);
   const due = m.due_cents;
-  const proofs = (db().prepare("SELECT COUNT(*) n FROM payment_proofs WHERE order_id = ? AND status = 'submitted'").get(orderId) as { n: number }).n;
+  const proofs =
+    (db().prepare("SELECT COUNT(*) n FROM payment_proofs WHERE order_id = ? AND status = 'submitted'").get(orderId) as { n: number }).n +
+    (db().prepare("SELECT COUNT(*) n FROM payment_declarations WHERE order_id = ? AND status = 'submitted'").get(orderId) as { n: number }).n;
   const req = openRequest(orderId);
   const lastFail = db().prepare("SELECT created_at FROM payments WHERE order_id = ? AND status = 'failed' ORDER BY created_at DESC LIMIT 1").get(orderId) as { created_at: string } | undefined;
   const manualPaid = paid === 0 && o.payment_status === 'paid' && o.payment_state === 'paid';
@@ -73,8 +75,9 @@ export function paymentBlocker(orderId: string): string | null {
   if (pending) return 'A proposed change is still waiting for the customer’s answer.';
   const blocking = (db().prepare("SELECT COUNT(*) n FROM exceptions WHERE order_id = ? AND status = 'open' AND severity = 'blocking'").get(orderId) as { n: number }).n;
   if (blocking) return 'There are open questions on this order.';
+  if (!o.finalized_at) return 'Do the final weighing and finalize the order first.';
   const m = orderMoney(orderId);
-  if (m.due_cents == null) return 'The final amount isn’t known yet: enter the packed weight of each weighed item.';
+  if (m.due_cents == null) return 'The final amount isn’t known yet.';
   if ((m.balance_cents ?? 0) <= 0) return 'Nothing is owed on this order.';
   const methods = paymentMethods();
   if (!methods.eft && !methods.online) return 'No payment method is set up yet (Settings → Payments).';
@@ -93,51 +96,55 @@ export function createPaymentRequest(orderId: string, actor: Actor, opts: { noti
   const existing = openRequest(orderId);
   if (existing && existing.amount_cents === amount) return { request: existing, created: false };
   const rid = id('prq_');
+  const fin = db().prepare('SELECT id FROM order_finalizations WHERE order_id = ? AND superseded_at IS NULL ORDER BY version DESC LIMIT 1').get(orderId) as { id: string } | undefined;
+  const expires = new Date(Date.now() + getSettings().payments.linkDays * 86400_000).toISOString();
   tx(() => {
     if (existing) db().prepare("UPDATE payment_requests SET status = 'superseded', closed_at = ?, closed_reason = ? WHERE id = ?").run(now(), `Replaced by a request for ${money(amount)}`, existing.id);
-    db().prepare("INSERT INTO payment_requests (id, order_id, amount_cents, status, created_by_kind, created_by, created_at) VALUES (?,?,?,'open',?,?,?)").run(rid, orderId, amount, actor.kind, actor.userId, now());
+    db().prepare("INSERT INTO payment_requests (id, order_id, amount_cents, status, created_by_kind, created_by, created_at, expires_at, finalization_id) VALUES (?,?,?,'open',?,?,?,?,?)").run(rid, orderId, amount, actor.kind, actor.userId, now(), expires, fin?.id ?? null);
     addEvent(orderId, 'payment_requested', `Payment requested: ${money(amount)}${existing ? ` (replaces ${money(existing.amount_cents)})` : ''}`, actor, { request_id: rid, amount_cents: amount });
     audit(actor, 'payment.requested', 'order', orderId, `Payment of ${money(amount)} requested`, { request_id: rid });
     recomputePayment(orderId);
   });
   const request = db().prepare('SELECT * FROM payment_requests WHERE id = ?').get(rid) as any;
-  if (opts.notify !== false) sendPaymentRequestEmail(orderId, request);
+  if (opts.notify) sendPaymentRequestEmail(orderId, request);
   publish(['orders'], { orderId });
   return { request, created: true };
 }
 
-/** When an order is marked ready and Terram asks for payment at that point. Never throws: a blocker is recorded instead. */
-export function requestPaymentWhenReady(orderId: string, actor: Actor): { request: any | null; reason: string | null } {
-  if (getSettings().payments.trigger !== 'ready') return { request: null, reason: 'Payment requests are sent by staff.' };
+/** The payment request message (email and WhatsApp share the facts). */
+export function paymentRequestMessage(orderId: string, request: any) {
   const o = requireOrder(orderId);
-  if (o.payment_state === 'paid') return { request: null, reason: 'Already paid.' };
-  const blocker = paymentBlocker(orderId);
-  if (blocker) {
-    if (!/Nothing is owed/.test(blocker))
-      raiseException({ type: 'payment_issue', severity: 'info', title: `Payment not requested for #${o.order_number}`, detail: blocker, order_id: orderId, dedupe_key: `pay-blocked:${orderId}` });
-    return { request: null, reason: blocker };
-  }
-  const r = createPaymentRequest(orderId, actor, { notify: false });
-  return { request: r.request, reason: null };
+  const c = customerContact(orderId);
+  const s = getSettings();
+  const url = payUrl(request);
+  const support = [s.business.phone ? `WhatsApp or call us on ${s.business.phone}` : null, s.business.email ? `email ${s.business.email}` : null].filter(Boolean).join(', or ');
+  const whatsapp = [
+    `Hi ${c.firstName}, your ${s.business.name} order #${o.order_number} has been packed and weighed.`,
+    `Amount due: ${money(request.amount_cents)}`,
+    `Pay by EFT using the banking details on your secure payment page: ${url}`,
+    `Please use ${o.order_number} as your payment reference. Once you've paid, open the same link and tap “Already paid?” on your payment page — no proof of payment needed. We'll confirm as soon as it reflects; your order is released for ${o.fulfilment_type === 'collection' ? 'collection' : 'delivery'} once payment is confirmed.`,
+    `Thank you!`,
+  ].join('\n\n');
+  const email = layout({
+    subject: `Payment for your order #${o.order_number}: ${money(request.amount_cents)}`,
+    preheader: `Your order is packed and weighed. Amount due ${money(request.amount_cents)}.`,
+    greeting: `Hi ${c.firstName},`,
+    intro: [`Your order #${o.order_number} has been packed and weighed, and the final amount is ready.`],
+    blocks: [
+      { facts: [['Amount due', money(request.amount_cents)], ['Payment reference', `${o.order_number}`]] },
+      { heading: 'How to pay', paragraphs: ['Open your secure payment page for our banking details. Pay by EFT from your banking app using your order number as the reference.', 'Once you’ve paid, open your payment page again and tap “Already paid?” there. No proof of payment is needed (you can upload one if you have it).', `Payment must reflect in our account before your order is released for ${o.fulfilment_type === 'collection' ? 'collection' : 'delivery'}. We’ll let you know as soon as it has been verified.`] },
+    ],
+    cta: { label: 'Open my payment page', url },
+    closing: [`Questions? ${support || 'Reply to this email'} with your order number #${o.order_number}.`, ...signOff()],
+  });
+  return { url, email, whatsapp, to: c.email, phone: o.contact_phone ?? o.customer_phone ?? null, firstName: c.firstName, customerId: c.customerId };
 }
 
 export function sendPaymentRequestEmail(orderId: string, request: any, resend = 0) {
-  const o = requireOrder(orderId);
-  const c = customerContact(orderId);
-  if (!c.email) return;
+  const m = paymentRequestMessage(orderId, request);
+  if (!m.to) return null;
   const s = getSettings();
-  const methods = paymentMethods();
-  const how = [methods.online ? 'online by card or instant EFT' : null, methods.eft ? 'by EFT' : null].filter(Boolean).join(' or ');
-  const e = layout({
-    subject: `Payment for your order #${o.order_number}: ${money(request.amount_cents)}`,
-    preheader: `Amount due ${money(request.amount_cents)}.`,
-    greeting: `Hi ${c.firstName},`,
-    intro: [`Your order #${o.order_number} is ready for payment.`],
-    blocks: [{ facts: [['Amount due', money(request.amount_cents)], ['Reference', `#${o.order_number}`]] }, { paragraphs: [`You can pay ${how} from your order page. Your order shows as paid once the payment has been verified.`] }],
-    cta: { label: 'Pay for my order', url: orderUrl(orderId, '#pay') },
-    closing: signOff(),
-  });
-  notify({ key: `payment_requested:${request.id}${resend ? `:resend${resend}` : ''}`, kind: 'payment_requested', audience: 'customer', to: [c.email], ...e, replyTo: s.business.email || null, orderId, customerId: c.customerId });
+  return notify({ key: `payment_requested:${request.id}${resend ? `:resend${resend}` : ''}`, kind: 'payment_requested', audience: 'customer', to: [m.to], ...m.email, replyTo: s.business.email || null, orderId, customerId: m.customerId });
 }
 
 /** Called whenever an order's lines or weights change: an open request for the wrong amount stops being payable. */
@@ -186,15 +193,34 @@ export function recordVerifiedPayment(orderId: string, input: RecordPaymentInput
       raiseException({ type: 'payment_issue', severity: 'warning', title: `#${o.order_number} has been overpaid`, detail: `Received ${money(m.paid_cents)} against ${money(m.due_cents)} due. Arrange a refund or credit with the customer.`, order_id: orderId, dedupe_key: `overpaid:${orderId}` });
     void state;
   });
+  db().prepare("UPDATE payment_declarations SET status = 'accepted', reviewed_by = ?, reviewed_at = ? WHERE order_id = ? AND status = 'submitted'").run(actor.userId, now(), orderId);
+  recomputePayment(orderId);
+  // Paid in full and already packed & finalized: it's ready to go out (one email covers both)
+  let released = false;
+  const cur = requireOrder(orderId);
+  if (cur.payment_state === 'paid' && cur.status === 'packed' && cur.finalized_at) {
+    transition(orderId, 'ready', actor, null, { system: true, silent: true, note: 'paid — ready for ' + (cur.fulfilment_type === 'collection' ? 'collection' : 'delivery') });
+    released = true;
+  }
   const c = customerContact(orderId);
   const s = getSettings();
   const after = requireOrder(orderId);
   if (c.email) {
+    const f = s.fulfilment;
+    // The customer's day: the expected date we confirmed (or their preferred date), if there is one
+    const day = after.expected_from ? formatTimeframe(after.expected_from, after.expected_to) : after.requested_date ? formatTimeframe(after.requested_date, null) : null;
+    const next = released
+      ? after.fulfilment_type === 'collection'
+        ? `Your order is now ready for collection from ${[f.collectionPlace, f.collectionAddress].filter(Boolean).join(', ')}${f.collectionHours ? ` (${f.collectionHours})` : ''}${day ? `, from ${day}` : ''}.`
+        : day
+          ? `Your order is confirmed for delivery and will be out for delivery on ${day}. We’ll be in touch if anything changes.`
+          : 'Your order is now ready, and we’ll be in touch to arrange your delivery day.'
+      : null;
     const e = layout({
-      subject: `Payment received for order #${o.order_number} — thank you`,
+      subject: released ? `Payment received — order #${o.order_number} is ready` : `Payment received for order #${o.order_number} — thank you`,
       preheader: `We've received ${money(input.amount_cents)}.`,
       greeting: `Hi ${c.firstName},`,
-      intro: [`We've received and verified your payment of ${money(input.amount_cents)} for order #${o.order_number}. Thank you!`],
+      intro: [`We've received and verified your payment of ${money(input.amount_cents)} for order #${o.order_number}. Thank you!`, ...(next ? [next] : [])],
       blocks: [{ facts: [['Receipt number', `R${receipt}`], ['Paid by', METHOD_LABEL[input.method]], ...(after.payment_state === 'partially_paid' ? [['Still to pay', money(orderMoney(orderId).balance_cents)] as [string, string]] : [])] }],
       cta: { label: 'View my receipt', url: orderUrl(orderId, `/receipt/${pid}`) },
       closing: signOff(),

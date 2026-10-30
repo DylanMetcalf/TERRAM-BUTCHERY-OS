@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Package, Printer, Scale, Store, Truck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { BigCheck, Button, Card, cx, EmptyState, ErrorState, Field, Input, LoadingBlock, PageHeader, SectionTitle, Sheet, useToast } from '../components/ui';
+import { BigCheck, Button, Card, cx, EmptyState, ErrorState, LoadingBlock, PageHeader, SectionTitle, useToast } from '../components/ui';
+import { FinalWeighingSheet, PaymentRequestSheet, StorageBadge } from '../components/FinalWeighing';
 import { api, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { friendlyDate, qtyBeforeName, todayYmd } from '../lib/format';
@@ -11,8 +12,12 @@ import type { OrderItem, OrderSummary } from '../lib/types';
 type PackOrder = OrderSummary & { items: OrderItem[] };
 
 export default function Packing() {
-  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['packing'], queryFn: () => api.get<{ ready_to_pack: PackOrder[]; still_cutting: OrderSummary[] }>('/api/production/packing') });
+  const can = useCan();
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['packing'], queryFn: () => api.get<{ ready_to_pack: PackOrder[]; still_cutting: OrderSummary[]; final_weighing: PackOrder[]; awaiting_payment: OrderSummary[] }>('/api/production/packing') });
   const orders = data?.ready_to_pack ?? [];
+  const [weighing, setWeighing] = useState<PackOrder | null>(null);
+  const [requesting, setRequesting] = useState<string | null>(null);
+  const cur = weighing ? data?.final_weighing.find((x) => x.id === weighing.id) ?? weighing : null;
   return (
     <div className="animate-rise">
       <PageHeader
@@ -24,7 +29,7 @@ export default function Packing() {
         <ErrorState error={error} retry={refetch} />
       ) : isLoading ? (
         <LoadingBlock rows={4} />
-      ) : !orders.length ? (
+      ) : !orders.length && !data?.final_weighing.length ? (
         <EmptyState icon={<Package className="size-6" />} title="No packing" tone="field">
           Nothing is waiting to be packed. Orders appear here once they’re cut.
         </EmptyState>
@@ -35,6 +40,41 @@ export default function Packing() {
           ))}
         </div>
       )}
+      {data && data.final_weighing.length > 0 && (
+        <section className="mt-8">
+          <SectionTitle>Final weighing · {data.final_weighing.length}</SectionTitle>
+          <p className="-mt-1 mb-3 text-[14px] text-ink-2">Packed orders: enter the actual weights, check the packs, then finalize the amount and send the payment request.</p>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {data.final_weighing.map((o) => {
+              const toWeigh = o.items.filter((i) => i.status === 'active' && (i.pricing === 'by_weight' || i.pricing === 'estimate'));
+              const left = toWeigh.filter((i) => !i.packed_weight_g).length;
+              return (
+                <Card key={o.id} className="flex items-center gap-3 p-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2"><Link to={`/orders/${o.id}`} className="truncate font-semibold hover:underline">{o.customer_name}</Link><StorageBadge storage={o.storage} size="sm" /></div>
+                    <div className="text-[13px] text-ink-3">#{o.order_number} · {toWeigh.length ? (left ? `${left} of ${toWeigh.length} to weigh` : 'All weighed') : 'Fixed packs only'}</div>
+                  </div>
+                  {can('orders.write') && <Button variant="primary" icon={<Scale className="size-4" />} onClick={() => setWeighing(o)}>Weigh</Button>}
+                </Card>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      {data && data.awaiting_payment.length > 0 && (
+        <section className="mt-8">
+          <SectionTitle>Finalized · waiting for payment · {data.awaiting_payment.length}</SectionTitle>
+          <div className="flex flex-wrap gap-2">
+            {data.awaiting_payment.map((o) => (
+              <button key={o.id} type="button" onClick={() => setRequesting(o.id)} className="rounded-xl border border-line bg-surface px-3 py-2 text-left text-[14px] hover:border-line-strong">
+                <span className="font-medium">{o.customer_name}</span> <span className="text-ink-3">#{o.order_number} · {o.payment_state === 'proof_submitted' ? 'check payment' : o.payment_state === 'not_requested' ? 'request not sent' : 'requested'}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      {cur && <FinalWeighingSheet order={cur} items={cur.items} problems={[]} open onClose={() => setWeighing(null)} onFinalized={() => { const id = cur.id; setWeighing(null); setRequesting(id); }} />}
+      {requesting && <PaymentRequestSheet orderId={requesting} open onClose={() => setRequesting(null)} />}
       {data && data.still_cutting.length > 0 && (
         <section className="mt-8">
           <SectionTitle>Still being cut · {data.still_cutting.length}</SectionTitle>
@@ -55,13 +95,11 @@ function PackCard({ o }: { o: PackOrder }) {
   const qc = useQueryClient();
   const toast = useToast();
   const can = useCan();
-  const [weighing, setWeighing] = useState<OrderItem | null>(null);
-  const [weight, setWeight] = useState('');
   const [items, setItems] = useState(o.items);
   useEffect(() => setItems(o.items), [o.items]);
   const pack = useMutation({
-    mutationFn: (v: { id: string; packed: boolean; w?: number | null }) => api.post(`/api/items/${v.id}/packed`, { packed: v.packed, packed_weight_g: v.w ?? null }),
-    onMutate: (v) => setItems((s) => s.map((i) => (i.id === v.id ? { ...i, packed_at: v.packed ? new Date().toISOString() : null, packed_weight_g: v.w ?? i.packed_weight_g } : i))),
+    mutationFn: (v: { id: string; packed: boolean }) => api.post(`/api/items/${v.id}/packed`, { packed: v.packed }),
+    onMutate: (v) => setItems((s) => s.map((i) => (i.id === v.id ? { ...i, packed_at: v.packed ? new Date().toISOString() : null } : i))),
     onError: (e) => {
       setItems(o.items);
       toast({ tone: 'error', title: e instanceof ApiError ? e.message : 'Could not save.' });
@@ -71,7 +109,7 @@ function PackCard({ o }: { o: PackOrder }) {
   const done = useMutation({
     mutationFn: () => api.post(`/api/orders/${o.id}/packed`),
     onSuccess: () => {
-      toast({ tone: 'success', title: `${o.customer_name}’s order is packed`, body: 'Moved to Ready.' });
+      toast({ tone: 'success', title: `${o.customer_name}’s order is packed`, body: 'Next: final weighing (below).' });
       qc.invalidateQueries({ queryKey: ['packing'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       qc.invalidateQueries({ queryKey: ['fulfilment'] });
@@ -88,6 +126,7 @@ function PackCard({ o }: { o: PackOrder }) {
           <Link to={`/orders/${o.id}`} className="font-display text-[19px] font-semibold leading-tight tracking-tight hover:underline">{o.customer_name}</Link>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[13.5px] text-ink-2">
             <span className="tabular">#{o.order_number}</span>
+            <StorageBadge storage={o.storage} size="sm" />
             <span className="inline-flex items-center gap-1">{o.fulfilment_type === 'delivery' ? <Truck className="size-4" /> : <Store className="size-4" />}{o.fulfilment_type === 'delivery' ? 'Delivery' : 'Collection'} · {friendlyDate(o.requested_date, todayYmd())}{o.time_window ? ` · ${o.time_window}` : ''}</span>
           </div>
         </div>
@@ -103,13 +142,7 @@ function PackCard({ o }: { o: PackOrder }) {
               </div>
               {i.preparation_label && <div className="text-[13.5px] font-semibold text-brand">{i.preparation_label}</div>}
               {i.special_instructions && <div className="text-[13.5px] font-medium text-ochre">⚑ {i.special_instructions}</div>}
-              {i.packed_weight_g && <div className="text-[13px] text-ink-3">Weighed {(i.packed_weight_g / 1000).toFixed(2)}kg</div>}
             </div>
-            {canPack && (i.qty.kind !== 'count' || i.price_unit === 'kg') && (
-              <button onClick={() => { setWeighing(i); setWeight(i.packed_weight_g ? String(i.packed_weight_g / 1000) : ''); }} className="rounded-xl p-2.5 text-ink-3 hover:bg-sunken hover:text-ink" aria-label={`Record weight for ${i.product_name}`}>
-                <Scale className="size-5" />
-              </button>
-            )}
           </li>
         ))}
       </ul>
@@ -121,21 +154,6 @@ function PackCard({ o }: { o: PackOrder }) {
           </Button>
         </div>
       )}
-      <Sheet
-        open={!!weighing}
-        onClose={() => setWeighing(null)}
-        title={`Weight · ${weighing?.product_name ?? ''}`}
-        subtitle={weighing ? `Ordered ${weighing.qty_label}` : undefined}
-        footer={
-          <Button variant="primary" size="lg" full disabled={!Number(weight.replace(',', '.'))} onClick={() => { if (weighing) pack.mutate({ id: weighing.id, packed: true, w: Math.round(Number(weight.replace(',', '.')) * 1000) }); setWeighing(null); }}>
-            Save & tick
-          </Button>
-        }
-      >
-        <Field label="Actual weight (kg)" hint="Optional — useful when weight-priced items are invoiced.">
-          <Input big inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value.replace(/[^\d.,]/g, ''))} autoFocus placeholder="e.g. 2.08" />
-        </Field>
-      </Sheet>
     </Card>
   );
 }

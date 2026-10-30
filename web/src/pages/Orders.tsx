@@ -18,8 +18,10 @@ const VIEWS = [
   { value: 'overdue', label: 'Overdue' },
   { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: 'Cancelled' },
-  { value: 'awaiting_payment', label: 'Awaiting payment' },
-  { value: 'proofs', label: 'Proofs to check' },
+  { value: 'weighing', label: 'Final weighing' },
+  { value: 'to_request', label: 'Payment not requested' },
+  { value: 'requested', label: 'Payment requested' },
+  { value: 'verify', label: 'Payments to verify' },
   { value: 'awaiting_customer', label: 'Waiting on customer' },
 ] as const;
 
@@ -34,6 +36,10 @@ const EMPTY: Record<string, { title: string; body: string }> = {
   cancelled: { title: 'No cancelled orders', body: 'Good news.' },
   awaiting_payment: { title: 'Nothing awaiting payment', body: 'Orders with an open payment request show up here.' },
   proofs: { title: 'No proofs to check', body: 'EFT proofs uploaded by customers show up here until they are verified or rejected.' },
+  weighing: { title: 'Nothing to weigh', body: 'Packed orders wait here for their final weights.' },
+  to_request: { title: 'All requests sent', body: 'Finalized orders whose payment request hasn’t gone out show up here.' },
+  requested: { title: 'No open payment requests', body: 'Finalized orders waiting for the customer to pay show up here.' },
+  verify: { title: 'Nothing to verify', body: 'When a customer uploads proof or says they’ve paid, the order shows up here until someone checks the bank.' },
   awaiting_customer: { title: 'Not waiting on anyone', body: 'Orders with a suggested change the customer hasn’t answered show up here.' },
   undated: { title: 'All orders have dates', body: 'Nothing is missing a collection or delivery date.' },
 };

@@ -61,6 +61,7 @@ interface State {
   special?: string;
   invoice?: InvoiceForm;
   reminders?: boolean;
+  storage?: 'fresh' | 'frozen' | '';
 }
 interface QuoteLine { index: number; ok: boolean; problem: string | null; product_id: string; label?: string; pricing: Pricing | null; cents: number | null; unit_price_cents?: number | null; price_unit?: 'kg' | 'each' | null }
 interface Quote { lines: QuoteLine[]; total: { estimate_cents: number | null; exact: boolean; pending_lines: number } }
@@ -169,7 +170,9 @@ export default function PublicOrder() {
   useEffect(() => {
     document.title = info ? `Order · ${info.business.name}` : 'Order';
   }, [info]);
-  useEffect(() => window.scrollTo({ top: 0 }), [s.step]);
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [s.step]);
   const set = (p: Partial<State>) => setS((x) => ({ ...x, ...p }));
   const products = cat?.products ?? [];
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
@@ -249,6 +252,7 @@ export default function PublicOrder() {
       ? { billing_name: s.invoice.billing_name, company: s.invoice.company || null, billing_email: s.invoice.billing_email, billing_address: s.invoice.billing_address || null, vat_number: s.invoice.vat_number || null, instructions: s.invoice.instructions || null }
       : null,
     marketing_consent: !!s.reminders,
+    storage: s.storage || undefined,
     seen_total_cents: quote?.total.estimate_cents ?? null,
     client_ref: s.client_ref,
   });
@@ -342,7 +346,7 @@ export default function PublicOrder() {
   const invoiceOk = !inv.wanted || (inv.billing_name.trim().length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inv.billing_email));
   const needsAddress = !chooses || s.fulfilment === 'delivery';
   const dateOk = !s.date || (s.date >= info.earliest_date && s.date <= addDays(info.today, 90) && allowedDays.includes(new Date(s.date + 'T00:00:00Z').getUTCDay()));
-  const whenOk = dateOk && (!needsAddress || s.address.trim().length > 5);
+  const whenOk = dateOk && (!needsAddress || s.address.trim().length > 5) && !!s.storage;
   const steps = ['Choose', 'Your details', chooses ? 'Collection or delivery' : 'Address', 'Check & send'];
   const quoteProblems = quote?.lines.filter((l) => !l.ok) ?? [];
   const shownTotal = quote?.total.estimate_cents ?? (local.length ? localTotal : null);
@@ -391,6 +395,7 @@ export default function PublicOrder() {
           <ChangeOrderLink phone={info.business.phone} email={info.business.email} className="mt-2 text-[14px] font-medium text-brand underline-offset-2 hover:underline" />
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[14px]">
             <Link to="/account" className="font-medium text-brand underline-offset-2 hover:underline">See your past orders</Link>
+            <Link to="/help" className="font-medium text-brand underline-offset-2 hover:underline">How ordering & payment work</Link>
           </div>
 
           {/* Search: on phones a full-screen panel pinned above the keyboard; on computers an inline box */}
@@ -598,6 +603,24 @@ export default function PublicOrder() {
               )}
             </div>
           </Field>
+          <fieldset className="mt-6">
+            <legend className="text-[15px] font-semibold">Fresh or frozen?</legend>
+            <p className="mt-1 text-[13.5px] text-ink-2">Choose how you’d like your order. Everything is vacuum-packed.</p>
+            <div className="mt-3 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Fresh or frozen">
+              {(['fresh', 'frozen'] as const).map((v) => (
+                <button key={v} type="button" role="radio" aria-checked={s.storage === v} onClick={() => set({ storage: v })} className={cx('rounded-xl border px-4 py-3 text-left', s.storage === v ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface')}>
+                  <div className="text-[15.5px] font-semibold">{v === 'fresh' ? 'Fresh' : 'Frozen'}</div>
+                  <div className="text-[13px] opacity-80">{v === 'fresh' ? 'Best for collection or a short delivery trip' : 'Recommended for longer delivery journeys'}</div>
+                </button>
+              ))}
+            </div>
+            {(s.storage === 'fresh' && (needsAddress)) || !s.storage ? (
+              <p className={cx('mt-3 rounded-xl px-3 py-2.5 text-[13.5px]', s.storage === 'fresh' ? 'bg-ochre-soft text-ochre-soft-ink' : 'bg-surface-2 text-ink-2')}>
+                For delivery journeys longer than about {info.form.freshMaxHours ?? 2} hours, we can’t guarantee fresh products stay in the required condition, so we recommend frozen. Not sure how far you are?{' '}
+                {info.help?.whatsapp ? <a href={info.help.whatsapp} target="_blank" rel="noreferrer" className="font-semibold underline">Chat to us on WhatsApp</a> : 'Contact us'} before you order.
+              </p>
+            ) : null}
+          </fieldset>
           <Field label="Anything we should know?" optional className="mt-5"><Textarea rows={2} value={s.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="e.g. it’s for a braai for 10 people" /></Field>
         </div>
       )}
@@ -653,6 +676,7 @@ export default function PublicOrder() {
             <div><b>{s.name}</b> · {s.phone}{s.email ? ` · ${s.email}` : ''}</div>
             <div>{chooses ? (s.fulfilment === 'delivery' ? `Delivery to ${s.address}` : 'Collection') : s.address}</div>
             <div className="text-ink-2">{s.date ? `Preferred date: ${longDate(s.date)}` : 'No preferred date'}</div>
+            <div className="font-semibold">{s.storage === 'frozen' ? 'Frozen' : s.storage === 'fresh' ? 'Fresh' : ''} · vacuum-packed</div>
             {!chooses && <div className="text-[13.5px] text-ink-3">We’ll contact you to arrange delivery or collection.</div>}
             {s.notes && <div className="text-ink-2">“{s.notes}”</div>}
             {inv.wanted && <div className="flex items-center gap-1.5 text-ink-2"><Receipt className="size-4 text-ink-3" />Invoice to {inv.billing_name}{inv.company ? ` (${inv.company})` : ''}, {inv.billing_email}</div>}
@@ -890,6 +914,17 @@ function AddSheet({ family, start, line, existing, onAdd, onRemove, onClose, cur
             </Field>
             <Field label={opt?.kind === 'pack' ? 'How many packs?' : 'How many?'}>
               <Stepper value={count} onChange={setCount} min={Math.max(1, p.min_qty ?? 1)} max={p.max_qty ?? 50} label="Quantity" />
+              {opt?.kind === 'pack' && opt.grams && (
+                <>
+                  <p className="mt-2 text-[14px] font-medium text-ink" aria-live="polite">= {count} × {opt.grams >= 1000 ? `${opt.grams / 1000} kg` : `${opt.grams} g`} packs, {(count * opt.grams) / 1000} kg in total</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-ink-3">
+                    <span>Total:</span>
+                    {[1000, 2000, 3000, 5000].filter((t) => t % opt.grams! === 0 && t / opt.grams! >= Math.max(1, p.min_qty ?? 1) && t / opt.grams! <= (p.max_qty ?? 50)).map((t) => (
+                      <button key={t} type="button" onClick={() => setCount(t / opt.grams!)} className={cx('h-9 rounded-full border px-3 font-medium', count * opt.grams! === t ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface text-ink-2')}>{t / 1000} kg</button>
+                    ))}
+                  </div>
+                </>
+              )}
             </Field>
           </>
         ) : (

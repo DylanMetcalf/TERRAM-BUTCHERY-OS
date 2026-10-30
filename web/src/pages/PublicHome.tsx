@@ -131,7 +131,7 @@ export default function PublicHome() {
             {phone && <a href={`tel:${phone.replace(/\s/g, '')}`} className="inline-flex items-center gap-1.5 hover:text-ink"><Phone className="size-4" />{phone}</a>}
             {email && <a href={`mailto:${email}`} className="inline-flex items-center gap-1.5 hover:text-ink"><Mail className="size-4" />{email}</a>}
           </div>
-          <span className="text-ink-3"><Link to="/privacy" className="hover:text-ink">Privacy notice</Link> · <Link to="/login" className="hover:text-ink">Staff sign in</Link> · © {new Date().getFullYear()} {name}</span>
+          <span className="text-ink-3"><Link to="/help" className="hover:text-ink">Help & FAQ</Link> · <Link to="/privacy" className="hover:text-ink">Privacy notice</Link> · <Link to="/login" className="hover:text-ink">Staff sign in</Link> · © {new Date().getFullYear()} {name}</span>
         </div>
       </footer>
     </div>

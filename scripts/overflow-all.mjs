@@ -4,7 +4,7 @@ const base = 'http://localhost:8092';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const widths = (process.env.WIDTHS ?? '390,768,1024,1280,1440').split(',').map(Number);
 const login = async (p) => { await p.goto(base + '/login'); await p.fill('#email', 'dylan@terram.test'); await p.fill('#password', 'butchery123'); await p.click('button[type=submit]'); await p.waitForTimeout(1000); };
-let paths = ['/', '/orders', '/cutting', '/packing', '/fulfilment', '/customers', '/products', '/stock', '/stock?tab=plan', '/stock?tab=items', '/stock?tab=purchases', '/stock?tab=suppliers', '/exceptions', '/intelligence', '/reports', '/settings', '/devices', '/orders/new', '/import', '/invoices', '/settings?tab=payments', '/settings?tab=messages', '/orders?view=awaiting_payment', '/order', '/account'];
+let paths = ['/', '/orders', '/cutting', '/packing', '/fulfilment', '/customers', '/products', '/stock', '/stock?tab=plan', '/stock?tab=items', '/stock?tab=purchases', '/stock?tab=suppliers', '/exceptions', '/intelligence', '/reports', '/settings', '/devices', '/orders/new', '/import', '/invoices', '/settings?tab=payments', '/settings?tab=messages', '/orders?view=awaiting_payment', '/order', '/account', '/help', '/orders?view=weighing', '/settings?tab=help'];
 let problems = 0;
 for (const w of widths) {
   const ctx = await b.newContext({ viewport: { width: w, height: 900 }, isMobile: w < 500 });

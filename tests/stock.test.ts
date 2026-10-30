@@ -189,6 +189,7 @@ describe('out of stock on the order form', () => {
       delivery_address: '12 Kerk Street, Pretoria',
       requested_date: weekday(),
       client_ref: 'ref-oos-000001',
+      storage: 'fresh',
     });
     expect(r.status).toBe(400);
     expect(r.body.error).toMatch(/Fillet is out of stock/);

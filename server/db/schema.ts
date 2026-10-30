@@ -673,4 +673,58 @@ CREATE TABLE order_feedback (
 INSERT INTO counters(name, value) VALUES ('receipt_number', 0);
 `,
   },
+  {
+    id: 8,
+    name: 'final-weighing-eft-fresh-frozen',
+    sql: `
+-- Fresh or frozen, chosen by the customer (NULL on older and staff-entered orders until set)
+ALTER TABLE orders ADD COLUMN storage TEXT CHECK (storage IN ('fresh','frozen'));
+-- Final weighing: the order is locked at its final amount until reopened (with a reason)
+ALTER TABLE orders ADD COLUMN finalized_at TEXT;
+ALTER TABLE orders ADD COLUMN finalized_by TEXT REFERENCES users(id);
+ALTER TABLE orders ADD COLUMN finalized_version INTEGER NOT NULL DEFAULT 0;
+-- Each finalization keeps an exact copy of the lines, weights, rates and total it was based on
+CREATE TABLE order_finalizations (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  snapshot TEXT NOT NULL,
+  total_cents INTEGER NOT NULL,
+  created_by TEXT REFERENCES users(id),
+  created_by_name TEXT,
+  created_at TEXT NOT NULL,
+  superseded_at TEXT,
+  superseded_by TEXT REFERENCES users(id),
+  superseded_reason TEXT,
+  UNIQUE (order_id, version)
+);
+-- Payment page links are signed (nothing secret stored); bumping link_version revokes them
+ALTER TABLE payment_requests ADD COLUMN link_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE payment_requests ADD COLUMN expires_at TEXT;
+ALTER TABLE payment_requests ADD COLUMN finalization_id TEXT REFERENCES order_finalizations(id);
+-- "I've made payment" declarations from the customer (never mark anything paid)
+CREATE TABLE payment_declarations (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  request_id TEXT REFERENCES payment_requests(id),
+  amount_cents INTEGER,
+  paid_on TEXT,
+  note TEXT,
+  status TEXT NOT NULL CHECK (status IN ('submitted','accepted','rejected')),
+  reviewed_by TEXT REFERENCES users(id),
+  reviewed_at TEXT,
+  review_note TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_declarations_order ON payment_declarations(order_id, status);
+`,
+  },
+  {
+    id: 9,
+    name: 'payment-declaration-reference',
+    sql: `
+-- "I've paid": the name or reference the payment came from, so staff can find it on the statement
+ALTER TABLE payment_declarations ADD COLUMN payer_reference TEXT;
+`,
+  },
 ];
