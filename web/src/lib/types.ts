@@ -136,6 +136,10 @@ export interface Product {
   variant_label?: string | null;
   unavailable_reason?: string | null;
   image?: string | null;
+  order_method?: 'packs' | 'items_weighed' | 'items' | 'by_weight' | 'whole' | 'custom';
+  order_method_reviewed?: boolean;
+  weight_ranges?: { id: string; label: string; min_g: number; max_g: number }[];
+  group_only?: boolean;
 }
 
 export interface Customer {

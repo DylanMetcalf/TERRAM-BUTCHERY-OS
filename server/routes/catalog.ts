@@ -144,6 +144,9 @@ const ProductInput = z.object({
   variant_label: z.string().max(60).nullable().optional(),
   unavailable_reason: z.string().max(200).nullable().optional(),
   image: z.string().max(400_000).nullable().optional(),
+  order_method: z.enum(['packs', 'items_weighed', 'items', 'by_weight', 'whole', 'custom']).nullable().optional(),
+  weight_ranges: z.array(z.object({ id: z.string().trim().max(40).optional(), label: z.string().trim().max(40).optional(), min_g: z.number().int().positive().max(100000), max_g: z.number().int().positive().max(100000) })).max(8).nullable().optional(),
+  group_only: z.boolean().optional(),
 });
 
 products.get('/', requirePerm('products.read'), (c) => {

@@ -20,13 +20,15 @@ export default function Products() {
   const [show, setShow] = useState<'active' | 'all' | 'inactive'>('active');
   const openId = params.get('open');
   const [creating, setCreating] = useState(false);
+  const [variationOf, setVariationOf] = useState<Product | null>(null);
+  const reviewOnly = params.get('review') === '1';
   const [pricing, setPricing] = useState(false);
   const { data: intel } = useQuery({ queryKey: ['intelligence'], queryFn: () => api.get<any>('/api/intelligence'), enabled: can('intelligence.read') });
   const suggestions = intel?.suggestions?.length ?? 0;
   const products = useMemo(() => {
     const n = normalise(q);
-    return (data?.products ?? []).filter((p) => (show === 'all' ? true : show === 'active' ? p.active : !p.active)).filter((p) => !n || normalise(p.canonical_name).includes(n) || p.aliases.some((a) => a.alias.includes(n)));
-  }, [data, q, show]);
+    return (data?.products ?? []).filter((p) => !reviewOnly || (!p.order_method_reviewed && (p.weight_ranges?.length ?? 0) > 0)).filter((p) => reviewOnly || (show === 'all' ? true : show === 'active' ? p.active : !p.active)).filter((p) => !n || normalise(p.canonical_name).includes(n) || p.aliases.some((a) => a.alias.includes(n)));
+  }, [data, q, show, reviewOnly]);
   const cats = [...new Set(products.map((p) => p.category))];
   const current = data?.products.find((p) => p.id === openId) ?? null;
   return (
@@ -46,6 +48,11 @@ export default function Products() {
       {suggestions > 0 && can('intelligence.approve') && (
         <Callout tone="ochre" icon={<Sparkles className="size-5" />} className="mb-5" action={<Link to="/intelligence"><Button size="sm">Review</Button></Link>}>
           {suggestions} new name{suggestions === 1 ? '' : 's'} learned from staff corrections — waiting for your approval.
+        </Callout>
+      )}
+      {reviewOnly && (
+        <Callout tone="ochre" className="mb-5" action={<Button size="sm" onClick={() => setParams({})}>Show all</Button>}>
+          Products whose ordering set-up was added automatically (e.g. steak weight choices). Open each one, check it, and save to mark it reviewed.
         </Callout>
       )}
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -77,6 +84,8 @@ export default function Products() {
                     <div className="mt-2.5 flex flex-wrap gap-1.5">
                       <Badge size="sm">{p.quantity_type === 'weight' ? 'By weight' : p.quantity_type === 'count' ? `By ${p.piece_noun}` : 'Weight or pieces'}</Badge>
                       {p.allows_portions && <Badge size="sm">Packs</Badge>}
+                      {!p.order_method_reviewed && (p.weight_ranges?.length ?? 0) > 0 && <Badge size="sm" tone="ochre">Check set-up</Badge>}
+                      {p.variant_of && <Badge size="sm" tone="slate">Variation</Badge>}
                       {!p.active && <Badge size="sm" tone="danger">{p.customer_visible ? 'Out of stock' : 'Unavailable'}</Badge>}
                       {!p.customer_visible && <Badge size="sm" tone="slate"><EyeOff className="size-3" />Internal</Badge>}
                       {!!p.orders_90d && <Badge size="sm" tone="field">{p.orders_90d} order{p.orders_90d === 1 ? "" : "s"} · 90d</Badge>}
@@ -89,16 +98,46 @@ export default function Products() {
         </div>
       )}
       <PriceImport open={pricing} onClose={() => setPricing(false)} />
-      <ProductEditor open={!!current || creating} product={current} onClose={() => { setCreating(false); setParams({}); }} readOnly={!can('products.write')} />
+      <ProductEditor open={!!current || creating} product={current} preset={variationOf} onAddVariation={(parent) => { setParams({}); setVariationOf(parent); setCreating(true); }} onClose={() => { setCreating(false); setVariationOf(null); setParams(reviewOnly ? { review: '1' } : {}); }} readOnly={!can('products.write')} />
     </div>
   );
+}
+
+/** Resize a photo in the browser so it stays small (max 640 px, JPEG). */
+async function shrinkImage(file: File): Promise<string | null> {
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) return null;
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const scale = Math.min(1, 640 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * scale);
+    c.height = Math.round(img.height * scale);
+    c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.82);
+  } catch {
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 interface PrepRow { group_name: string; name: string; keywords: string; is_default: boolean; customer_visible: boolean; active: boolean; surcharge_pct: number }
 interface OptRow { id: string; label: string; kind: 'pack' | 'piece'; grams: string }
 const slugId = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40)
 
-function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; onClose: () => void; product: Product | null; readOnly: boolean }) {
+const METHODS: { value: NonNullable<Product['order_method']>; label: string; hint: string }[] = [
+  { value: 'packs', label: 'Fixed-weight packs', hint: 'e.g. mince in 500 g packets. Customers choose how many packs.' },
+  { value: 'items_weighed', label: 'Counted, priced on weight', hint: 'e.g. steaks: customers choose how many and a preferred weight each.' },
+  { value: 'items', label: 'Individual items', hint: 'Customers choose how many; fixed price each.' },
+  { value: 'by_weight', label: 'By weight', hint: 'Customers enter the weight they want.' },
+  { value: 'whole', label: 'Whole / sized pieces', hint: 'Customers pick a size, e.g. Whole or Half.' },
+  { value: 'custom', label: 'Custom / on request', hint: 'Not ordered on the form; customers ask under Special requests.' },
+];
+interface RangeRow { id: string; label: string; min: string; max: string }
+
+function ProductEditor({ open, onClose, product, readOnly, onAddVariation, preset }: { open: boolean; onClose: () => void; product: Product | null; readOnly: boolean; onAddVariation?: (parent: Product) => void; preset?: Product | null }) {
+  const [ranges, setRanges] = useState<RangeRow[]>([]);
   const qc = useQueryClient();
   const toast = useToast();
   const [v, setV] = useState<any>({});
@@ -130,14 +169,20 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
       internal_notes: p?.internal_notes ?? '',
       min_qty: p?.min_qty ?? '',
       max_qty: p?.max_qty ?? '',
-      variant_of: p?.variant_of ?? '',
+      variant_of: p?.variant_of ?? preset?.id ?? '',
       variant_label: p?.variant_label ?? '',
+      ...(!p && preset ? { canonical_name: `${preset.canonical_name} – `, category: preset.category, price_unit: preset.price_unit ?? 'kg', quantity_type: preset.quantity_type, order_method: preset.order_method, piece_noun: preset.piece_noun } : {}),
       unavailable_reason: p?.unavailable_reason ?? '',
+      order_method: p?.order_method ?? (p ? undefined : 'by_weight'),
+      group_only: p?.group_only ?? false,
+      image: p?.image ?? null,
     });
+    setRanges((p?.weight_ranges ?? []).map((r) => ({ id: r.id, label: r.label, min: String(r.min_g), max: String(r.max_g) })));
     setOpts((p?.sale_options ?? []).map((o) => ({ id: o.id, label: o.label, kind: o.kind, grams: o.grams ? String(o.grams) : '' })));
     setAliases((p?.aliases ?? []).map((a) => a.alias).filter((a) => a !== normalise(p?.canonical_name ?? '')));
     setPreps((p?.preparations ?? []).map((o) => ({ group_name: o.group_name, name: o.name, keywords: o.keywords.join(', '), is_default: o.is_default, customer_visible: o.customer_visible, active: o.active, surcharge_pct: o.surcharge_pct ?? 0 })));
-  }, [open, product]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, product, preset]);
   const save = useMutation({
     mutationFn: () => {
       const body = {
@@ -160,6 +205,10 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
         variant_of: v.variant_of || null,
         variant_label: v.variant_label?.trim() || null,
         unavailable_reason: v.unavailable_reason?.trim() || null,
+        order_method: v.order_method || null,
+        group_only: !!v.group_only,
+        image: v.image ?? null,
+        weight_ranges: ranges.filter((r) => r.min && r.max).map((r) => ({ id: r.id || `${r.min}-${r.max}`, label: r.label.trim() || `${r.min}–${r.max} g`, min_g: Number(r.min), max_g: Number(r.max) })),
         sale_options: opts.filter((o) => o.label.trim()).map((o, i, all) => {
           let id = o.id || slugId(o.label) || `opt_${i + 1}`;
           if (all.slice(0, i).some((x) => (x.id || slugId(x.label)) === id)) id = `${id}_${i + 1}`;
@@ -178,6 +227,7 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Could not save.'),
   });
   const groups = [...new Set(preps.map((p) => p.group_name))];
+  const variations = product ? (allProducts?.products ?? []).filter((x) => x.variant_of === product.id) : [];
   const addAlias = () => {
     const a = aliasInput.trim().toLowerCase();
     if (a && !aliases.includes(a)) setAliases([...aliases, a]);
@@ -210,7 +260,37 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
         </section>
 
         <section>
-          <SectionTitle>How it’s ordered</SectionTitle>
+          <SectionTitle>How customers order it</SectionTitle>
+          {product && !product.order_method_reviewed && <p className="mb-3 rounded-xl bg-ochre-soft px-3 py-2 text-[13.5px] text-ochre-soft-ink">This was worked out automatically from the old setup. Check it, then save to mark it reviewed.</p>}
+          <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Order method">
+            {METHODS.map((m) => (
+              <button key={m.value} type="button" role="radio" aria-checked={v.order_method === m.value} onClick={() => set('order_method', m.value)} className={cx('rounded-xl border px-3 py-2.5 text-left', v.order_method === m.value ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface')}>
+                <div className="text-[14.5px] font-semibold">{m.label}</div>
+                <div className="text-[12.5px] opacity-80">{m.hint}</div>
+              </button>
+            ))}
+          </div>
+          {(v.order_method === 'items_weighed' || v.order_method === 'items') && (
+            <div className="mt-4">
+              <div className="text-[14px] font-semibold">Preferred weight choices</div>
+              <p className="mb-2 text-[13px] text-ink-3">Shown as choices per {v.piece_noun || 'piece'}, plus “Other / special request”. Leave empty for none. Estimates use the middle of the range.</p>
+              <div className="space-y-2">
+                {ranges.map((r, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 rounded-xl bg-surface-2 p-2 sm:grid-cols-[1.3fr_6rem_6rem_auto]">
+                    <Input value={r.label} onChange={(e) => setRanges(ranges.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} placeholder="Label, e.g. 300–400 g" className="col-span-3 h-9 sm:col-span-1" aria-label="Label" />
+                    <Input inputMode="numeric" value={r.min} onChange={(e) => setRanges(ranges.map((x, j) => (j === i ? { ...x, min: e.target.value.replace(/\D/g, '') } : x)))} placeholder="from g" className="h-9" aria-label="From grams" />
+                    <Input inputMode="numeric" value={r.max} onChange={(e) => setRanges(ranges.map((x, j) => (j === i ? { ...x, max: e.target.value.replace(/\D/g, '') } : x)))} placeholder="to g" className="h-9" aria-label="To grams" />
+                    {!readOnly && <button type="button" onClick={() => setRanges(ranges.filter((_, j) => j !== i))} className="rounded-lg p-2 text-ink-3 hover:bg-sunken" aria-label="Remove weight choice"><X className="size-4" /></button>}
+                  </div>
+                ))}
+                {!readOnly && <button type="button" onClick={() => setRanges([...ranges, { id: '', label: '', min: '', max: '' }])} className="text-[13.5px] font-medium text-brand hover:underline">+ Add weight choice</button>}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section>
+          <SectionTitle>Quantities</SectionTitle>
           <div className="space-y-4">
             <Segmented full value={v.quantity_type} onChange={(x) => set('quantity_type', x)} options={[{ value: 'weight', label: 'By weight' }, { value: 'count', label: 'By piece' }, { value: 'either', label: 'Either' }]} />
             <div className="grid gap-4 sm:grid-cols-2">
@@ -251,6 +331,40 @@ function ProductEditor({ open, onClose, product, readOnly }: { open: boolean; on
               </Select>
             </Field>
             <Field label="Option label" optional hint="e.g. On the bone"><Input value={v.variant_label ?? ''} onChange={(e) => set('variant_label', e.target.value)} /></Field>
+          </div>
+        </section>
+
+        {product && !product.variant_of && (
+          <section>
+            <SectionTitle>Variations</SectionTitle>
+            <p className="-mt-1 mb-3 text-[13.5px] text-ink-3">Each variation has its own price, description, rules and availability, e.g. Brisket → Whole / Smoked BBQ / Smoked Honey Mustard.</p>
+            {variations.length > 0 && (
+              <ul className="mb-3 divide-y divide-line overflow-hidden rounded-xl border border-line">
+                {variations.map((x) => (
+                  <li key={x.id}>
+                    <a href={`/products?open=${x.id}`} className="flex items-center justify-between gap-2 px-3 py-2.5 text-[14px] hover:bg-surface-2">
+                      <span className="min-w-0"><b>{x.variant_label ?? x.canonical_name}</b>{!x.active && <span className="text-ink-3"> · out of stock</span>}</span>
+                      <span className="shrink-0 text-ink-2">{x.price_cents != null ? `${formatMoney(x.price_cents)}/${x.price_unit}` : 'No price'}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!readOnly && onAddVariation && <Button type="button" size="sm" icon={<Plus className="size-4" />} onClick={() => onAddVariation(product)}>Add variation</Button>}
+            {variations.length > 0 && <Switch checked={!!v.group_only} onChange={(x) => set('group_only', x)} label="Only a heading for its variations" description="Customers must pick one of the variations; the main product itself can’t be ordered." />}
+          </section>
+        )}
+
+        <section>
+          <SectionTitle>Photo</SectionTitle>
+          <div className="flex flex-wrap items-center gap-3">
+            {v.image ? <img src={v.image} alt="" className="size-20 rounded-xl object-cover" /> : <span className="flex size-20 items-center justify-center rounded-xl bg-sunken text-[12px] text-ink-3">No photo</span>}
+            {!readOnly && (
+              <div className="space-y-1.5">
+                <input type="file" accept="image/png,image/jpeg,image/webp" aria-label="Product photo" className="block text-[13.5px] file:mr-3 file:h-9 file:rounded-xl file:border-0 file:bg-sunken file:px-3 file:font-semibold" onChange={async (e) => { const fl = e.target.files?.[0]; if (!fl) return; const url = await shrinkImage(fl); if (url) set('image', url); else setErr('Use a PNG, JPG or WebP photo.'); }} />
+                {v.image && <button type="button" className="text-[13px] font-medium text-danger hover:underline" onClick={() => set('image', null)}>Remove photo</button>}
+              </div>
+            )}
           </div>
         </section>
 

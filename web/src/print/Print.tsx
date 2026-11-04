@@ -110,7 +110,7 @@ function CuttingPrint() {
                   </td>
                   <td className="py-1.5 pr-2 text-[11px] leading-snug">
                     {l.orders.map((o: any) => (
-                      <div key={o.item_id}>{o.customer_name} {o.qty_label}{o.storage ? <b> [{o.storage === 'frozen' ? 'FROZEN' : 'FRESH'}]</b> : null}{o.special_instructions ? <b> — {o.special_instructions}</b> : null}</div>
+                      <div key={o.item_id}>{o.customer_name} {o.qty_label}{o.storage === 'fresh' ? <b> [FRESH]</b> : null}{o.special_instructions ? <b> — {o.special_instructions}</b> : null}</div>
                     ))}
                   </td>
                   <td className="py-1.5"><div className="mt-3.5 border-b border-dotted border-neutral-500" /></td>
@@ -171,7 +171,7 @@ function Docket({ o, items, notes, business, onePerPage }: { o: OrderSummary; it
         <div className="flex shrink-0 flex-col items-end justify-center bg-[var(--brand,#446041)] px-4 py-2 text-white">
           <div className="text-[9.5px] font-bold uppercase tracking-[0.14em] opacity-90">Order docket</div>
           <div className="font-display text-[26px] font-extrabold leading-none">#{o.order_number}</div>
-          <div className="mt-1 rounded bg-white px-2 py-0.5 text-[12px] font-extrabold uppercase tracking-wide text-black">{o.storage === 'frozen' ? 'Frozen' : o.storage === 'fresh' ? 'Fresh' : 'Fresh/frozen?'}</div>
+          <div className="mt-1 rounded bg-white px-2 py-0.5 text-[12px] font-extrabold uppercase tracking-wide text-black">{o.storage === 'fresh' ? 'Fresh' : 'Frozen'}</div>
         </div>
       </header>
 
