@@ -182,7 +182,7 @@ describe('customer order form', () => {
     expect(noAddress.body.error).toMatch(/address/);
     expect((await c.post('/api/public/orders', order('ref-mode-0002', { items: [eggs(30)], fulfilment_type: 'delivery' }), ip)).status).toBe(200);
     const o = db().prepare("SELECT fulfilment_type, delivery_address FROM orders ORDER BY created_at DESC LIMIT 1").get() as any;
-    expect(o).toEqual({ fulfilment_type: null, delivery_address: '12 Kerk Street, Pretoria' }); // the family arranges it
+    expect(o).toEqual({ fulfilment_type: 'delivery', delivery_address: '12 Kerk Street, Pretoria' }); // address + delivery fee = a delivery; staff can switch it to collection
 
     const admin = await signedIn('admin');
     expect((await admin.req('PUT', '/api/admin/settings/fulfilment', { customerChooses: true })).status).toBe(200);

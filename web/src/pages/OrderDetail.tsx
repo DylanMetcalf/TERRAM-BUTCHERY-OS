@@ -431,7 +431,7 @@ export default function OrderDetail() {
             </Card>
           </section>
 
-          <CommunicationsPanel orderId={o.id} canWrite={canWrite} canPay={can('payments.write')} hasInvoice={!!data.invoice?.file} invoiceSent={!!data.invoice?.sent_at} paymentReady={!!o.finalized_at && !['paid', 'waived'].includes(o.payment_state ?? '')} onInvoiceNotify={() => setInvoiceNotify(true)} />
+          <CommunicationsPanel orderId={o.id} canWrite={canWrite} canPay={can('payments.write')} hasInvoice={!!data.invoice?.file} invoiceSent={!!data.invoice?.sent_at} paymentReady={!!o.finalized_at && !['paid', 'waived'].includes(o.payment_state ?? '')} awaitingCheck={awaitingCheck} onInvoiceNotify={() => setInvoiceNotify(true)} />
 
           {can('system.health') && (data.notifications ?? []).length > 0 && (
             <details className="group">

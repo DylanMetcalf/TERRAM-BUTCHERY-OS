@@ -1,4 +1,6 @@
 import { db } from '../db/db.js';
+import { localDayStartUtc } from '../lib/time.js';
+import { businessTz } from '../services/settings.js';
 import { formatQty, formatWeight, pluralise, type Qty } from '../../shared/quantity.js';
 import { categoryOrder, listProducts } from './products.js';
 import { getItems, type OrderSummary, getOrderSummary } from './orders.js';
@@ -164,8 +166,8 @@ export function fulfilmentBoard(date: string) {
     )
     .all(date) as { id: string }[];
   const completed = db()
-    .prepare("SELECT id FROM orders WHERE status = 'completed' AND substr(completed_at, 1, 10) >= ? ORDER BY completed_at DESC LIMIT 50")
-    .all(date) as { id: string }[];
+    .prepare("SELECT id FROM orders WHERE status = 'completed' AND completed_at >= ? ORDER BY completed_at DESC LIMIT 50")
+    .all(localDayStartUtc(date, businessTz())) as { id: string }[];
   const map = (rows: { id: string }[]) => rows.map((r) => ({ ...getOrderSummary(r.id)!, items: getItems(r.id) }));
   return { ready: map(ready), not_ready_today: map(upcoming), completed_today: map(completed) };
 }

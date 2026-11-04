@@ -1,5 +1,5 @@
 import { db, json } from '../db/db.js';
-import { addDays, localDate } from '../lib/time.js';
+import { addDays, localDate, localDayStartUtc } from '../lib/time.js';
 import { businessTz } from '../services/settings.js';
 import { openExceptionCount } from './exceptions.js';
 import { getOrderSummary, orderMoney } from './orders.js';
@@ -59,8 +59,8 @@ export function dashboard() {
     overdue: count(`SELECT COUNT(*) n FROM orders WHERE requested_date < ? AND ${open} AND status != 'on_hold'`, today),
     collections_today: count(`SELECT COUNT(*) n FROM orders WHERE requested_date = ? AND fulfilment_type = 'collection' AND ${open}`, today),
     deliveries_today: count(`SELECT COUNT(*) n FROM orders WHERE requested_date = ? AND fulfilment_type = 'delivery' AND ${open}`, today),
-    completed_today: count("SELECT COUNT(*) n FROM orders WHERE status = 'completed' AND completed_at >= ?", `${today}T00:00:00`),
-    received_today: count('SELECT COUNT(*) n FROM orders WHERE created_at >= ?', `${today}T00:00:00`),
+    completed_today: count("SELECT COUNT(*) n FROM orders WHERE status = 'completed' AND completed_at >= ?", localDayStartUtc(today, businessTz())),
+    received_today: count('SELECT COUNT(*) n FROM orders WHERE created_at >= ?', localDayStartUtc(today, businessTz())),
     open_total: count(`SELECT COUNT(*) n FROM orders WHERE ${open}`),
   };
   /** Work queues for the customer platform: each count links to the list that clears it. */

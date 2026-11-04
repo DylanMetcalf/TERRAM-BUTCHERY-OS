@@ -467,3 +467,55 @@ describe('payment verification workflow', () => {
     expect(d.attention.find((a: any) => a.key === 'delivered_unpaid')?.n).toBe(1);
   });
 });
+
+describe('sample data', () => {
+  it('loads completely, with orders at each stage and a finished past order', async () => {
+    const { loadSampleData } = await import('../server/seed/sample');
+    await loadSampleData(STAFF);
+    const st = (db().prepare('SELECT status, COUNT(*) n FROM orders WHERE is_sample = 1 GROUP BY status').all() as any[]).reduce((m, r) => ({ ...m, [r.status]: r.n }), {} as Record<string, number>);
+    expect(st.completed).toBeGreaterThanOrEqual(1);
+    expect((st.packed ?? 0) + (st.ready ?? 0)).toBeGreaterThanOrEqual(1);
+    expect((st.cut ?? 0) + (st.packing ?? 0)).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('local days', () => {
+  it('“today” starts at local midnight, not UTC midnight', async () => {
+    const { localDayStartUtc } = await import('../server/lib/time');
+    expect(localDayStartUtc('2026-11-05', 'Africa/Johannesburg')).toBe('2026-11-04T22:00:00.000Z');
+    expect(localDayStartUtc('2026-07-01', 'Europe/London')).toBe('2026-06-30T23:00:00.000Z'); // summer time
+    expect(localDayStartUtc('2026-01-01', 'UTC')).toBe('2026-01-01T00:00:00.000Z');
+  });
+});
+
+describe('scenario A: one order through every section', () => {
+  it('sits in exactly the right section at each stage, then moves to History', async () => {
+    updateSettings('payments', { eftEnabled: true, accountHolder: 'Terram Farm (Pty) Ltd', bankName: 'FNB', accountNumber: '62000000001', branchCode: '250655' }, null);
+    const id = await placed();
+    const manager = await signedIn('manager');
+    const where = async () => {
+      const d = (await manager.get('/api/production/dashboard')).body;
+      return d.sections.filter((x: any) => x.orders.some((o: any) => o.id === id)).map((x: any) => x.key);
+    };
+    expect(await where()).toEqual(['new']);
+    const ok = await manager.post(`/api/orders/${id}/confirm`, { expected_from: addDays(today(), 7), expected_to: addDays(today(), 10) });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(await where()).toEqual(['confirmed']);
+    for (const to of ['cutting', 'cut', 'packing']) {
+      expect((await manager.post(`/api/orders/${id}/transition`, { to })).status).toBe(200);
+      expect(await where()).toEqual(['processing']);
+    }
+    for (const i of getItems(id)) await manager.post(`/api/items/${i.id}/packed`, { packed: true });
+    expect((await manager.post(`/api/orders/${id}/packed`)).status).toBe(200);
+    expect(await where()).toEqual(['packed']);
+    await manager.post(`/api/orders/${id}/finalize`, { packs_confirmed: true });
+    expect((await manager.post(`/api/orders/${id}/transition`, { to: 'out_for_delivery', unpaid_reason: 'Pays on delivery' })).status).toBe(200);
+    expect(await where()).toEqual(['out']);
+    expect((await manager.post(`/api/orders/${id}/transition`, { to: 'completed' })).status).toBe(200);
+    expect(await where()).toEqual([]);
+    expect((await manager.get('/api/orders?view=history')).body.orders.map((o: any) => o.id)).toContain(id);
+    // The customer sees the same words
+    const steps = (await pub().get(`/api/public/o/${orderToken(id)}`)).body.order.steps.map((x: any) => x.label);
+    expect(steps).toEqual(expect.arrayContaining(['Processing', 'Out for delivery', 'Delivered']));
+  });
+});

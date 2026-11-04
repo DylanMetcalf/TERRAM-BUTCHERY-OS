@@ -6,7 +6,7 @@ import { db } from '../db/db.js';
 import { ORDER_STATUSES, OPEN_STATUSES, allowedTransitions, type OrderStatus } from '../../shared/workflow.js';
 import { can } from '../../shared/permissions.js';
 import { badRequest, forbidden } from '../lib/errors.js';
-import { addDays as addDaysYmd, localDate } from '../lib/time.js';
+import { addDays as addDaysYmd, localDate, localDayStartUtc } from '../lib/time.js';
 import { businessTz } from '../services/settings.js';
 import { listExceptions } from '../domain/exceptions.js';
 import { actionsFor } from '../domain/exception-actions.js';
@@ -88,7 +88,7 @@ r.get('/', requirePerm('orders.read'), (c) => {
   else if (view === 'stage_packing') where.push("o.status = 'packing'");
   else if (view === 'stage_packed') where.push("o.status IN ('packed','ready')");
   else if (view === 'stage_out') where.push("o.status = 'out_for_delivery'");
-  else if (view === 'stage_delivered') where.push("o.status = 'completed' AND o.completed_at >= ?"), vals.push(`${addDaysYmd(today, -6)}T00:00:00`);
+  else if (view === 'stage_delivered') where.push("o.status = 'completed' AND o.completed_at >= ?"), vals.push(localDayStartUtc(addDaysYmd(today, -6), businessTz()));
   else if (view === 'awaiting_customer') where.push("EXISTS (SELECT 1 FROM order_amendments a WHERE a.order_id = o.id AND a.status = 'proposed' AND a.requires_approval = 1)");
   if (q.status && (ORDER_STATUSES as readonly string[]).includes(q.status)) where.push('o.status = ?'), vals.push(q.status);
   const from = ymdParam(q.from);

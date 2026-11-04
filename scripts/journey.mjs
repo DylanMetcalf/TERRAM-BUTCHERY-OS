@@ -263,12 +263,20 @@ if (st.body.order.payment.state === 'paid') fail('declaration/proof marked the o
 await shot(c, '10b-awaiting-verification');
 step('customer copied the details, declared payment and uploaded proof — awaiting verification, not paid');
 
-// Manager verifies against the bank → paid → released as ready
-await p.reload();
-await p.getByRole('button', { name: 'Check & verify…' }).click();
-await p.getByText(/I’ve checked the bank/).click();
-await p.getByRole('button', { name: 'Verify payment' }).click();
-await p.getByText(/Payment verified/).first().waitFor();
+// The admin's next step is checking the bank — not requesting payment again
+const sentRequests = (await api(p, 'GET', `/api/orders/${order.id}/payment-request/preview`)).body.history.filter((h) => h.channel === 'email').length;
+await p.goto(base + '/');
+await p.getByRole('heading', { name: /Payments to check/ }).waitFor();
+await p.getByRole('link', { name: /Thandi Journey-Test/ }).filter({ hasText: /check the bank/ }).first().click();
+await p.getByRole('button', { name: 'Check payment' }).waitFor();
+if (await p.getByRole('button', { name: /^Send payment request/ }).count()) fail('a prominent “Send payment request” is shown while a payment is waiting to be checked');
+await shot(p, '10c-staff-check-payment');
+await p.getByRole('button', { name: 'Confirm payment…' }).click();
+await p.getByText(/I’ve checked the bank account/).click();
+await p.getByRole('dialog').getByRole('button', { name: 'Confirm payment', exact: true }).click();
+await p.getByText('Payment confirmed').first().waitFor();
+const sentAfter = (await api(p, 'GET', `/api/orders/${order.id}`)).body.notifications.filter((n) => n.kind === 'payment_requested').length;
+if (sentAfter !== sentRequests) fail(`payment request emails changed from ${sentRequests} to ${sentAfter} during “I’ve paid” and confirmation`);
 const after = (await api(p, 'GET', `/api/orders/${order.id}`)).body;
 if (after.order.status !== 'ready' || after.order.payment_state !== 'paid') fail(`after verification: ${after.order.status}/${after.order.payment_state}`);
 if (!after.declarations.every((d) => d.status === 'accepted')) fail('declaration not closed');
@@ -371,11 +379,20 @@ await shot(h, '19-faq');
 step('home page sections, View my orders by mobile, About and FAQ (by topic) pages');
 await home.close();
 
-// Dashboard
+// Dashboard: new orders first, then confirmed, processing, packed & ready, out for delivery; delivered lives in History
 await p.goto(base + '/');
-await p.getByText('Where things are').waitFor();
-for (const label of ['New / Confirmed', 'Cutting', 'Packing', 'Packed & Ready', 'Out for Delivery', 'Delivered']) if (!(await p.getByText(label, { exact: true }).count())) fail(`dashboard stage missing: ${label}`);
+await p.getByRole('heading', { name: /New orders · needs review/ }).waitFor();
+const headings = (await p.locator('main h2').allInnerTexts()).map((t) => t.trim().toUpperCase());
+const cards = (await p.getByRole('navigation', { name: 'Where things are' }).innerText()).replace(/\s+/g, ' ');
+for (const label of ['New / Needs review', 'Confirmed', 'Processing', 'Packed & Ready', 'Out for Delivery', 'Payments to check']) if (!cards.includes(label)) fail(`dashboard count missing: ${label} (${cards})`);
+for (const gone of ['CUTTING', 'PACKING', 'DELIVERED']) if (headings.some((h) => h.startsWith(gone))) fail(`dashboard still has a “${gone}” section: ${headings.join(' | ')}`);
+if (/\b0 received today/.test(await p.locator('main').innerText())) fail('“received today” count is 0 although orders were received today');
 await shot(p, '15-dashboard');
+await p.goto(base + '/fulfilment?tab=history');
+await p.getByLabel('Search delivered orders').fill('Thandi');
+await p.getByText('Thandi Journey-Test').first().waitFor();
+await shot(p, '15b-history');
+step('dashboard sections in the new order; delivered order found in Fulfilment → History');
 await b.close();
 console.log(errors.length ? `\n${errors.length} problem(s):\n- ${errors.join('\n- ')}` : '\nJourney passed');
 process.exit(errors.length ? 1 : 0);

@@ -49,7 +49,7 @@ interface Dash {
 
 const SUB: Record<string, string> = {
   cutting: 'Cutting', cut: 'Cut · to pack', packing: 'Packing',
-  packed: 'Packed · final weighing & payment', ready: 'Ready to go out',
+  packed: 'Packed', ready: 'Ready to go out',
 };
 const money = (o: DashOrder) => (o.total_cents != null ? `${o.total_exact ? '' : '≈ '}${formatMoney(o.total_cents)}` : null);
 const unpaid = (o: DashOrder) => !['paid', 'waived'].includes(o.payment_state) && (o.balance_cents ?? 0) > 0;

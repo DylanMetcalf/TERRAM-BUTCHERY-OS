@@ -22,7 +22,7 @@ interface Comms {
 
 const TONE: Record<string, Tone> = { sent: 'field', queued: 'slate', failed: 'danger', skipped: 'neutral', manual: 'ochre' };
 
-export function CommunicationsPanel({ orderId, canWrite, hasInvoice, invoiceSent, canPay, paymentReady, onInvoiceNotify }: { orderId: string; canWrite: boolean; hasInvoice: boolean; invoiceSent: boolean; canPay: boolean; paymentReady: boolean; onInvoiceNotify: () => void }) {
+export function CommunicationsPanel({ orderId, canWrite, hasInvoice, invoiceSent, canPay, paymentReady, awaitingCheck, onInvoiceNotify }: { orderId: string; canWrite: boolean; hasInvoice: boolean; invoiceSent: boolean; canPay: boolean; paymentReady: boolean; awaitingCheck?: boolean; onInvoiceNotify: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const key = ['order-comms', orderId];
@@ -47,7 +47,11 @@ export function CommunicationsPanel({ orderId, canWrite, hasInvoice, invoiceSent
         {canWrite && (
           <div className="grid grid-cols-1 gap-2 border-b border-line p-3 sm:grid-cols-2">
             <Button size="sm" icon={<Mail className="size-3.5" />} disabled={!data?.confirmation.to} onClick={() => setSheet('confirm')}>Send order confirmation…</Button>
-            <Button size="sm" icon={<Send className="size-3.5" />} disabled={!paymentReady} onClick={() => setSheet('payment')} title={paymentReady ? undefined : 'Finalize the order first'}>Send payment request…</Button>
+            {awaitingCheck ? (
+              <p className="flex items-center rounded-xl bg-ochre-soft px-3 py-2 text-[12.5px] text-ochre-soft-ink">Customer says they’ve paid: check the bank under Payment before asking again.</p>
+            ) : (
+              <Button size="sm" icon={<Send className="size-3.5" />} disabled={!paymentReady} onClick={() => setSheet('payment')} title={paymentReady ? undefined : 'Finalize the order first'}>Send payment request…</Button>
+            )}
             <Button size="sm" icon={<FileText className="size-3.5" />} disabled={!hasInvoice || !canPay} onClick={onInvoiceNotify} title={hasInvoice ? undefined : 'Upload the invoice first'}>{invoiceSent ? 'Send invoice notification again…' : 'Send invoice notification…'}</Button>
             <Button size="sm" icon={<MessageCircle className="size-3.5" />} disabled={!data} onClick={() => setSheet('whatsapp')}>WhatsApp message…</Button>
             <Button size="sm" variant="ghost" icon={<Copy className="size-3.5" />} disabled={!data} onClick={copyLink} className="sm:col-span-2">Copy customer portal link</Button>
