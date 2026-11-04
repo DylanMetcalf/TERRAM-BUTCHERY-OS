@@ -26,7 +26,7 @@ import { z } from 'zod';
 /** Public customer ordering — feeds the same central order engine as everything else. */
 const r = new Hono();
 
-export const PACKAGING_NOTE = 'Packaged products are prepared using our standard vacuum packaging to help maintain freshness.';
+export const PACKAGING_NOTE = 'Our products are supplied frozen and vacuum-packed.';
 
 r.get('/info', (c) => {
   const s = getSettings();

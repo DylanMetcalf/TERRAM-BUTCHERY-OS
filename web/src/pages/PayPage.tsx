@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Check, CheckCircle2, Clock, Copy, Landmark, MessageCircle, Upload } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, Clock, Copy, Download, FileText, Home, Landmark, MessageCircle, Upload } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { PublicShell } from '../components/PublicShell';
+import { usePublicInfo } from '../components/SiteChrome';
+import { GoogleReviewCard, InstagramCard } from '../components/Social';
 import { Button, Card, cx, Field, Input, Spinner, Textarea } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { copyText } from '../lib/clipboard';
@@ -25,6 +27,13 @@ export default function PayPage() {
   const { data, error, isLoading } = useQuery({ queryKey: key, queryFn: () => api.get<{ pay: Pay }>(`/api/public/pay/${token}`), retry: false });
   const p = data?.pay;
   const set = (pay: Pay) => qc.setQueryData(key, { pay });
+  /** Shown once, right after the customer tells us they've paid or sends proof (not on later visits). */
+  const [thanks, setThanks] = useState<'declared' | 'proof' | null>(null);
+  const thank = (kind: 'declared' | 'proof') => (pay: Pay) => {
+    set(pay);
+    setThanks(kind);
+    window.scrollTo({ top: 0 });
+  };
   // The order page's "Already paid?" link (?paid=1) opens straight on the "I've paid" form
   const [params] = useSearchParams();
   const [declaring, setDeclaring] = useState(params.get('paid') === '1');
@@ -53,6 +62,8 @@ export default function PayPage() {
       </PublicShell>
     );
   }
+
+  if (thanks) return <ThankYou p={p} kind={thanks} onBack={() => setThanks(null)} />;
 
   const due = p.amount_due_cents as number | null;
   return (
@@ -84,8 +95,10 @@ export default function PayPage() {
         {p.bank && due != null && <BankDetails p={p} due={due} />}
         {p.eft_unavailable && <p className="rounded-xl bg-ochre-soft px-4 py-3 text-[14px] text-ochre-soft-ink">EFT details aren’t available right now. Please contact us to arrange payment.</p>}
 
-        {p.status === 'awaiting_payment' && <Declare token={token} due={due} reference={p.reference} open={declaring} setOpen={setDeclaring} onDone={set} />}
-        {(p.status === 'awaiting_payment' || p.status === 'awaiting_verification') && <ProofUpload token={token} due={due} onDone={set} />}
+        {p.status === 'awaiting_payment' && <Declare token={token} due={due} reference={p.reference} open={declaring} setOpen={setDeclaring} onDone={thank('declared')} />}
+        {(p.status === 'awaiting_payment' || p.status === 'awaiting_verification') && <ProofUpload token={token} due={due} onDone={thank('proof')} extra={p.status === 'awaiting_verification'} />}
+
+        {p.invoice && <InvoiceCard invoice={p.invoice} />}
 
         <section>
           <h2 className="mb-2 font-display text-[20px] font-bold">Your order</h2>
@@ -101,12 +114,13 @@ export default function PayPage() {
                 <div className="shrink-0 text-right font-semibold tabular">{formatMoney(l.line_cents, 'ZAR')}</div>
               </div>
             ))}
-            {p.delivery_fee_cents > 0 && <div className="flex justify-between px-4 py-3"><span>Delivery</span><span className="tabular">{formatMoney(p.delivery_fee_cents, 'ZAR')}</span></div>}
+            {p.delivery_fee_cents > 0 && <div className="flex justify-between px-4 py-3"><span>Delivery fee</span><span className="tabular">{formatMoney(p.delivery_fee_cents, 'ZAR')}</span></div>}
             <div className="flex items-baseline justify-between px-4 py-3 text-[16px]"><span className="font-semibold">Total</span><b className="tabular">{formatMoney(p.total_cents, 'ZAR')}</b></div>
             {p.paid_cents > 0 && <div className="flex justify-between px-4 py-3 text-field"><span>Paid</span><span className="tabular">{formatMoney(p.paid_cents, 'ZAR')}</span></div>}
+            {p.paid_cents > 0 && p.total_cents > p.paid_cents && <div className="flex justify-between px-4 py-3 font-semibold"><span>Balance</span><span className="tabular">{formatMoney(p.total_cents - p.paid_cents, 'ZAR')}</span></div>}
           </Card>
           <p className="mt-2 text-[13px] text-ink-3">
-            {[p.order.storage ? (p.order.storage === 'frozen' ? 'Frozen' : 'Fresh') : null, 'vacuum-packed', p.order.fulfilment === 'collection' ? `Collection${p.order.collection ? `: ${p.order.collection}` : ''}` : p.order.address ? `Delivery to ${p.order.address}` : null].filter(Boolean).join(' · ')}
+            {['Frozen', 'vacuum-packed', p.order.fulfilment === 'collection' ? `Collection${p.order.collection ? `: ${p.order.collection}` : ''}` : p.order.address ? `Delivery to ${p.order.address}` : null].filter(Boolean).join(' · ')}
           </p>
         </section>
 
@@ -129,7 +143,7 @@ export default function PayPage() {
             {p.business.phone && <a href={`tel:${p.business.phone.replace(/\s/g, '')}`} className="inline-flex h-11 items-center rounded-xl border border-line-strong bg-surface px-4 font-semibold">Call {p.business.phone}</a>}
           </div>
         </Card>
-        <p className="text-center text-[13px] text-ink-3"><Link to={p.order_url} className="underline underline-offset-2">View my order</Link> · <Link to="/help" className="underline underline-offset-2">Help & FAQ</Link></p>
+        <p className="text-center text-[13px] text-ink-3"><Link to={p.order_url} className="underline underline-offset-2">View my order</Link> · <Link to="/faq" className="underline underline-offset-2">FAQs</Link> · <Link to="/" className="underline underline-offset-2">Home</Link></p>
       </div>
     </PublicShell>
   );
@@ -249,7 +263,46 @@ function Declare({ token, due, reference, open, setOpen, onDone }: { token: stri
   );
 }
 
-function ProofUpload({ token, due, onDone }: { token: string; due: number | null; onDone: (p: Pay) => void }) {
+function InvoiceCard({ invoice }: { invoice: { filename: string; uploaded_at: string; reference: string | null; url: string } }) {
+  return (
+    <Card className="flex flex-wrap items-center gap-3 p-4" id="invoice">
+      <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-sunken text-ink-2"><FileText className="size-5" /></span>
+      <div className="min-w-0 flex-1">
+        <div className="font-semibold">Your invoice{invoice.reference ? ` ${invoice.reference}` : ''}</div>
+        <div className="truncate text-[13px] text-ink-3">{invoice.filename} · {dateTime(invoice.uploaded_at)}</div>
+      </div>
+      <a href={invoice.url} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center gap-2 rounded-xl border border-line-strong bg-surface px-4 font-semibold"><Download className="size-4" />Download</a>
+    </Card>
+  );
+}
+
+/** After "I've paid" or a proof upload. The payment page itself stays the permanent place to come back to. */
+function ThankYou({ p, kind, onBack }: { p: Pay; kind: 'declared' | 'proof'; onBack: () => void }) {
+  const { data: info } = usePublicInfo();
+  const name: string = info?.business?.name ?? p.business.name;
+  return (
+    <PublicShell subtitle={`Payment · order #${p.order.number}`}>
+      <div className="mx-auto max-w-md animate-rise space-y-5 py-4 text-center">
+        <span className="mx-auto flex size-16 items-center justify-center rounded-full bg-field text-white"><Check className="size-8 animate-pop" strokeWidth={3} /></span>
+        <h1 className="font-display text-[30px] font-semibold leading-tight">Thank you!</h1>
+        <p className="text-[16px] leading-relaxed text-ink-2">
+          {kind === 'proof' ? 'We’ve received your proof of payment' : 'Thank you for letting us know you’ve paid'} for order #{p.order.number}. We’ll check that the payment has reflected in our bank account and confirm it with you — then your order will be prepared for delivery.
+        </p>
+        <p className="text-[14px] text-ink-3">You can come back to your payment page at any time to see the status, add a proof of payment or download your invoice.</p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
+          <Button variant="primary" size="lg" onClick={onBack}>Back to my payment page</Button>
+          <Link to="/" className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface px-5 text-[15px] font-semibold"><Home className="size-4" />Home</Link>
+        </div>
+        <div className="space-y-3 pt-2 text-left">
+          <GoogleReviewCard url={info?.business?.googleReviewUrl} name={name} lead={`Enjoying ${name}?`} />
+          <InstagramCard url={info?.business?.instagramUrl} name={name} />
+        </div>
+      </div>
+    </PublicShell>
+  );
+}
+
+function ProofUpload({ token, due, onDone, extra }: { token: string; due: number | null; onDone: (p: Pay) => void; extra?: boolean }) {
   const [file, setFile] = useState<File | null>(null);
   const [amount, setAmount] = useState(due != null ? (due / 100).toFixed(2) : '');
   const tooBig = !!file && file.size > 5 * 1024 * 1024;
@@ -267,8 +320,8 @@ function ProofUpload({ token, due, onDone }: { token: string; due: number | null
   });
   return (
     <Card className="space-y-3 p-4">
-      <h2 className="flex items-center gap-2 font-semibold"><Upload className="size-4" />Have a proof of payment? <span className="font-normal text-ink-3">(optional)</span></h2>
-      <p className="text-[13.5px] text-ink-2">If your banking app gives you one, you can upload it here (PDF, JPG or PNG, up to 5 MB). Not needed if you’ve tapped “I’ve paid”.</p>
+      <h2 className="flex items-center gap-2 font-semibold"><Upload className="size-4" />{extra ? 'Add a proof of payment' : 'Have a proof of payment?'} <span className="font-normal text-ink-3">(optional)</span></h2>
+      <p className="text-[13.5px] text-ink-2">{extra ? 'You’ve already told us you’ve paid. If you have a proof of payment, you can add it here to help us find it faster' : 'If your banking app gives you one, you can upload it here'} (PDF, JPG or PNG, up to 5 MB).{extra ? '' : ' Not needed if you’ve tapped “I’ve paid”.'}</p>
       <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,.heic,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-[14px] file:mr-3 file:h-11 file:rounded-xl file:border-0 file:bg-sunken file:px-4 file:font-semibold" aria-label="Proof of payment file" />
       {tooBig && <p className="text-[13.5px] text-danger">That file is bigger than 5 MB.</p>}
       <Field label="Amount paid (R)" optional><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-40" /></Field>
