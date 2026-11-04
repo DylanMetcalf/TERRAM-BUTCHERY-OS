@@ -192,6 +192,7 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   const phone = validMobile(input.customer.phone);
   if (!phone) throw badRequest('Please enter a valid mobile number, e.g. 082 123 4567.');
   if (fulfilmentType !== 'collection' && (input.delivery_address?.trim().length ?? 0) < 8) throw badRequest('Please enter your full delivery address, including the area or town.');
+  if (fulfilmentType !== 'collection' && (input.delivery_instructions?.trim().length ?? 0) < 3) throw badRequest('Please add delivery instructions (e.g. directions, gate code or where to leave it).');
   const match = matchCustomer({ phone, email: input.customer.email || null });
   const customer = match.status === 'matched' ? { id: match.customer.id } : { new: { name: input.customer.name, phone: input.customer.phone, email: input.customer.email || null, address: input.delivery_address ?? null } };
   const products = new Map(input.items.map((i) => [i.product_id, requireProduct(i.product_id)]));
@@ -214,7 +215,7 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
       invoice: input.invoice ? { billing_name: input.invoice.billing_name, company: input.invoice.company || null, billing_email: input.invoice.billing_email, billing_address: input.invoice.billing_address || null, vat_number: input.invoice.vat_number || null, instructions: input.invoice.instructions || null } : null,
       delivery_address: fulfilmentType === 'collection' ? null : input.delivery_address ?? null,
       contact_phone: phone,
-      delivery_notes: input.delivery_instructions,
+      delivery_notes: fulfilmentType === 'collection' ? null : input.delivery_instructions?.trim() || null,
       notes: input.notes ?? null,
       idempotency_key: idemKey,
       message_ids: [messageId],

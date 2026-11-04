@@ -72,7 +72,7 @@ export const PublicOrderSchema = z.object({
   }),
   items: z.array(ItemSchema.omit({ special_instructions: true }).extend({ special_instructions: z.string().max(300).nullable().optional() })).max(40),
   /** Directions, gate/access codes, anything that helps us deliver. */
-  delivery_instructions: z.string().trim().min(3, 'Please add delivery instructions (e.g. directions or gate information).').max(800),
+  delivery_instructions: z.string().trim().max(800).nullable().optional(),
   special_request: optStr(1500),
   fulfilment_type: z.enum(['collection', 'delivery']).nullable().optional(),
   /** The customer's preferred date (optional: lead time counts from confirmation). */
