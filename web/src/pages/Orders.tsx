@@ -25,6 +25,34 @@ const VIEWS = [
   { value: 'awaiting_customer', label: 'Waiting on customer' },
 ] as const;
 
+/** Lists the dashboard opens that aren't tabs here. */
+const EXTRA_VIEWS: Record<string, string> = {
+  stage_new: 'New / Confirmed',
+  stage_cutting: 'Cutting',
+  stage_packing: 'Packing',
+  stage_packed: 'Packed & Ready',
+  stage_out: 'Out for Delivery',
+  stage_delivered: 'Delivered in the last 7 days',
+  arrange: 'Deliveries to arrange separately',
+  no_address: 'Deliveries with no address',
+  unpaid_released: 'Sent out before payment · still unpaid',
+  delivered_unpaid: 'Delivered · not paid',
+  awaiting_payment: 'Awaiting payment',
+  proofs: 'Proofs to check',
+  undated: 'No date yet',
+};
+
+/** Open orders grouped by where they are in production (same groups as the dashboard). */
+const STAGE_GROUPS: { label: string; statuses: string[] }[] = [
+  { label: 'New / Confirmed', statuses: ['review', 'needs_clarification', 'confirmed', 'on_hold'] },
+  { label: 'Cutting', statuses: ['cutting', 'cut'] },
+  { label: 'Packing', statuses: ['packing'] },
+  { label: 'Packed & Ready', statuses: ['packed', 'ready'] },
+  { label: 'Out for Delivery', statuses: ['out_for_delivery'] },
+  { label: 'Delivered', statuses: ['completed'] },
+  { label: 'Cancelled', statuses: ['cancelled'] },
+];
+
 const EMPTY: Record<string, { title: string; body: string }> = {
   open: { title: 'No open orders', body: 'New orders will appear here as soon as they arrive.' },
   review: { title: 'Nothing to review', body: 'Every order has been checked.' },
@@ -58,7 +86,8 @@ export default function Orders() {
     return () => clearTimeout(t);
   }, [q]);
   useEffect(() => setPage(0), [view, debounced, from, to]);
-  const limit = 50;
+  const grouped = ['open', 'production', 'ready', 'today', 'overdue'].includes(view) && !debounced;
+  const limit = grouped ? 100 : 50;
   const { data, isLoading, error, refetch, isPlaceholderData } = useQuery({
     queryKey: ['orders', view, debounced, from, to, page],
     queryFn: () => api.get<{ orders: OrderSummary[]; total: number; counts: Record<string, number> }>(`/api/orders${qs({ view, q: debounced, from, to, limit, offset: page * limit })}`),
@@ -96,6 +125,12 @@ export default function Orders() {
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name or order number" className="pl-9" aria-label="Filter orders" />
         </div>
       </div>
+      {EXTRA_VIEWS[view] && (
+        <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1.5 text-[13.5px] font-semibold text-brand-soft-ink">
+          {EXTRA_VIEWS[view]}
+          <button aria-label="Show all open orders" onClick={() => setView('open')}><X className="size-3.5" /></button>
+        </div>
+      )}
       {(from || to) && (
         <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-sunken px-3 py-1.5 text-[13px] font-medium text-ink-2">
           {from === to ? friendlyDate(from, today) : `${friendlyDate(from, today)} – ${friendlyDate(to, today)}`}
@@ -122,9 +157,21 @@ export default function Orders() {
               <span className="w-40 text-right">Status</span>
               <span className="w-4" />
             </div>
-            {data.orders.map((o) => (
-              <OrderRow key={o.id} o={o} today={today} />
-            ))}
+            {grouped
+              ? STAGE_GROUPS.map((g) => {
+                  const list = data.orders.filter((o) => g.statuses.includes(o.status));
+                  if (!list.length) return null;
+                  return (
+                    <section key={g.label} aria-label={g.label}>
+                      <h2 className="flex items-center justify-between border-b border-line bg-surface-2 px-4 py-2 text-[13px] font-semibold text-ink-2">
+                        <span>{g.label}</span>
+                        <span className="tabular text-ink-3">{list.length}</span>
+                      </h2>
+                      {list.map((o) => <OrderRow key={o.id} o={o} today={today} />)}
+                    </section>
+                  );
+                })
+              : data.orders.map((o) => <OrderRow key={o.id} o={o} today={today} />)}
           </Card>
           {data.total > limit && (
             <div className="mt-4 flex items-center justify-between text-[14px] text-ink-2">

@@ -11,10 +11,11 @@ const cust = await (await b.newContext({ viewport: { width: 390, height: 844 }, 
 cust.on('pageerror', (e) => errors.push('customer: ' + e.message));
 await cust.goto(base + '/order');
 await cust.getByRole('button', { name: /^Lean Mince/ }).first().click();
-await cust.getByRole('dialog').getByRole('button', { name: /^1 kg pack/ }).click();
+await cust.getByRole('dialog').getByRole('button', { name: 'More' }).click();
 await cust.getByRole('dialog').getByRole('button', { name: /Add to order/ }).click();
 await cust.getByRole('button', { name: /^Rump\b/ }).first().click();
-await cust.getByRole('button', { name: /More quantity/ }).first().click();
+await cust.getByRole('dialog').getByRole('button', { name: 'More' }).click();
+await cust.getByRole('dialog').getByRole('radio', { name: '300–400 g' }).click();
 await cust.getByRole('button', { name: 'Thick cut' }).click();
 await cust.getByRole('button', { name: /Add to order/ }).click();
 // Search, add something by mistake, then remove it in the cart
@@ -26,12 +27,13 @@ await cust.getByRole('button', { name: /View order/ }).click();
 await cust.getByRole('button', { name: 'Remove Droewors' }).click();
 if (await cust.getByRole('dialog').getByText('Droewors').count()) errors.push('removing from the cart did not work');
 await cust.getByRole('button', { name: 'Checkout' }).click();
-await cust.getByLabel('Name', { exact: true }).fill('Naledi Zulu');
+await cust.getByLabel('Full name').fill('Naledi Zulu');
 await cust.getByLabel('Mobile number').fill('071 555 3380');
+await cust.getByLabel(/^Email/).fill('naledi.e2e@example.com');
 await cust.getByRole('button', { name: 'Continue' }).click();
 // Address-only mode (the default): the family arranges collection or delivery
-if (await cust.getByText('Your address').count()) await cust.locator('textarea').first().fill('12 Kerk Street, Pretoria East');
-await cust.getByRole('radio', { name: /^Frozen/ }).click();
+await cust.getByLabel('Delivery address').fill('12 Kerk Street, Hoedspruit');
+await cust.getByLabel('Delivery instructions').fill('Ring at the gate');
 await cust.getByRole('button', { name: 'Continue' }).click();
 await cust.getByRole('checkbox').check();
 await cust.screenshot({ path: `${shots}/1-customer-review.png`, fullPage: true });

@@ -184,7 +184,7 @@ function CutRow({ l, canCut, onCut, busy }: { l: CutLine; canCut: boolean; onCut
               {canCut && open && <BigCheck size="md" checked={o.cut} onChange={(v) => onCut([o.item_id], v)} label={`${o.customer_name} cut`} />}
               <div className="min-w-0 flex-1">
                 <Link to={`/orders/${o.order_id}`} className="text-[14px] font-medium hover:underline">{o.customer_name}</Link>
-                {o.storage && <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[11.5px] font-semibold ${o.storage === 'frozen' ? 'bg-slate-soft text-slate-soft-ink' : 'bg-field-soft text-field-soft-ink'}`}>{o.storage === 'frozen' ? 'Frozen' : 'Fresh'}</span>}
+                {o.storage === 'fresh' && <span className="ml-1.5 rounded bg-field-soft px-1.5 py-0.5 text-[11.5px] font-semibold text-field-soft-ink">Fresh (older order)</span>}
                 <span className="ml-2 text-[12.5px] text-ink-3">#{o.order_number} · {friendlyDate(o.requested_date, today)}</span>
                 {o.special_instructions && <div className="text-[13.5px] font-medium text-ochre">“{o.special_instructions}”</div>}
               </div>

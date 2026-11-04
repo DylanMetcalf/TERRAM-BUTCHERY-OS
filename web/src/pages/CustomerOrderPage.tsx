@@ -122,11 +122,13 @@ export default function CustomerOrderPage() {
             <Row label="Timeframe">{o.lead_time}</Row>
           ) : null}
           {o.preferred_date && <Row label="Your preferred date">{longDate(o.preferred_date)}</Row>}
-          {o.storage && <Row label="Fresh or frozen">{o.storage === 'frozen' ? 'Frozen' : 'Fresh'} · vacuum-packed</Row>}
+          <Row label="Packaging">{o.storage === 'fresh' ? 'Fresh' : 'Frozen'} · vacuum-packed</Row>
           <Row label={o.fulfilment.type === 'delivery' ? 'Delivery to' : o.fulfilment.type === 'collection' ? 'Collection' : 'Address'}>
             {o.fulfilment.collection ? [o.fulfilment.collection.place, o.fulfilment.collection.address, o.fulfilment.collection.hours].filter(Boolean).join(' · ') || 'From the farm' : o.fulfilment.address || 'We’ll contact you to arrange this.'}
           </Row>
-          {!o.fulfilment.type && <p className="text-[13.5px] text-ink-3">We’ll contact you to arrange delivery or collection.</p>}
+          {o.fulfilment.type !== 'collection' && o.fulfilment.instructions && <Row label="Delivery instructions">{o.fulfilment.instructions}</Row>}
+          {o.fulfilment.type !== 'collection' && <Row label="Delivery fee">{o.fulfilment.arrangement === 'separate' ? 'Arranged separately' : o.fulfilment.delivery_fee_cents != null ? formatMoney(o.fulfilment.delivery_fee_cents, cur) : 'To be confirmed'}</Row>}
+          {o.fulfilment.type !== 'collection' && <p className="text-[13.5px] text-ink-3">We will contact you to confirm the delivery arrangements.</p>}
         </Card>
 
         {o.amendments.some((a: any) => a.needs_answer) && <Amendments o={o} token={token} onDone={setOrder} />}
@@ -161,7 +163,7 @@ export default function CustomerOrderPage() {
                 <p className="whitespace-pre-line text-ink-2">{o.special_request}</p>
               </div>
             )}
-            {m.delivery_fee_cents > 0 && <div className="flex justify-between px-4 py-3 text-[14px]"><span>Delivery</span><span className="tabular">{formatMoney(m.delivery_fee_cents, cur)}</span></div>}
+            {m.delivery_fee_cents > 0 && <div className="flex justify-between px-4 py-3 text-[14px]"><span>Delivery fee</span><span className="tabular">{formatMoney(m.delivery_fee_cents, cur)}</span></div>}
             <div className="space-y-1 px-4 py-3">
               {total != null && <div className="flex items-baseline justify-between text-[15.5px]"><span className="text-ink-2">{totalLabel}</span><b className="tabular">{formatMoney(total, cur)}</b></div>}
               {m.paid_cents > 0 && <div className="flex justify-between text-[14px] text-field"><span>Paid</span><span className="tabular">{formatMoney(m.paid_cents, cur)}</span></div>}
@@ -191,11 +193,11 @@ export default function CustomerOrderPage() {
           </section>
         )}
 
-        {o.invoice.status !== 'not_requested' && o.invoice.status !== 'cancelled' && (
-          <Card className="flex flex-wrap items-center justify-between gap-3 p-4 text-[14.5px]">
+        {(o.invoice.has_file || (o.invoice.status !== 'not_requested' && o.invoice.status !== 'cancelled')) && (
+          <Card className="flex scroll-mt-4 flex-wrap items-center justify-between gap-3 p-4 text-[14.5px]" id="invoice">
             <div>
               <div className="font-semibold">Invoice</div>
-              <div className="text-ink-2">{['issued', 'sent'].includes(o.invoice.status) ? `Invoice ${o.invoice.reference ?? ''}${o.invoice.issued_on ? `, issued ${longDate(o.invoice.issued_on)}` : ''}` : 'Requested. We’ll send it to you once it’s prepared.'}</div>
+              <div className="text-ink-2">{o.invoice.has_file || ['issued', 'sent'].includes(o.invoice.status) ? `Invoice ${o.invoice.reference ?? ''}${o.invoice.issued_on ? `, issued ${longDate(o.invoice.issued_on)}` : ''}` : 'Requested. We’ll send it to you once it’s prepared.'}</div>
             </div>
             {o.invoice.has_file && <a href={`/api/public/o/${token}/invoice`} className="inline-flex h-11 items-center gap-2 rounded-xl border border-line-strong px-4 font-semibold"><Download className="size-4" />Download</a>}
           </Card>
@@ -227,7 +229,7 @@ export default function CustomerOrderPage() {
           <p className="mt-1 text-[14px] text-ink-2">Contact us with your reference number #{o.order_number}.</p>
           <div className="mt-3"><ChangeOrderButtons phone={o.contact.phone} email={o.contact.email} reference={o.order_number} name={o.customer_name?.split(' ')[0]} /></div>
         </Card>
-        <p className="text-center text-[13px] text-ink-3"><Link to="/account" className="underline underline-offset-2">See all your orders</Link> · <Link to="/help" className="underline underline-offset-2">Help & FAQ</Link></p>
+        <p className="text-center text-[13px] text-ink-3"><Link to="/account" className="underline underline-offset-2">See all your orders</Link> · <Link to="/faq" className="underline underline-offset-2">FAQs</Link> · <Link to="/" className="underline underline-offset-2">Home</Link></p>
       </div>
       {receipt && <ReceiptSheet token={token} id={receipt} onClose={() => setReceipt(null)} />}
     </PublicShell>

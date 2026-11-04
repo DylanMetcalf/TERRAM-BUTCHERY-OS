@@ -1,3 +1,4 @@
+import { FAQ_ORDER } from './Help';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Database, Download, FlaskConical, KeyRound, Link2, Plus, ShieldCheck } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -22,7 +23,8 @@ export default function Settings() {
     { value: 'orders', label: 'Orders & fulfilment' },
     { value: 'form', label: 'Customer form' },
     { value: 'payments', label: 'Payments & banking' },
-    { value: 'help', label: 'Help & FAQ' },
+    { value: 'help', label: 'FAQs' },
+    { value: 'website', label: 'About page' },
     ...(can('system.health') ? [{ value: 'messages', label: 'Emails & reminders' }] : []),
     { value: 'assistant', label: 'Assistant' },
     ...(can('users.manage') ? [{ value: 'team', label: 'Team' }] : []),
@@ -53,6 +55,7 @@ export default function Settings() {
               {tab === 'form' && <FormSettings s={data.settings} env={data.environment} />}
               {tab === 'payments' && <PaymentsSettings s={data.settings} env={data.environment} />}
               {tab === 'help' && <HelpSettings s={data.settings} />}
+              {tab === 'website' && <WebsiteSettings s={data.settings} />}
               {tab === 'messages' && <MessagesSettings s={data.settings} />}
               {tab === 'assistant' && <Assistant s={data.settings} env={data.environment} />}
               {tab === 'team' && <Team />}
@@ -107,7 +110,8 @@ function Business({ s }: { s: any }) {
       <Field label="Address"><Textarea rows={2} value={v.address} onChange={(e) => setV({ ...v, address: e.target.value })} /></Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Instagram profile link" optional hint="Shown to customers after they order, and in emails."><Input value={v.instagramUrl ?? ''} onChange={(e) => setV({ ...v, instagramUrl: e.target.value })} placeholder="https://www.instagram.com/…" /></Field>
-        <Field label="Google review link" optional hint="Google Business Profile → “Ask for reviews” → copy the link. Only shown to customers who have had an order completed."><Input value={v.googleReviewUrl ?? ''} onChange={(e) => setV({ ...v, googleReviewUrl: e.target.value })} placeholder="https://g.page/r/…/review" /></Field>
+        <Field label="Google review link" optional hint="Google Business Profile → “Ask for reviews” → copy the link. Shown on the home page (“Ordered from us? Leave us a review”), the thank-you page and to returning customers."><Input value={v.googleReviewUrl ?? ''} onChange={(e) => setV({ ...v, googleReviewUrl: e.target.value })} placeholder="https://g.page/r/…/review" /></Field>
+        <Field label="Facebook page link" optional hint="Shown on the home page and in the footer. Leave empty to hide."><Input value={v.facebookUrl ?? ''} onChange={(e) => setV({ ...v, facebookUrl: e.target.value })} placeholder="https://www.facebook.com/…" /></Field>
       </div>
       <Field label="Public web address" hint="Used for every link in customer emails (order pages, payments). Must be the live https address, e.g. https://www.terramfarm.co.za."><Input value={v.siteUrl ?? ''} onChange={(e) => setV({ ...v, siteUrl: e.target.value })} placeholder="https://www.terramfarm.co.za" /></Field>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -135,6 +139,7 @@ function OrdersSettings({ s }: { s: any }) {
   const [f, setF] = useState(s.fulfilment);
   const saveO = useSave('orders');
   const saveF = useSave('fulfilment');
+  const [feeText, setFeeText] = useState(((s.fulfilment.flatDeliveryFeeCents ?? 15000) / 100).toFixed(2));
   return (
     <div className="space-y-6">
       <Panel title="Order rules" footer={<Button variant="primary" loading={saveO.isPending} onClick={() => saveO.mutate(o)}>Save</Button>}>
@@ -159,13 +164,17 @@ function OrdersSettings({ s }: { s: any }) {
           <>
             <Field label="Delivery days"><DayPicker value={f.deliveryDays} onChange={(v) => setF({ ...f, deliveryDays: v })} /></Field>
             <Field label="Delivery note for customers" hint="Shown on the order form. You don’t have to mention the distance or price here."><Input value={f.deliveryNotes} onChange={(e) => setF({ ...f, deliveryNotes: e.target.value })} /></Field>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Free delivery within (km)" hint="Distance from the shop."><Input type="number" min={0} value={f.freeDeliveryKm} onChange={(e) => setF({ ...f, freeDeliveryKm: Number(e.target.value) })} /></Field>
-              <Field label="Fee per km beyond that (R)" hint="0 = no distance fee. Staff enter the distance on each delivery order and the fee is worked out."><Input type="number" min={0} step="0.5" value={(f.deliveryRatePerKmCents ?? 0) / 100} onChange={(e) => setF({ ...f, deliveryRatePerKmCents: Math.round(Number(e.target.value) * 100) })} /></Field>
-            </div>
-            <Field label="Fresh deliveries: longest journey (hours)" hint="Shown to customers: for longer journeys fresh can’t be guaranteed and frozen is recommended. Staff are asked to check the journey on fresh delivery orders."><Input type="number" min={0.5} max={24} step={0.5} value={f.freshMaxHours ?? 2} onChange={(e) => setF({ ...f, freshMaxHours: Number(e.target.value) })} className="w-28" /></Field>
-            <Switch checked={!!f.showDeliveryFees} onChange={(x) => setF({ ...f, showDeliveryFees: x })} label="Show delivery fees on the order form" description="On: customers see “Delivery is free within 60 km; further away R… per km”. Off: nothing about fees is shown and you handle it yourselves." />
-            {(f.deliveryRatePerKmCents ?? 0) > 0 && <p className="-mt-2 text-[13px] text-ink-3">Example: a delivery {f.freeDeliveryKm + 15} km away costs 15 km × R{((f.deliveryRatePerKmCents ?? 0) / 100).toFixed(2)} = R{((15 * (f.deliveryRatePerKmCents ?? 0)) / 100).toFixed(2)}.</p>}
+            <Field label="Delivery pricing">
+              <Segmented value={f.deliveryPricing ?? 'flat'} onChange={(x) => setF({ ...f, deliveryPricing: x })} options={[{ value: 'flat', label: 'Flat fee per order' }, { value: 'per_km', label: 'Set per order by staff' }]} />
+            </Field>
+            {(f.deliveryPricing ?? 'flat') === 'flat' && (
+              <Field label="Standard delivery fee (R)" hint="Added to every new standard delivery and shown at checkout. Changing it never changes orders already placed.">
+                <Input inputMode="decimal" value={feeText} onChange={(e) => { setFeeText(e.target.value); const c = Math.round(Number(e.target.value.replace(',', '.')) * 100); if (Number.isFinite(c) && c >= 0) setF({ ...f, flatDeliveryFeeCents: c }); }} className="w-32" />
+              </Field>
+            )}
+            <Field label="Delivery area (shown to customers)" hint="Say where you deliver. Never promise delivery outside your regular area: those are arranged separately."><Textarea rows={3} value={f.deliveryAreaText ?? ''} onChange={(e) => setF({ ...f, deliveryAreaText: e.target.value })} /></Field>
+            <Field label="Delivery policy (shown to customers)"><Textarea rows={2} value={f.deliveryPolicyText ?? ''} onChange={(e) => setF({ ...f, deliveryPolicyText: e.target.value })} /></Field>
+            <p className="text-[13px] text-ink-3">Outside the regular area, set a custom fee or mark the delivery as arranged separately on the order (Delivery fee → Change).</p>
           </>
         )}
       </Panel>
@@ -566,7 +575,7 @@ function PaymentsSettings({ s, env }: { s: any; env: any }) {
       <Panel title="How customers pay" footer={<Button variant="primary" loading={save.isPending} onClick={() => save.mutate(v)}>Save</Button>}>
         <p className="text-[13.5px] text-ink-2">After packing, staff do the final weighing and finalize the order, then send the payment request (email, or WhatsApp by hand). Customers pay by EFT on their secure payment page and upload proof or tell you they’ve paid; staff confirm once the money has reflected.</p>
         <Switch checked={!!v.requirePaymentBeforeRelease} onChange={(x) => setV({ ...v, requirePaymentBeforeRelease: x })} label="Release orders only once paid" description="An order can’t be marked ready for delivery or collection until its payment is confirmed." />
-        {v.requirePaymentBeforeRelease && <Switch checked={!!v.allowUnpaidRelease} onChange={(x) => setV({ ...v, allowUnpaidRelease: x })} label="Let managers release an unpaid order" description="For agreed exceptions (e.g. cash on collection). A reason is required and recorded." />}
+        {v.requirePaymentBeforeRelease && <p className="-mt-2 text-[13px] text-ink-3">Managers can still send an unpaid order out for an agreed exception: they confirm a warning and give a reason, which is recorded with their name. The payment status doesn’t change.</p>}
         <Field label="Payment links stay valid for (days)" hint="Links in payment emails. Customers can always reach the current one from their order page."><Input type="number" min={1} max={90} value={v.linkDays ?? 30} onChange={(e) => setV({ ...v, linkDays: Number(e.target.value) })} className="w-28" /></Field>
         <Switch checked={!!v.eftEnabled} onChange={(x) => setV({ ...v, eftEnabled: x })} label="Accept EFT (bank transfer)" description={missing.length ? `Needs: ${missing.join(', ')}.` : 'Customers see the banking details below on their order page and upload proof. Staff verify it against the bank.'} />
         {pf.configured && <Switch checked={!!v.onlineEnabled} onChange={(x) => setV({ ...v, onlineEnabled: x })} disabled={!pf.configured} label="Accept online payment (PayFast)" description={pf.configured ? `PayFast is set up on the server (${pf.mode === 'live' ? 'LIVE' : 'sandbox / test'}${pf.passphrase ? ', with passphrase' : ', no passphrase'}). Paid status comes only from PayFast’s server notice.` : 'Not available yet: the PayFast merchant details must be added to the server environment (PAYFAST_MERCHANT_ID, PAYFAST_MERCHANT_KEY, PAYFAST_PASSPHRASE, PAYFAST_MODE).'} />}
@@ -601,7 +610,7 @@ function PaymentsSettings({ s, env }: { s: any; env: any }) {
 }
 
 function MessagesSettings({ s }: { s: any }) {
-  const [n, setN] = useState({ ...s.notifications, staffEmails: (s.notifications.staffEmails ?? []).join(', ') });
+  const [n, setN] = useState({ ...s.notifications, staffEmails: (s.notifications.staffEmails ?? []).join(', '), paymentReviewEmails: (s.notifications.paymentReviewEmails ?? []).join(', ') });
   const [r, setR] = useState(s.retention);
   const saveN = useSave('notifications');
   const saveR = useSave('retention');
@@ -609,10 +618,11 @@ function MessagesSettings({ s }: { s: any }) {
   const { data } = useQuery({ queryKey: ['notifications', filter], queryFn: () => api.get<{ notifications: any[]; problems: number }>(`/api/notifications${filter === 'problems' ? '?status=problems' : ''}`) });
   return (
     <div className="space-y-6">
-      <Panel title="Staff emails" footer={<Button variant="primary" loading={saveN.isPending} onClick={() => saveN.mutate({ ...n, staffEmails: n.staffEmails.split(/[\s,;]+/).filter(Boolean) })}>Save</Button>}>
+      <Panel title="Staff emails" footer={<Button variant="primary" loading={saveN.isPending} onClick={() => saveN.mutate({ ...n, staffEmails: n.staffEmails.split(/[\s,;]+/).filter(Boolean), paymentReviewEmails: n.paymentReviewEmails.split(/[\s,;]+/).filter(Boolean) })}>Save</Button>}>
         <Field label="Who gets staff alerts" hint="New orders, proofs of payment, declined changes. Separate addresses with commas. If empty, the order-form notification addresses are used."><Input value={n.staffEmails} onChange={(e) => setN({ ...n, staffEmails: e.target.value })} placeholder="orders@terramfarm.co.za" /></Field>
         <Switch checked={!!n.notifyPreparation} onChange={(x) => setN({ ...n, notifyPreparation: x })} label="Email customers when preparation starts" />
-        <Switch checked={!!n.invoiceReadyEmail} onChange={(x) => setN({ ...n, invoiceReadyEmail: x })} label="Email customers when their invoice is ready" />
+        <Field label="Who checks the bank when a customer says they’ve paid" hint="Gets “Payment Verification Required” when a customer taps “Already paid?” or uploads proof. Separate addresses with commas. If empty, the staff alert addresses are used."><Input value={n.paymentReviewEmails} onChange={(e) => setN({ ...n, paymentReviewEmails: e.target.value })} placeholder="accounts@…" /></Field>
+        <p className="text-[13px] text-ink-3">Invoice emails are only sent when someone chooses “Save and notify” or “Notify customer” on the order.</p>
       </Panel>
       <Panel title="Reminders & feedback" footer={<Button variant="primary" loading={saveR.isPending} onClick={() => saveR.mutate(r)}>Save</Button>}>
         <Switch checked={!!r.remindersEnabled} onChange={(x) => setR({ ...r, remindersEnabled: x })} label="Reorder reminders" description="Only for customers who ticked “send me reminders”. One email per completed order, with an unsubscribe link." />
@@ -630,11 +640,11 @@ function MessagesSettings({ s }: { s: any }) {
   );
 }
 
-/** The Help page questions. Plain text; {{leadTime}} and {{freshMaxHours}} are filled in from the settings above. */
+/** The FAQ page questions, grouped by topic. Plain text; placeholders are filled in from the settings. */
 function HelpSettings({ s }: { s: any }) {
-  const [faq, setFaq] = useState<{ q: string; a: string }[]>(s.help?.faq ?? []);
+  const [faq, setFaq] = useState<{ q: string; a: string; category?: string }[]>(s.help?.faq ?? []);
   const save = useSave('help');
-  const set = (i: number, k: 'q' | 'a', v: string) => setFaq(faq.map((f, j) => (j === i ? { ...f, [k]: v } : f)));
+  const set = (i: number, k: 'q' | 'a' | 'category', v: string) => setFaq(faq.map((f, j) => (j === i ? { ...f, [k]: v } : f)));
   const move = (i: number, d: -1 | 1) => {
     const j = i + d;
     if (j < 0 || j >= faq.length) return;
@@ -644,7 +654,8 @@ function HelpSettings({ s }: { s: any }) {
   };
   return (
     <Panel title="Help & FAQ" footer={<Button variant="primary" loading={save.isPending} disabled={faq.some((f) => f.q.trim().length < 3 || f.a.trim().length < 3)} onClick={() => save.mutate({ faq })}>Save</Button>}>
-      <p className="text-[13.5px] text-ink-2">Shown on <a href="/help" target="_blank" rel="noreferrer" className="font-medium text-brand underline">/help</a>, linked from the order form and customer pages. Only state what’s true for the farm. Write <code>{'{{leadTime}}'}</code> or <code>{'{{freshMaxHours}}'}</code> to insert those settings.</p>
+      <p className="text-[13.5px] text-ink-2">Shown on <a href="/faq" target="_blank" rel="noreferrer" className="font-medium text-brand underline">/faq</a> (grouped by topic) and previewed on the home page. Only state what’s true for the farm. Write <code>{'{{leadTime}}'}</code>, <code>{'{{deliveryArea}}'}</code> or <code>{'{{deliveryFee}}'}</code> to insert those settings.</p>
+      <datalist id="faq-categories">{FAQ_ORDER.map((c) => <option key={c} value={c} />)}</datalist>
       <div className="space-y-3">
         {faq.map((f, i) => (
           <Card key={i} className="space-y-2 p-3">
@@ -654,11 +665,36 @@ function HelpSettings({ s }: { s: any }) {
               <Button type="button" size="sm" variant="ghost" onClick={() => move(i, 1)} aria-label="Move down" disabled={i === faq.length - 1}>↓</Button>
               <Button type="button" size="sm" variant="ghost" onClick={() => setFaq(faq.filter((_, j) => j !== i))} aria-label="Remove question">✕</Button>
             </div>
+            <Input list="faq-categories" value={f.category ?? ''} onChange={(e) => set(i, 'category', e.target.value)} placeholder="Topic, e.g. Delivery" className="h-9 sm:w-72" aria-label={`Topic for question ${i + 1}`} />
             <Textarea rows={3} value={f.a} onChange={(e) => set(i, 'a', e.target.value)} placeholder="Answer" aria-label={`Answer ${i + 1}`} />
           </Card>
         ))}
       </div>
-      <Button type="button" icon={<Plus className="size-4" />} onClick={() => setFaq([...faq, { q: '', a: '' }])}>Add a question</Button>
+      <Button type="button" icon={<Plus className="size-4" />} onClick={() => setFaq([...faq, { q: '', a: '', category: 'Ordering' }])}>Add a question</Button>
+    </Panel>
+  );
+}
+
+/** The About Us page and home-page intro: the farm's own words. Avoid claims you can't back up. */
+function WebsiteSettings({ s }: { s: any }) {
+  const [c, setC] = useState<{ aboutIntro: string; aboutSections: { title: string; body: string }[] }>(s.content ?? { aboutIntro: '', aboutSections: [] });
+  const save = useSave('content');
+  return (
+    <Panel title="About page" footer={<Button variant="primary" loading={save.isPending} onClick={() => save.mutate(c)}>Save</Button>}>
+      <p className="text-[13.5px] text-ink-2">Shown on <a href="/about" target="_blank" rel="noreferrer" className="font-medium text-brand underline">/about</a>; the introduction also appears on the home page. Describe the beef and lamb as farm-raised; don’t add claims (like grass-fed) unless they are true and you can back them up.</p>
+      <Field label="Introduction"><Textarea rows={3} value={c.aboutIntro} onChange={(e) => setC({ ...c, aboutIntro: e.target.value })} /></Field>
+      <div className="space-y-3">
+        {c.aboutSections.map((x, i) => (
+          <Card key={i} className="space-y-2 p-3">
+            <div className="flex gap-2">
+              <Input value={x.title} onChange={(e) => setC({ ...c, aboutSections: c.aboutSections.map((y, j) => (j === i ? { ...y, title: e.target.value } : y)) })} placeholder="Heading" className="font-semibold" aria-label={`Heading ${i + 1}`} />
+              <Button type="button" size="sm" variant="ghost" onClick={() => setC({ ...c, aboutSections: c.aboutSections.filter((_, j) => j !== i) })} aria-label="Remove section">✕</Button>
+            </div>
+            <Textarea rows={3} value={x.body} onChange={(e) => setC({ ...c, aboutSections: c.aboutSections.map((y, j) => (j === i ? { ...y, body: e.target.value } : y)) })} placeholder="Text" aria-label={`Text ${i + 1}`} />
+          </Card>
+        ))}
+      </div>
+      {c.aboutSections.length < 8 && <Button type="button" icon={<Plus className="size-4" />} onClick={() => setC({ ...c, aboutSections: [...c.aboutSections, { title: '', body: '' }] })}>Add a section</Button>}
     </Panel>
   );
 }

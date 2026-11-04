@@ -48,6 +48,7 @@ const Invoices = lazy(() => import('./pages/Invoices'));
 const PrintView = lazy(() => import('./print/Print'));
 const Devices = lazy(() => import('./pages/Devices'));
 const PublicOrder = lazy(() => import('./pages/PublicOrder'));
+const AboutPage = lazy(() => import('./pages/About'));
 const PublicHome = lazy(() => import('./pages/PublicHome'));
 const PublicPrivacy = lazy(() => import('./pages/PublicPrivacy'));
 const CustomerOrderPage = lazy(() => import('./pages/CustomerOrderPage'));
@@ -79,7 +80,7 @@ function Routed() {
     return <Suspense fallback={<FullSpinner />}><PublicPrivacy /></Suspense>;
   }
   // Customer pages: the order page behind a signed link, order history, reminder preferences
-  if (/^\/(o|unsubscribe|pay)\/[^/]+/.test(loc.pathname) || loc.pathname === '/account' || loc.pathname === '/help') {
+  if (/^\/(o|unsubscribe|pay)\/[^/]+/.test(loc.pathname) || ['/account', '/help', '/faq', '/about'].includes(loc.pathname)) {
     return (
       <Suspense fallback={<FullSpinner />}>
         <Routes>
@@ -88,6 +89,8 @@ function Routed() {
           <Route path="/unsubscribe/:token" element={<Unsubscribe />} />
           <Route path="/pay/:token" element={<PayPage />} />
           <Route path="/help" element={<HelpPage />} />
+          <Route path="/faq" element={<HelpPage />} />
+          <Route path="/about" element={<AboutPage />} />
         </Routes>
       </Suspense>
     );

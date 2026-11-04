@@ -39,7 +39,7 @@ export const api = {
   post: <T>(url: string, body?: unknown, opts?: { idempotencyKey?: string }) => request<T>('POST', url, body ?? {}, opts),
   patch: <T>(url: string, body?: unknown) => request<T>('PATCH', url, body ?? {}),
   put: <T>(url: string, body?: unknown) => request<T>('PUT', url, body ?? {}),
-  del: <T>(url: string) => request<T>('DELETE', url),
+  del: <T>(url: string, body?: unknown) => request<T>('DELETE', url, body),
   /** Multipart upload (files); the browser sets the content type. */
   upload: <T>(url: string, form: FormData) => request<T>('POST', url, form),
 };

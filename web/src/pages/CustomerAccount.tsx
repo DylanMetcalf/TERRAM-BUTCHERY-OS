@@ -7,6 +7,7 @@ import { PublicShell } from '../components/PublicShell';
 import { Button, Card, Field, Input, Spinner, Switch } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { dateTime, formatMoney } from '../lib/format';
+import { validMobile } from '../../../shared/text';
 
 /**
  * Order history without a password: the customer types their email, we send a 6-digit code,
@@ -52,23 +53,34 @@ export default function CustomerAccount() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="font-display text-[28px] font-semibold">Your orders</h1>
-            <p className="break-all text-[14px] text-ink-3">Signed in as {data.email}</p>
+            <p className="break-all text-[14px] text-ink-3">Signed in as {data.email} · only your own orders are shown</p>
           </div>
           <Button variant="ghost" icon={<LogOut className="size-4" />} loading={logout.isPending} onClick={() => logout.mutate()}>Sign out</Button>
         </div>
         {!data.orders.length ? (
-          <Card className="p-6 text-center text-ink-2">No orders yet for this email address. <Link to="/order" className="font-semibold text-brand underline">Place an order</Link></Card>
+          <Card className="p-6 text-center text-ink-2">No orders yet for these details. <Link to="/order" className="font-semibold text-brand underline">Place an order</Link></Card>
         ) : (
           <Card className="divide-y divide-line">
             {data.orders.map((o: any) => {
-              const total = o.money.final_cents ?? o.money.confirmed_cents ?? o.money.estimated_cents;
+              const total = o.money.finalized_cents ?? o.money.final_cents ?? o.money.confirmed_cents ?? o.money.estimated_cents;
+              const exact = o.money.finalized_cents != null || o.money.final_cents != null || o.money.estimate_is_exact;
               return (
-                <Link key={o.id} to={o.link} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-2">
+                <Link key={o.id} to={o.link} className="flex items-start gap-3 px-4 py-3.5 hover:bg-surface-2">
                   <div className="min-w-0 flex-1">
-                    <div className="font-semibold">#{o.order_number} · {o.status_label}</div>
-                    <div className="text-[13px] text-ink-3">{dateTime(o.created_at)} · {o.item_count} item{o.item_count === 1 ? '' : 's'}{total != null ? ` · ${o.money.final_cents != null || o.money.estimate_is_exact ? '' : '≈ '}${formatMoney(total, 'ZAR')}` : ''}</div>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="font-semibold">#{o.order_number} · {o.status_label}</span>
+                      {total != null && <span className="font-semibold tabular">{exact ? '' : '≈ '}{formatMoney(total, 'ZAR')}</span>}
+                    </div>
+                    <div className="text-[13px] text-ink-3">{dateTime(o.created_at)}</div>
+                    {o.items?.length > 0 && <div className="mt-1 text-[13.5px] text-ink-2">{o.items.slice(0, 4).map((i: any) => `${i.qty_label} ${i.name}`).join(', ')}{o.items.length > 4 ? ` and ${o.items.length - 4} more` : ''}</div>}
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[12.5px] text-ink-3">
+                      {o.payment_label && <span>Payment: {o.payment_label}</span>}
+                      {o.fulfilment_type !== 'collection' && o.delivery_fee_cents != null && o.delivery_fee_cents > 0 && <span>Delivery {formatMoney(o.delivery_fee_cents, 'ZAR')}</span>}
+                      {o.money.balance_cents > 0 && <span className="font-medium text-ink-2">Outstanding {formatMoney(o.money.balance_cents, 'ZAR')}</span>}
+                      {o.invoice_available && <span className="font-medium text-brand">Invoice available</span>}
+                    </div>
                   </div>
-                  <ChevronRight className="size-4 shrink-0 text-ink-3" />
+                  <ChevronRight className="mt-1 size-4 shrink-0 text-ink-3" />
                 </Link>
               );
             })}
@@ -85,30 +97,45 @@ export default function CustomerAccount() {
   );
 }
 
-function SignIn({ onDone, initialEmail }: { onDone: () => void; initialEmail: string }) {
+/**
+ * "View my orders": the customer's mobile number (or email) and a one-time code — no password.
+ * There is no SMS service connected, so the code is emailed to the address on that number's orders.
+ */
+export function SignIn({ onDone, initialEmail = '', compact }: { onDone: () => void; initialEmail?: string; compact?: boolean }) {
+  const [by, setBy] = useState<'phone' | 'email'>(initialEmail ? 'email' : 'phone');
   const [email, setEmail] = useState(initialEmail);
+  const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [sent, setSent] = useState<string | null>(null);
-  const ask = useMutation({ mutationFn: () => api.post<{ message: string }>('/api/public/account/code', { email }), onSuccess: (r) => setSent(r.message) });
-  const verify = useMutation({ mutationFn: () => api.post('/api/public/account/verify', { email, code }), onSuccess: onDone });
-  const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const who = by === 'phone' ? { phone } : { email };
+  const ask = useMutation({ mutationFn: () => api.post<{ message: string }>('/api/public/account/code', who), onSuccess: (r) => setSent(r.message) });
+  const verify = useMutation({ mutationFn: () => api.post('/api/public/account/verify', { ...who, code }), onSuccess: onDone });
+  const ok = by === 'phone' ? !!validMobile(phone) : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const Heading = compact ? 'h2' : 'h1';
   return (
-    <Card className="mx-auto max-w-md animate-rise p-6">
-      <h1 className="font-display text-[26px] font-semibold">See your orders</h1>
-      <p className="mt-1 text-[14.5px] text-ink-2">No password needed. Enter the email address you used when ordering and we’ll send you a 6-digit code.</p>
+    <Card className={compact ? 'p-5 sm:p-6' : 'mx-auto max-w-md animate-rise p-6'}>
+      <Heading className="font-display text-[24px] font-semibold sm:text-[26px]">View my orders</Heading>
+      <p className="mt-1 text-[14.5px] text-ink-2">No password needed. Enter the {by === 'phone' ? 'mobile number' : 'email address'} you used when ordering and we’ll send you a 6-digit code{by === 'phone' ? ' by email, to the address on your orders' : ''}.</p>
       {!sent ? (
         <form className="mt-5 space-y-4" onSubmit={(e) => { e.preventDefault(); if (ok) ask.mutate(); }}>
-          <Field label="Email"><Input big type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+          {by === 'phone' ? (
+            <Field label="Mobile number" error={phone.replace(/\D/g, '').length >= 9 && !ok ? 'Please enter a valid mobile number, e.g. 071 234 5678.' : undefined}>
+              <Input big type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 071 234 5678" />
+            </Field>
+          ) : (
+            <Field label="Email"><Input big type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+          )}
           <Button type="submit" full size="lg" variant="primary" disabled={!ok} loading={ask.isPending}>Send me a code</Button>
           {ask.error && <p className="text-[14px] text-danger" role="alert">{(ask.error as Error).message}</p>}
+          <button type="button" className="text-[14px] font-medium text-brand underline" onClick={() => setBy(by === 'phone' ? 'email' : 'phone')}>{by === 'phone' ? 'Use my email address instead' : 'Use my mobile number instead'}</button>
         </form>
       ) : (
         <form className="mt-5 space-y-4" onSubmit={(e) => { e.preventDefault(); verify.mutate(); }}>
-          <p className="rounded-xl bg-surface-2 px-3 py-2 text-[14px] text-ink-2">{sent}</p>
+          <p className="rounded-xl bg-surface-2 px-3 py-2 text-[14px] text-ink-2" role="status">{sent}</p>
           <Field label="6-digit code"><Input big inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} className="w-44 tracking-[0.3em]" /></Field>
-          <Button type="submit" full size="lg" variant="primary" disabled={code.length !== 6} loading={verify.isPending}>Sign in</Button>
+          <Button type="submit" full size="lg" variant="primary" disabled={code.length !== 6} loading={verify.isPending}>Show my orders</Button>
           {verify.error && <p className="text-[14px] text-danger" role="alert">{(verify.error as Error).message}</p>}
-          <button type="button" className="text-[14px] font-medium text-brand underline" onClick={() => { setSent(null); setCode(''); }}>Use a different email or send a new code</button>
+          <button type="button" className="text-[14px] font-medium text-brand underline" onClick={() => { setSent(null); setCode(''); }}>Send a new code, or use different details</button>
         </form>
       )}
     </Card>

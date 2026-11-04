@@ -11,7 +11,7 @@ import { raiseException } from './exceptions.js';
 import { addEvent, orderMoney, requireOrder } from './orders.js';
 import { latestFinalization, type FinalSnapshot } from './finalize.js';
 import { customerContact, staffEmails } from './lifecycle.js';
-import { METHOD_LABEL, openRequest, paymentRequestMessage, recomputePayment, recordVerifiedPayment, sendPaymentRequestEmail, createPaymentRequest, paymentBlocker } from './payments.js';
+import { METHOD_LABEL, sendPaymentReviewEmail, openRequest, paymentRequestMessage, recomputePayment, recordVerifiedPayment, sendPaymentRequestEmail, createPaymentRequest, paymentBlocker } from './payments.js';
 
 /**
  * The customer's secure EFT payment page (/pay/<link>) and the staff side of sending it.
@@ -81,8 +81,14 @@ export function payView(request: any) {
     payments: payments.map((p) => ({ ...p, method: METHOD_LABEL[p.method as keyof typeof METHOD_LABEL], receipt: `R${p.receipt_number}` })),
     /** The order page, for receipts, history and help (the payment link already proves access to this order). */
     order_url: `/o/${orderToken(o.id)}`,
+    invoice: invoiceFor(o.id),
     expires_at: request.expires_at,
   };
+}
+
+function invoiceFor(orderId: string) {
+  const f = db().prepare('SELECT f.filename, f.created_at, o.invoice_ref FROM orders o JOIN files f ON f.id = o.invoice_file_id WHERE o.id = ?').get(orderId) as any;
+  return f ? { filename: f.filename, uploaded_at: f.created_at, reference: f.invoice_ref ?? null, url: `/api/public/o/${orderToken(orderId)}/invoice` } : null;
 }
 
 /** "I've made payment": recorded and passed to staff to check. Never marks the order paid. */
@@ -94,6 +100,12 @@ export function declarePayment(request: any, input: { amount_cents: number | nul
   if (input.paid_on && !/^\d{4}-\d{2}-\d{2}$/.test(input.paid_on)) throw badRequest('Check the payment date.');
   const recent = (db().prepare('SELECT COUNT(*) n FROM payment_declarations WHERE order_id = ? AND created_at > ?').get(o.id, new Date(Date.now() - 3600_000).toISOString()) as { n: number }).n;
   if (recent >= 3) throw conflict('We’ve already received your message. We’ll confirm as soon as we’ve checked the payment.');
+  // Already told us and we haven't checked yet: keep the one we have (add any new detail), no second alert
+  const pending = db().prepare("SELECT id FROM payment_declarations WHERE order_id = ? AND request_id = ? AND status = 'submitted' ORDER BY created_at DESC LIMIT 1").get(o.id, request.id) as { id: string } | undefined;
+  if (pending) {
+    db().prepare('UPDATE payment_declarations SET amount_cents = COALESCE(?, amount_cents), paid_on = COALESCE(?, paid_on), payer_reference = COALESCE(?, payer_reference), note = COALESCE(?, note) WHERE id = ?').run(input.amount_cents, input.paid_on, input.payer_reference?.trim().slice(0, 120) || null, input.note?.trim().slice(0, 500) || null, pending.id);
+    return pending.id;
+  }
   const did = id('pdc_');
   const customer: Actor = { userId: null, kind: 'customer', name: o.customer_name };
   tx(() => {
@@ -103,11 +115,7 @@ export function declarePayment(request: any, input: { amount_cents: number | nul
     recomputePayment(o.id);
   });
   raiseException({ type: 'payment_issue', severity: 'info', title: `Check the bank for #${o.order_number}`, detail: `${o.customer_name} says they’ve paid${input.amount_cents ? ` ${money(input.amount_cents)}` : ''}${input.payer_reference?.trim() ? `, from “${input.payer_reference.trim().slice(0, 120)}”` : ''}. Look for reference ${o.order_number} on the bank statement, then confirm the payment on the order.`, order_id: o.id, dedupe_key: `declared:${did}` });
-  const staff = staffEmails();
-  if (staff.length) {
-    const e = layout({ subject: `${o.customer_name} says they’ve paid #${o.order_number} — please check the bank`, preheader: money(request.amount_cents), intro: [`${o.customer_name} says they’ve paid${input.amount_cents ? ` ${money(input.amount_cents)}` : ''} for order #${o.order_number} (amount due ${money(request.amount_cents)}).${input.payer_reference?.trim() ? ` It should show on the statement as “${input.payer_reference.trim().slice(0, 120)}”.` : ''} Reference used: ${o.order_number}.`, 'The order is NOT marked paid until someone checks the money is in the account and confirms it in Terram.'], cta: { label: 'Open the order', url: `${siteUrl()}/orders/${o.id}` } });
-    notify({ key: `staff_declared:${did}`, kind: 'staff_declared', audience: 'staff', to: staff, ...e, orderId: o.id });
-  }
+  sendPaymentReviewEmail(o.id, { key: `staff_declared:${did}`, amount_cents: input.amount_cents, reference: input.payer_reference?.trim() || null, proofFileId: null, what: 'says they have paid' });
   const c = customerContact(o.id);
   if (c.email) {
     const ce = layout({ subject: `Thanks — we’ll check your payment for #${o.order_number}`, preheader: 'We’ll confirm once it has reflected.', greeting: `Hi ${c.firstName},`, intro: ['Thanks for letting us know you’ve paid. We’ll confirm as soon as the payment has reflected in our account.'], closing: signOff() });

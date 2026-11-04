@@ -1,3 +1,4 @@
+import { validMobile } from '../../shared/text.js';
 import { z } from 'zod';
 import type { Context } from 'hono';
 import { badRequest } from '../lib/errors.js';
@@ -16,6 +17,7 @@ export const ItemSchema = z.object({
   qty: QtySchema,
   preparation: PrepSchema,
   special_instructions: z.string().max(500).nullable().optional(),
+  weight_pref: z.string().max(40).nullable().optional(),
 });
 
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a valid date');
@@ -65,10 +67,12 @@ export const OrderPatchSchema = z.object({
 export const PublicOrderSchema = z.object({
   customer: z.object({
     name: z.string().trim().min(2, 'Please enter your name').max(120),
-    phone: z.string().trim().min(7, 'Please enter a phone number').max(40),
-    email: z.string().trim().max(200).email('Please enter a valid email').optional().or(z.literal('')),
+    phone: z.string().trim().max(40).refine((v) => !!validMobile(v), 'Please enter a valid mobile number, e.g. 082 123 4567.'),
+    email: z.string().trim().max(200).email('Please enter a valid email address.'),
   }),
   items: z.array(ItemSchema.omit({ special_instructions: true }).extend({ special_instructions: z.string().max(300).nullable().optional() })).max(40),
+  /** Directions, gate/access codes, anything that helps us deliver. */
+  delivery_instructions: z.string().trim().max(800).nullable().optional(),
   special_request: optStr(1500),
   fulfilment_type: z.enum(['collection', 'delivery']).nullable().optional(),
   /** The customer's preferred date (optional: lead time counts from confirmation). */
@@ -88,7 +92,8 @@ export const PublicOrderSchema = z.object({
     .optional(),
   /** Optional, unticked by default: occasional reorder reminders. Ordering never depends on it. */
   marketing_consent: z.boolean().optional(),
-  storage: z.enum(['fresh', 'frozen'], { message: 'Choose fresh or frozen.' }),
+  /** Ignored: products are frozen. Accepted so older pages still submit. */
+  storage: z.enum(['fresh', 'frozen']).optional(),
   /** The total the customer was shown; if prices changed since, they're asked to look again. */
   seen_total_cents: z.number().int().min(0).nullable().optional(),
   website: z.string().max(0).optional(), // honeypot — must stay empty

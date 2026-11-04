@@ -60,6 +60,7 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
       .refine((u) => !/localhost|127\.0\.0\.1|\.local\b/i.test(u), 'Use the public web address, not a local one.')
       .transform((u) => u.replace(/\/+$/, '')),
     instagramUrl: z.string().trim().max(300).regex(/^(https:\/\/(www\.)?instagram\.com\/[^\s]+)?$/i, 'Paste your Instagram profile link, e.g. https://www.instagram.com/terramfarm'),
+    facebookUrl: z.string().trim().max(300).regex(/^(https:\/\/(www\.|m\.)?facebook\.com\/[^\s]+)?$/i, 'Paste your Facebook page link, e.g. https://www.facebook.com/terramfarm'),
     googleReviewUrl: z.string().trim().max(500).regex(/^(https:\/\/(g\.page|maps\.app\.goo\.gl|search\.google\.com|www\.google\.[a-z.]+|google\.[a-z.]+|maps\.google\.[a-z.]+|g\.co)\/[^\s]*)?$/i, 'Paste the “Ask for reviews” link from your Google Business Profile (it starts with https://g.page/ or https://search.google.com/).'),
   }).partial(),
   orders: z.object({
@@ -83,6 +84,10 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
     showDeliveryFees: z.boolean(),
     deliveryRatePerKmCents: z.number().int().min(0).max(100000),
     freshMaxHours: z.number().min(0.5).max(24),
+    deliveryPricing: z.enum(['flat', 'per_km']),
+    flatDeliveryFeeCents: z.number().int().min(0).max(1_000_000),
+    deliveryAreaText: z.string().trim().max(600),
+    deliveryPolicyText: z.string().trim().max(600),
   }).partial(),
   ai: z.object({
     enabled: z.boolean(),
@@ -112,9 +117,10 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
       linkDays: z.number().int().min(1).max(90),
     })
     .partial(),
-  help: z.object({ faq: z.array(z.object({ q: z.string().trim().min(3).max(200), a: z.string().trim().min(3).max(2000) })).max(40) }),
+  help: z.object({ faq: z.array(z.object({ q: z.string().trim().min(3).max(200), a: z.string().trim().min(3).max(2000), category: z.string().trim().max(40).optional() })).max(60) }),
+  content: z.object({ aboutIntro: z.string().trim().max(1500), aboutSections: z.array(z.object({ title: z.string().trim().min(1).max(80), body: z.string().trim().min(1).max(3000) })).max(12) }).partial(),
   retention: z.object({ remindersEnabled: z.boolean(), reminderDays: z.number().int().min(3).max(120), feedbackEnabled: z.boolean() }).partial(),
-  notifications: z.object({ staffEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), notifyPreparation: z.boolean(), invoiceReadyEmail: z.boolean() }).partial(),
+  notifications: z.object({ staffEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), notifyPreparation: z.boolean(), invoiceReadyEmail: z.boolean(), paymentReviewEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10) }).partial(),
   customerForm: z.object({ enabled: z.boolean(), intro: z.string().max(600), confirmationMessage: z.string().max(600), showPrices: z.boolean(), terms: z.string().max(3000), noticeNote: z.string().max(400), notifyEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), emailCustomer: z.boolean() }).partial(),
   brand: z
     .object({

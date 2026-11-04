@@ -727,4 +727,39 @@ CREATE INDEX idx_declarations_order ON payment_declarations(order_id, status);
 ALTER TABLE payment_declarations ADD COLUMN payer_reference TEXT;
 `,
   },
+  {
+    id: 10,
+    name: 'master-upgrade',
+    sql: `
+-- Delivery: how this order's fee was set (standard flat fee, a custom fee, arranged separately, or collection)
+ALTER TABLE orders ADD COLUMN delivery_arrangement TEXT CHECK (delivery_arrangement IN ('standard','custom','separate','collection'));
+-- Payment resolved without money (agreed by a manager), and orders released before payment
+ALTER TABLE orders ADD COLUMN payment_waived_at TEXT;
+ALTER TABLE orders ADD COLUMN payment_waived_by TEXT REFERENCES users(id);
+ALTER TABLE orders ADD COLUMN payment_waived_reason TEXT;
+ALTER TABLE orders ADD COLUMN released_unpaid_at TEXT;
+ALTER TABLE orders ADD COLUMN released_unpaid_by TEXT REFERENCES users(id);
+ALTER TABLE orders ADD COLUMN released_unpaid_reason TEXT;
+-- Recorded payments: the date the money was paid and the bank reference
+ALTER TABLE payments ADD COLUMN paid_on TEXT;
+ALTER TABLE payments ADD COLUMN reference TEXT;
+-- Products: how customers order them, and optional preferred-weight ranges (e.g. 300–400 g per steak)
+ALTER TABLE products ADD COLUMN order_method TEXT CHECK (order_method IN ('packs','items_weighed','items','by_weight','whole','custom'));
+ALTER TABLE products ADD COLUMN order_method_reviewed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE products ADD COLUMN weight_ranges TEXT;
+-- A parent that only groups its variations (e.g. "Brisket" → Whole / Smoked BBQ / Smoked Honey Mustard)
+ALTER TABLE products ADD COLUMN group_only INTEGER NOT NULL DEFAULT 0;
+-- The weight the customer asked for per item (snapshot: {id,label,min_g,max_g})
+ALTER TABLE order_items ADD COLUMN weight_pref TEXT;
+-- Unfinished baskets, so a customer can pick up where they left off (private, expiring)
+CREATE TABLE order_drafts (
+  id TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX idx_order_drafts_expiry ON order_drafts(expires_at);
+`,
+  },
 ];

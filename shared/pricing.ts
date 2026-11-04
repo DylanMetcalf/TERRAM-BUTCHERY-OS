@@ -133,3 +133,56 @@ export function rands(cents: number | null | undefined, currency = 'ZAR'): strin
   const symbol = currency === 'ZAR' ? 'R' : currency;
   return `${symbol}${(cents / 100).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
+
+/**
+ * How customers order a product. Each method shows only its own fields:
+ *   packs         fixed-weight packs (e.g. mince: number of 500 g packets)
+ *   items_weighed individual pieces priced per kg (e.g. steaks: how many, preferred weight each)
+ *   items         individual items priced each (e.g. egg trays)
+ *   by_weight     loose, in kilograms
+ *   whole         whole/half pieces chosen from the product's sizes (e.g. whole fillet)
+ *   custom        not ordered directly; ask under Special requests
+ */
+export type OrderMethod = 'packs' | 'items_weighed' | 'items' | 'by_weight' | 'whole' | 'custom';
+export const ORDER_METHODS: OrderMethod[] = ['packs', 'items_weighed', 'items', 'by_weight', 'whole', 'custom'];
+export const ORDER_METHOD_LABEL: Record<OrderMethod, string> = {
+  packs: 'Fixed-weight packs',
+  items_weighed: 'Individual items, priced by weight',
+  items: 'Individual items, priced each',
+  by_weight: 'By weight (kg)',
+  whole: 'Whole / half pieces',
+  custom: 'Custom order (special request)',
+};
+
+/** A preferred weight per item, e.g. 300–400 g a steak. */
+export interface WeightRange { id: string; label: string; min_g: number; max_g: number }
+
+export function parseWeightRanges(v: unknown): WeightRange[] {
+  let raw: unknown = v;
+  if (typeof v === 'string') {
+    try {
+      raw = JSON.parse(v);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+  const out: WeightRange[] = [];
+  for (const r of raw) {
+    const min = Math.round(Number((r as any)?.min_g));
+    const max = Math.round(Number((r as any)?.max_g));
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max < min || max > 100000) continue;
+    const id = String((r as any).id ?? `${min}-${max}`).trim().slice(0, 40) || `${min}-${max}`;
+    if (out.some((x) => x.id === id)) continue;
+    out.push({ id, label: String((r as any).label ?? '').trim().slice(0, 40) || `${min}–${max} g`, min_g: min, max_g: max });
+  }
+  return out;
+}
+
+/** The method a product uses when none has been set (worked out from its existing setup; flagged for review). */
+export function inferOrderMethod(p: { sale_options: { kind: string }[]; quantity_type: string; price_unit: string | null; typical_piece_g?: number | null }): OrderMethod {
+  if (p.sale_options.length) return p.sale_options.every((o) => o.kind === 'pack') ? 'packs' : 'whole';
+  if (p.quantity_type === 'weight') return 'by_weight';
+  if (p.quantity_type === 'count') return p.price_unit === 'kg' ? 'items_weighed' : 'items';
+  return p.price_unit === 'kg' && p.typical_piece_g ? 'items_weighed' : p.price_unit === 'each' ? 'items' : 'by_weight';
+}

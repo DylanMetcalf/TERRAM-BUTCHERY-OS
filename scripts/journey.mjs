@@ -52,30 +52,36 @@ await shot(c, '01-mobile-search-keyboard');
 step(`mobile search panel: box at ${Math.round(s.input[0])}–${Math.round(s.input[1])}, first result ends at ${Math.round(s.first?.[1])}, visible height ${s.h}`);
 await c.setViewportSize({ width: 390, height: 844 });
 
-// Lean mince (picked straight from the search panel): a size must be chosen; 2 × 1kg packs, exact price
+// Lean mince (picked straight from the search panel): 500 g packets only; 4 × 500 g = 2 kg, exact price
 await panel.getByRole('button', { name: /^Lean Mince/ }).first().tap();
-await c.getByRole('dialog').getByRole('button', { name: /^1 kg pack/ }).click();
-await c.getByRole('dialog').getByRole('button', { name: 'More' }).click();
+for (let i = 0; i < 3; i++) await c.getByRole('dialog').getByRole('button', { name: 'More' }).click();
+if (!(await c.getByText(/4 × 500 g packets = 2 kg estimated total/).count())) fail('mince packet total line missing');
 const addLabel = await c.getByRole('dialog').getByRole('button', { name: /Add to order/ }).textContent();
-if (!/R\s?250/.test(addLabel.replace(/\u00a0/g, ' '))) fail(`mince 2 × 1kg price on button: ${addLabel}`);
+if (!/R\s?250/.test(addLabel.replace(/\u00a0/g, ' '))) fail(`mince 4 × 500 g price on button: ${addLabel}`);
 await c.getByRole('dialog').getByRole('button', { name: /Add to order/ }).click();
 // Rib-eye on the bone is an option inside the rib-eye card
 await pick('rib eye', /^Rib-Eye/);
 await c.getByRole('dialog').getByRole('button', { name: /On the bone/ }).click();
-await c.getByRole('dialog').getByRole('button', { name: 'More quantity' }).first().click().catch(() => undefined);
+const ribRange = c.getByRole('dialog').getByRole('radio', { name: '500–600 g' });
+if (await ribRange.count()) await ribRange.click();
 await c.getByRole('dialog').getByRole('button', { name: /Add to order/ }).click();
-// Dry-aged rump: surcharge shown
+// Dry-aged rump: steaks are counted with a preferred weight each; surcharge shown
 await pick('rump', /^Rump/);
+if (await c.getByRole('dialog').getByRole('button', { name: /Add to order/ }).isEnabled()) fail('a steak could be added without a preferred weight');
+await c.getByRole('dialog').getByRole('button', { name: 'More' }).click();
+await c.getByRole('dialog').getByRole('radio', { name: '400–500 g' }).click();
+if (!(await c.getByText(/2 × about 450 g ≈ 900 g estimated total/).count())) fail('steak estimated total missing');
 await c.getByRole('dialog').getByRole('button', { name: /Dry-aged/ }).click();
 if (!(await c.getByText(/instead of/).count())) fail('dry-aged surcharge price not shown');
-await c.getByRole('dialog').getByRole('button', { name: 'More quantity' }).first().click().catch(() => undefined);
+await shot(c, '02a-steak-weights');
 await c.getByRole('dialog').getByRole('button', { name: /Add to order/ }).click();
 await c.getByRole('button', { name: 'Clear search' }).first().tap().catch(() => undefined);
 if (await c.getByText('Packing', { exact: true }).count()) fail('packaging is still offered as a customer choice');
 await shot(c, '02-catalogue');
 await c.getByRole('button', { name: /View order/ }).click();
 await c.getByRole('button', { name: 'Checkout' }).click();
-await c.getByLabel('Name', { exact: true }).fill('Thandi Journey-Test');
+// Email is required now
+await c.getByLabel('Full name').fill('Thandi Journey-Test');
 await c.getByLabel('Mobile number').fill('082 444 9917');
 await c.getByLabel(/^Email/).fill('thandi.journey@example.com');
 await c.getByText('Yes, please provide an invoice').click();
@@ -83,18 +89,21 @@ await c.getByLabel('Company · optional').fill('Zulu Catering');
 await c.getByText(/occasional reminder/).click();
 await shot(c, '03-details-invoice');
 await c.getByRole('button', { name: 'Continue' }).click();
-await c.locator('textarea').first().fill('12 Kerk Street, Pretoria East');
-// Fresh or frozen must be chosen; fresh on a delivery shows the journey-time disclosure
-if (await c.getByRole('button', { name: 'Continue' }).isEnabled()) fail('could continue without choosing fresh or frozen');
-await c.getByRole('radio', { name: /^Fresh/ }).click();
-if (!(await c.getByText(/longer than about 2 hours/).count())) fail('fresh delivery disclosure missing');
-await c.getByRole('radio', { name: /^Frozen/ }).click();
+// Delivery: the wording, the flat fee, an address and instructions (no fresh/frozen choice any more)
+if (!(await c.getByText(/We deliver within our regular local delivery area/).count())) fail('delivery wording missing');
+if (!(await c.getByText(/Delivery fee: R\s?150/).count())) fail('delivery fee not shown at checkout');
+if (await c.getByRole('radio', { name: /^Fresh/ }).count()) fail('fresh/frozen choice still shown');
+await c.getByLabel('Delivery address').fill('12 Kerk Street, Hoedspruit');
+if (await c.getByRole('button', { name: 'Continue' }).isEnabled()) fail('could continue without delivery instructions');
+await c.getByLabel('Delivery instructions').fill('Gate code 4411, green gate');
+await shot(c, '03b-delivery');
 await c.getByRole('button', { name: 'Continue' }).click();
 await c.getByText(/Checking today’s prices/).waitFor({ state: 'detached' }).catch(() => undefined);
 await c.waitForTimeout(400);
 const terms = c.getByRole('checkbox');
 if (await terms.count()) await terms.check();
 await shot(c, '04-review');
+if (!(await c.getByText('Delivery fee').count())) fail('delivery fee not in the order total');
 await c.getByRole('button', { name: 'Send order' }).click();
 await c.getByRole('heading', { name: 'Order received' }).waitFor();
 if (await c.getByText(/order (is|has been) confirmed/i).count()) fail('success screen says confirmed');
@@ -234,12 +243,21 @@ await c.getByLabel(/Name or reference the payment came from/).fill('ZULU CATERIN
 await c.getByText(/I’ve paid Terram Farm using reference/).click();
 await shot(c, '10a-ive-paid');
 await c.getByRole('button', { name: 'Send — I’ve paid' }).click();
+await c.getByRole('heading', { name: 'Thank you!' }).waitFor();
+await shot(c, '10t-thank-you');
+if (!(await c.getByRole('link', { name: 'Home' }).count())) fail('thank-you page has no way home');
+await c.getByRole('button', { name: 'Back to my payment page' }).click();
 await c.getByRole('heading', { name: 'Payment awaiting verification' }).waitFor();
+if (await c.getByRole('button', { name: /Already paid/ }).count()) fail('“Already paid?” offered again after declaring');
 const pdf = `${out}/proof.pdf`;
 fs.writeFileSync(pdf, '%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
 await c.getByLabel('Proof of payment file').setInputFiles(pdf);
 await c.getByRole('button', { name: 'Send proof' }).click();
+await c.getByRole('heading', { name: 'Thank you!' }).waitFor();
+await c.getByRole('button', { name: 'Back to my payment page' }).click();
 await c.getByText(/being checked/).first().waitFor();
+await c.reload();
+if (await c.getByRole('heading', { name: 'Thank you!' }).count()) fail('thank-you page shown again on a return visit');
 const st = await api(c, 'GET', `/api/public${new URL(orderUrl).pathname}`);
 if (st.body.order.payment.state === 'paid') fail('declaration/proof marked the order paid');
 await shot(c, '10b-awaiting-verification');
@@ -267,14 +285,25 @@ await shot(c, '11-receipt');
 await c.keyboard.press('Escape');
 step('customer sees the receipt');
 
-// Invoice: issued by hand with a real reference and file
+// Invoice: uploaded on the order, customer notified only because staff chose to
 await p.reload();
-await p.getByRole('button', { name: /Mark issued/ }).click();
-await p.getByLabel('Invoice number / reference').fill('INV-0042');
-await p.locator('input[type=file]').setInputFiles(pdf);
-await p.getByRole('button', { name: 'Mark sent' }).click();
-await p.getByText('Invoice marked as sent').first().waitFor();
-step('staff attached and sent the invoice');
+await p.getByRole('button', { name: 'Upload invoice (PDF)' }).click();
+await p.getByRole('dialog').getByLabel('Invoice number · optional').fill('INV-0042');
+await p.getByRole('dialog').locator('input[type=file]').setInputFiles(pdf);
+await shot(p, '11b-invoice-upload');
+await p.getByRole('button', { name: 'Save and notify customer' }).click();
+await p.getByText(/Invoice saved and the customer is being emailed/).first().waitFor();
+step('staff uploaded the invoice and chose to notify the customer');
+// Communications panel: confirmation preview, editable WhatsApp (never changes payment)
+await p.getByRole('button', { name: 'Send order confirmation…' }).click();
+await p.getByRole('dialog').getByText(/Subject:/).waitFor();
+await p.keyboard.press('Escape');
+await p.getByRole('button', { name: 'WhatsApp message…' }).click();
+const waText = await p.getByRole('dialog').getByLabel('WhatsApp message').inputValue();
+if (!waText.includes('/o/')) fail('WhatsApp message has no portal link: ' + waText);
+await shot(p, '11c-whatsapp');
+await p.keyboard.press('Escape');
+step('communications: confirmation preview and editable WhatsApp message');
 
 const done = await api(p, 'POST', `/api/orders/${order.id}/transition`, { to: 'completed' });
 if (done.status !== 200) fail('complete: ' + JSON.stringify(done.body));
@@ -302,7 +331,6 @@ step('reorder loaded a draft basket (nothing sent)');
 // Send the reorder: a returning customer is invited to review on Google and follow on Instagram
 await c.getByRole('button', { name: 'Checkout' }).click();
 await c.getByRole('button', { name: 'Continue' }).click();
-await c.getByRole('radio', { name: /^Frozen/ }).click();
 await c.getByRole('button', { name: 'Continue' }).click();
 await c.getByText(/Checking today’s prices/).waitFor({ state: 'detached' }).catch(() => undefined);
 if (await c.getByRole('checkbox').count()) await c.getByRole('checkbox').check();
@@ -320,8 +348,33 @@ if (notes.some((n) => n.status === 'sent')) fail('a message was marked sent alth
 if (!notes.length) fail('no messages were recorded for the order');
 step(`${notes.length} messages recorded for the order, none falsely marked sent`);
 
-// Dashboard queues
+// Home page: sections, View my orders (mobile number → one-time code), About and FAQ pages
+const home = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+const h = await home.newPage();
+h.on('pageerror', (e) => fail('home page error: ' + e.message));
+await h.goto(base + '/');
+await h.getByRole('heading', { name: /Farm-raised Beef/ }).waitFor();
+for (const name of ['What we offer', 'How ordering works', 'Delivery', 'Already ordered?']) if (!(await h.getByRole('heading', { name }).count())) fail(`home section missing: ${name}`);
+if (!(await h.getByRole('link', { name: /Leave a Google review/ }).count())) fail('home page review link missing');
+await h.getByLabel('Mobile number').fill('082 444 9917');
+await h.getByRole('button', { name: 'Send me a code' }).click();
+await h.getByText(/we’ve emailed a 6-digit code/).waitFor();
+await shot(h, '17-home-view-my-orders');
+await h.getByRole('button', { name: 'Open menu' }).click();
+await h.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'About Us' }).click();
+await h.getByRole('heading', { name: /Farm-raised Beef/ }).waitFor();
+if (/grass[- ]fed|grain[- ]fed/i.test(await h.locator('main').innerText())) fail('About page makes a grass/grain-fed claim');
+await shot(h, '18-about');
+await h.goto(base + '/faq');
+await h.getByRole('heading', { name: 'Delivery' }).first().waitFor();
+await shot(h, '19-faq');
+step('home page sections, View my orders by mobile, About and FAQ (by topic) pages');
+await home.close();
+
+// Dashboard
 await p.goto(base + '/');
+await p.getByText('Where things are').waitFor();
+for (const label of ['New / Confirmed', 'Cutting', 'Packing', 'Packed & Ready', 'Out for Delivery', 'Delivered']) if (!(await p.getByText(label, { exact: true }).count())) fail(`dashboard stage missing: ${label}`);
 await shot(p, '15-dashboard');
 await b.close();
 console.log(errors.length ? `\n${errors.length} problem(s):\n- ${errors.join('\n- ')}` : '\nJourney passed');

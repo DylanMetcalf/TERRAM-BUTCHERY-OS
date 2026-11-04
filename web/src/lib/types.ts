@@ -54,11 +54,15 @@ export interface OrderSummary {
   final_total_cents?: number | null;
   amount_paid_cents?: number | null;
   storage?: 'fresh' | 'frozen' | null;
+  delivery_arrangement?: 'standard' | 'custom' | 'separate' | 'collection' | null;
+  released_unpaid_at?: string | null;
+  released_unpaid_reason?: string | null;
+  payment_waived_at?: string | null;
   finalized_at?: string | null;
   finalized_version?: number;
 }
 
-export type PaymentState = 'not_requested' | 'requested' | 'pending' | 'proof_submitted' | 'partially_paid' | 'paid' | 'failed' | 'refunded';
+export type PaymentState = 'not_requested' | 'requested' | 'pending' | 'proof_submitted' | 'partially_paid' | 'paid' | 'failed' | 'refunded' | 'rejected' | 'waived';
 export type InvoiceStatus = 'not_requested' | 'requested' | 'in_progress' | 'issued' | 'sent' | 'cancelled';
 
 export interface OrderItem {
@@ -78,6 +82,9 @@ export interface OrderItem {
   cut_at: string | null;
   packed_at: string | null;
   packed_weight_g: number | null;
+  /** The customer's preferred weight per piece, e.g. 300–400 g. */
+  weight_pref?: { id: string; label: string; min_g: number | null; max_g: number | null } | null;
+  expected_g?: number | null;
   price_cents: number | null;
   price_unit: 'kg' | 'each' | null;
   sale_option?: string | null;
@@ -129,6 +136,10 @@ export interface Product {
   variant_label?: string | null;
   unavailable_reason?: string | null;
   image?: string | null;
+  order_method?: 'packs' | 'items_weighed' | 'items' | 'by_weight' | 'whole' | 'custom';
+  order_method_reviewed?: boolean;
+  weight_ranges?: { id: string; label: string; min_g: number; max_g: number }[];
+  group_only?: boolean;
 }
 
 export interface Customer {

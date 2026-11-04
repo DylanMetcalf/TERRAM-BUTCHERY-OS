@@ -28,32 +28,62 @@ This covers the customer ordering platform: catalogue rules, the order form, con
 11. **Completed**: the customer can leave optional feedback and **Reorder**. Reorder loads a new draft basket at today's prices; the customer reviews and sends it. Nothing is ordered automatically.
 12. **Reorder reminders** (optional): sent only to customers who ticked the reminder box, about 14 days after completion (configurable). Each customer gets one per order, and none if they've ordered again since. Every reminder has an unsubscribe link.
 
-## Instagram, Google reviews and past orders
+## Customer details at checkout
 
-- *Settings → Business*: paste your **Instagram profile link** and your **Google review link** (Google Business Profile → "Ask for reviews" → copy link). If either is left blank, it isn't shown.
-- **Instagram** is offered to every customer: on the thank-you screen, the order page and in emails.
-- **Google review** is offered only to customers who have actually had an order completed. That means the thank-you screen for a returning customer, the order page once completed, and the "order complete" email. Everyone who qualifies is asked, whatever their rating. Google's rules don't allow inviting only happy customers.
-- **Past orders**:
-  - Each device remembers the orders placed or opened on it ("Orders from this device").
-  - Customer emails include a "See all your orders" link that signs them in for 30 days.
-  - Customers can also get a 6-digit code at `/account`.
-  - Orders are never shown just because someone typed a name or phone number. Anyone could type those.
+Required: **full name**, a **valid mobile number** (stored as +27…; other countries need +country code), a **valid email**, and for deliveries a **delivery address** and **delivery instructions** (directions, gate code). There are no customer passwords.
 
-## Fresh or frozen
+## Delivery fee (flat R150)
 
-Customers must choose **fresh** or **frozen** (there's no default).
-- Fresh on a delivery: the form explains that journeys over about 2 hours (*Settings → Orders & fulfilment → Fresh deliveries*) can't be guaranteed, recommends frozen, and offers WhatsApp.
-- Staff get a "Check delivery time" item on fresh delivery orders.
-- There's no route-time service, so nothing is calculated from distance: staff judge the journey.
-- The choice shows on the order, cutting list, packing bench, fulfilment board, docket, customer order page and payment page. Staff can change it on the order.
+- *Settings → Orders & fulfilment → Collection & delivery*: pricing method (flat fee per order), the **standard delivery fee** (R150 to start), the **delivery area** and **policy** texts shown to customers.
+- The fee is written onto each order when it's placed. Changing the setting **never changes existing orders**.
+- Checkout says: "We deliver within our regular local delivery area. Other locations can be arranged separately. We will contact you to confirm the delivery arrangements." The fee shows on checkout, the received email, the order page, the payment page and the docket.
+- On an order (*Delivery fee → Change*): standard fee, **custom fee** (managers only, e.g. outside the area), **arranged separately** (no fee on the order) or collection. Totals are recalculated; a finalized order gets a new version, and an open payment request is updated.
+- The old per-km fields are no longer used for new orders.
 
-## Vacuum packing and mince packs
+## Products: how customers order them
 
-Everything is vacuum-packed. The old "Packing" options (e.g. individually packed) are switched off for customers and staff. They're kept in the database so past orders still read correctly. Mince is sold only in the pack sizes set on the product (500 g first and preferred; 1 kg where offered). The form shows the pack count and total ("4 × 500 g packs = 2 kg"), and the server refuses any other size.
+*Products → (product) → How customers order it*:
+- **Fixed-weight packs**: e.g. mince in 500 g packets ("4 × 500 g packets = 2 kg estimated total").
+- **Counted, priced on weight**: e.g. steaks. Customers choose how many and a **preferred weight each** (300–400 g, 400–500 g, 500–600 g, or Other / special request, which needs a note). Weight choices are set per product.
+- **Individual items**, **by weight**, **whole / sized pieces**, or **custom** (ask under Special requests).
+- **Variations**: a main product (e.g. Brisket) with its own variations (Whole / Smoked BBQ / Smoked Honey Mustard), each with its own price, description, availability and rules. Use **Add variation**. Switch on "Only a heading for its variations" if the main product can't be ordered itself.
+- The upgrade set mince to 500 g packets (only where it still had the old 500 g + 1 kg setup) and added the three steak weight choices to priced steak products. These are marked **Check set-up** until someone opens and saves them (*Dashboard → Attention → Product set-ups to check*). No prices or weights were invented.
+- **Everything is frozen** now: customers aren't asked fresh or frozen. Older orders keep "fresh" where it was chosen.
 
-## Help & FAQ
+## Final weights at any stage
 
-`/help` shows the questions from *Settings → Help & FAQ*, plus a WhatsApp button (from the business phone number). Edit the answers there; only state what's true for the farm. `{{leadTime}}` and `{{freshMaxHours}}` are filled in automatically.
+Weighed items can get a final weight while **cutting, packing, packed or ready** (*order → item → Enter final weight*), without moving the order. Each change is in the history with who and when. Totals follow; a finalized order gets a new version and an open payment request is updated. A weight far from the estimate is flagged for a second look.
+
+## Payments
+
+- States: not requested, requested, customer said paid / proof sent (awaiting verification), part paid, paid, payment not confirmed (rejected), waived.
+- The customer taps **Already paid?** on their **payment page** (never from the email), optionally adds a proof, and sees a **thank-you page** once. The payment page stays the permanent place to come back to.
+- Each "I've paid" or proof sends **"Payment Verification Required — Terram Farm — #N"** to the payment reviewers (*Settings → Emails & reminders → Who checks the bank*, default Sharonm@Imagine.co.za), once per declaration or proof. It links to the order; nothing in the email marks anything paid.
+- Managers can record full or part payments with the **date received** and **bank reference**, waive a payment (with a reason), or reject a declaration or proof.
+- **Unpaid release**: a manager can send an unpaid order out (*More → Send out for delivery unpaid…*) after a warning, a confirmation and a reason. Their name, the time and the reason are recorded. The payment status doesn't change, and it stays on the dashboard as owed.
+
+## Invoices
+
+Upload the PDF on the order at any time (*Invoice → Upload invoice*). **Save invoice only** (customer not emailed) or **Save and notify customer**. You can view, download, replace or remove it, and send the notification again later (with a preview). The customer downloads it securely from their order page and payment page.
+
+## Communications on the order
+
+*Communications* lists everything sent to the customer, with honest statuses: **Sent** means our mail server accepted it (we can't see inbox delivery, so "Delivered" is never shown), plus Queued / Failed / Not sent. The panel has separate actions: send (or resend) the order confirmation, the payment request, the invoice notification (all with previews), an **editable WhatsApp message** (opened on your phone, recorded as a hand-off, never changes payment), and **copy portal link**. In *History* you can add an **internal note** or an **update for the customer** (shown on their order page).
+
+## Website pages
+
+- Home page sections: hero, intro, products, ordering info, how ordering works, delivery, about, **View my orders**, reviews and social, FAQ preview, Order now. All pages share the same header (Home, About Us, Order Now, FAQs, Contact) and footer.
+- **About Us** (`/about`): edit in *Settings → About page*. It says "farm-raised"; don't add claims you can't back up.
+- **FAQs** (`/faq`, `/help` still works): grouped by topic, edited in *Settings → FAQs*. `{{leadTime}}`, `{{deliveryArea}}` and `{{deliveryFee}}` are filled in.
+- Instagram, Facebook and Google review links appear only if set in *Settings → Business*. The home page says "Ordered from us? Leave us a Google review"; the thank-you pages also offer it.
+
+## View my orders (no passwords)
+
+The customer enters their **mobile number** (or email). **There is no SMS service connected**, so the one-time code is **emailed** to the address(es) on that number's orders. The reply is the same whether or not the number is known. After the code, they see only their own orders: products, totals, delivery fee, payment and production status, outstanding amount, and invoice availability.
+
+## Unfinished orders
+
+The order form saves the basket on the device, and also privately on the server for 14 days (tied to a cookie on that device, not to a name or number). If the browser loses it, the form offers **Continue that order / Start a new order**. It's deleted when the order is sent.
 
 ## Vegetables and new sections
 
@@ -100,24 +130,18 @@ How the details are protected:
 
 ## How to test
 
-- `npm test` runs the API/unit tests. Email goes to an in-memory outbox and PayFast is mocked; nothing real is sent or charged.
+- `npm test` runs the API/unit tests (`tests/master.test.ts` covers this upgrade). Email goes to an in-memory outbox and PayFast is mocked; nothing real is sent or charged.
 - `npm run build && bash scripts/qa-server.sh` starts a throwaway server on :8092 with sample data (not your live database). Then:
-  - `node scripts/journey.mjs` runs the whole customer journey in a browser:
-    - phone search, fresh/frozen choice, received
-    - confirm, suggested change
-    - packed, final weighing, finalize
-    - payment request preview and send, printed docket total
-    - payment page and copy-all, "I've made payment", proof upload
-    - manager verification, paid → ready
-    - receipt, invoice, completed, feedback, reorder, review prompt
-  - `node scripts/e2e.mjs` covers staff import, cutting, packing, final weighing and fulfilment.
-  - `node scripts/overflow-all.mjs` checks every screen at phone, tablet and desktop widths.
+  - `node scripts/journey.mjs`: the whole customer journey in a phone browser (search, packets, steak weights, delivery fee and instructions, confirm, change, final weighing, payment request, "Already paid?", thank-you, proof, verification, invoice upload and notify, communications, completion, reorder, home page, View my orders, About, FAQ, dashboard).
+  - `node scripts/e2e.mjs`: staff import, cutting, packing, final weighing and fulfilment.
+  - `node scripts/overflow-all.mjs`: every staff screen at phone, tablet and desktop widths.
+  - `node scripts/sheets-check.mjs`: public pages signed out, and the weighing, delivery and WhatsApp sheets at 360/390 px (no sideways overflow or scroll, even with an input focused).
 
 ### Trying it yourself on the live site (with a test order)
-1. Place a small order at `/order` with your own email, and choose fresh or frozen.
+1. Place a small order at `/order` with your own email and mobile number.
 2. Confirm it in Terram, then move it through cutting and packing and tick the items packed.
 3. Packing → **Final weighing** → enter the weights, tick the packs, then **Finalize & request payment** → **Send by email**.
-4. Open the payment page from the email. Check the amount, details and reference, then tap **I've made payment** or upload a screenshot. Don't actually pay.
+4. Open the payment page from the email. Check the amount, details and reference, then tap **Already paid?** (or upload a screenshot). Don't actually pay. The reviewer address gets "Payment Verification Required".
 5. As a manager, use **Check & confirm** / **Check & verify**. For a test, record it and then **Reverse** it, or delete the test order afterwards.
 6. The order shows **Ready**. Mark it collected/delivered.
 
@@ -126,8 +150,9 @@ How the details are protected:
 - **Opening the banking app**: there's no bank payment-link integration, so the page can't open a customer's banking app or start a transfer. It gives copy buttons (per field and "copy all") and clear steps instead.
 - **PayFast** stays switched off unless its server variables are set; the payment page is EFT-only.
 
-- **WhatsApp/SMS** notifications are not connected. The notification service has the channel slots, but only email sends.
+- **WhatsApp/SMS** sending is not connected. WhatsApp messages are opened on a staff phone and recorded as hand-offs. The View-my-orders code goes by email because there is no SMS provider.
+- **Email delivery** can't be confirmed (SMTP only reports acceptance), so statuses stop at "Sent". Bounces aren't tracked.
 - **PayFast** is tested against PayFast's documented signature rules and a mocked ITN, not against a live PayFast account. Do a sandbox payment before going live.
 - **Refunds** are recorded by hand: "Reverse" on a payment. PayFast refunds are made in the PayFast dashboard.
-- **Invoices** are prepared manually. Terram tracks the request and stores the file.
+- **Invoices** are prepared in your accounting software. Terram stores the uploaded file and sends the notification.
 - Order history sign-in uses a 6-digit email code, so it needs working email.

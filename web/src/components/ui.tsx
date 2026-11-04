@@ -428,7 +428,7 @@ export function Sheet({ open, onClose, title, children, footer, width = 'md', su
             <X className="size-5" />
           </IconButton>
         </div>
-        <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-5">{children}</div>
+        <div className="min-w-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5">{children}</div>
         {footer && <div className="safe-bottom border-t border-line bg-surface-2 px-5 py-3">{footer}</div>}
       </div>
     </div>,

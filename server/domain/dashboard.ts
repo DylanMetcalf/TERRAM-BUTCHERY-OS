@@ -44,6 +44,40 @@ export function dashboard() {
     invoices_outstanding: count("SELECT COUNT(*) n FROM orders WHERE invoice_status IN ('requested','in_progress')"),
     failed_notifications: notificationProblemCount(),
   };
+  /** Where every open order is, by production stage. Each stage opens the matching list. */
+  const weekAgo = addDays(today, -6);
+  const stages = [
+    { key: 'new', label: 'New / Confirmed', n: count("SELECT COUNT(*) n FROM orders WHERE status IN ('review','needs_clarification','confirmed','on_hold')"), sub: counts.to_review ? `${counts.to_review} to confirm` : null },
+    { key: 'cutting', label: 'Cutting', n: count("SELECT COUNT(*) n FROM orders WHERE status IN ('cutting','cut')"), sub: null },
+    { key: 'packing', label: 'Packing', n: count("SELECT COUNT(*) n FROM orders WHERE status = 'packing'"), sub: null },
+    { key: 'packed', label: 'Packed & Ready', n: count("SELECT COUNT(*) n FROM orders WHERE status IN ('packed','ready')"), sub: queuesSub() },
+    { key: 'out', label: 'Out for Delivery', n: counts.out_for_delivery, sub: null },
+    { key: 'delivered', label: 'Delivered', n: count("SELECT COUNT(*) n FROM orders WHERE status = 'completed' AND completed_at >= ?", `${weekAgo}T00:00:00`), sub: 'last 7 days' },
+  ];
+  function queuesSub() {
+    const w = count("SELECT COUNT(*) n FROM orders WHERE status = 'packed' AND finalized_at IS NULL");
+    return w ? `${w} to weigh` : null;
+  }
+  /** Things only we can move forward. Customer-pending items (e.g. a payment we're waiting for) are not here. */
+  const waiting = [
+    { key: 'confirm', label: 'Orders to confirm', n: counts.to_review, to: '/orders?view=review' },
+    { key: 'cut', label: 'Confirmed · to start cutting', n: counts.to_cut, to: '/cutting' },
+    { key: 'weigh', label: 'Packed · enter final weights', n: count("SELECT COUNT(*) n FROM orders WHERE status = 'packed' AND finalized_at IS NULL"), to: '/orders?view=weighing' },
+    { key: 'request', label: 'Finalized · send the payment request', n: queues.finalized_not_requested, to: '/orders?view=to_request' },
+    { key: 'verify', label: 'Customer says paid · check the bank', n: count("SELECT COUNT(DISTINCT o.id) n FROM orders o WHERE o.status != 'cancelled' AND o.payment_state NOT IN ('paid','waived') AND (EXISTS (SELECT 1 FROM payment_proofs p WHERE p.order_id = o.id AND p.status = 'submitted') OR EXISTS (SELECT 1 FROM payment_declarations d WHERE d.order_id = o.id AND d.status = 'submitted'))"), to: '/orders?view=verify' },
+    { key: 'paid_ready', label: 'Paid · send out or hand over', n: queues.paid_ready, to: '/fulfilment' },
+    { key: 'invoice', label: 'Invoices to upload', n: count("SELECT COUNT(*) n FROM orders WHERE invoice_status IN ('requested','in_progress') AND invoice_file_id IS NULL AND status != 'cancelled'"), to: '/invoices' },
+    { key: 'arrange', label: 'Deliveries to arrange separately', n: count("SELECT COUNT(*) n FROM orders WHERE delivery_arrangement = 'separate' AND status NOT IN ('completed','cancelled')"), to: '/orders?view=arrange' },
+  ].filter((w) => w.n > 0);
+  /** Real problems that are still unresolved. */
+  const attention = [
+    { key: 'exceptions', label: 'Questions to decide', n: count("SELECT COUNT(*) n FROM exceptions e LEFT JOIN orders o ON o.id = e.order_id WHERE e.status = 'open' AND (o.id IS NULL OR o.status != 'cancelled')"), to: '/exceptions' },
+    { key: 'emails', label: 'Emails that didn’t send', n: queues.failed_notifications, to: '/settings?tab=messages' },
+    { key: 'address', label: 'Deliveries with no address', n: count("SELECT COUNT(*) n FROM orders WHERE fulfilment_type = 'delivery' AND (delivery_address IS NULL OR TRIM(delivery_address) = '') AND status NOT IN ('completed','cancelled')"), to: '/orders?view=no_address' },
+    { key: 'unpaid_released', label: 'Sent out before payment · still unpaid', n: count("SELECT COUNT(*) n FROM orders WHERE released_unpaid_at IS NOT NULL AND payment_state NOT IN ('paid','waived') AND status != 'cancelled'"), to: '/orders?view=unpaid_released' },
+    { key: 'delivered_unpaid', label: 'Delivered · not paid', n: count("SELECT COUNT(*) n FROM orders WHERE status = 'completed' AND payment_state NOT IN ('paid','waived') AND COALESCE(final_total_cents, estimated_total_cents, 0) > amount_paid_cents"), to: '/orders?view=delivered_unpaid' },
+    { key: 'products', label: 'Product set-ups to check', n: count("SELECT COUNT(*) n FROM products WHERE active = 1 AND order_method_reviewed = 0 AND weight_ranges IS NOT NULL"), to: '/products?review=1' },
+  ].filter((a) => a.n > 0);
   const exceptions = openExceptionCount();
   const ids = (sql: string, ...args: unknown[]) => (db().prepare(sql).all(...args) as { id: string }[]).map((r) => getOrderSummary(r.id)!);
   const dueToday = ids(`SELECT id FROM orders WHERE requested_date = ? AND ${open} ORDER BY fulfilment_type, time_window, order_number LIMIT 40`, today);
@@ -75,5 +109,5 @@ export function dashboard() {
     ...e,
     payload: json(e.payload, {}),
   }));
-  return { today, counts, queues, exceptions, due_today: dueToday, overdue, to_review: toReview, week, undated, activity, top_exceptions: topExceptions };
+  return { today, counts, queues, stages, waiting, attention, exceptions, due_today: dueToday, overdue, to_review: toReview, week, undated, activity, top_exceptions: topExceptions };
 }

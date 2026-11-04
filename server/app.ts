@@ -1,3 +1,4 @@
+import draftRoutes from './routes/drafts.js';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -57,6 +58,7 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
   api.route('/public', publicRoutes);
   api.route('/integrations', integrations);
   api.route('/public', customerRoutes);
+  api.route('/public', draftRoutes);
   api.route('/orders', orders);
   api.route('/items', items);
   api.route('/production', production);

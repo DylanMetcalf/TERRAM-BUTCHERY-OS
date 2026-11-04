@@ -11,6 +11,7 @@ import {
   Phone,
   Plus,
   Printer,
+  Scale,
   Scissors,
   Package,
   Trash2,
@@ -20,12 +21,12 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { primaryNextStep, SOURCE_LABEL, STATUS_LABEL, type OrderStatus } from '../../../shared/workflow';
 import { ExceptionCard } from '../components/ExceptionCard';
-import { AmendmentsPanel, ConfirmSheet, CustomerLinkCard, ExpectedRow, InvoicePanel, NotificationList, PaymentPanel, TimeframeSheet } from '../components/OrderPlatform';
+import { AmendmentsPanel, ConfirmSheet, CustomerLinkCard, ExpectedRow, InvoiceNotifySheet, InvoicePanel, NotificationList, PaymentPanel, TimeframeSheet } from '../components/OrderPlatform';
+import { CommunicationsPanel } from '../components/Communications';
 import { FinalizationCard, FinalWeighingSheet, PaymentRequestSheet, StorageBadge } from '../components/FinalWeighing';
 import { ItemEditor, type ItemDraft } from '../components/ItemEditor';
 import { FulfilmentLabel, SourceIcon, StageTrack, StatusPill } from '../components/order-bits';
 import { Badge, Button, Card, cx, ErrorState, Field, Input, KeyValue, LoadingBlock, SectionTitle, Segmented, Sheet, Textarea, useConfirm, useToast } from '../components/ui';
-import { deliveryFeeCents } from '../../../shared/delivery';
 import { api, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { dateTime, estimateLinePrice, formatMoney, friendlyDate, longDate, timeAgo, todayYmd, waLink } from '../lib/format';
@@ -52,7 +53,8 @@ interface Detail {
   finalization_history: any[];
   finalization_problems: string[];
   declarations: any[];
-  release: { require_payment: boolean; allow_unpaid: boolean };
+  release: { require_payment: boolean; allow_unpaid: boolean; released_unpaid_at: string | null; released_unpaid_reason: string | null };
+  delivery: { method: string; fee_cents: number | null; area: string; policy: string };
 }
 
 const SECONDARY_LABEL: Partial<Record<OrderStatus, string>> = {
@@ -87,6 +89,10 @@ export default function OrderDetail() {
   const [weighing, setWeighing] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [releasing, setReleasing] = useState(false);
+  const [weighItem, setWeighItem] = useState<OrderItem | null>(null);
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
+  const [invoiceNotify, setInvoiceNotify] = useState(false);
+  const [forCustomer, setForCustomer] = useState(false);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['order', id] });
@@ -130,10 +136,11 @@ export default function OrderDetail() {
     onError: onErr,
   });
   const addNote = useMutation({
-    mutationFn: (text: string) => api.post(`/api/orders/${id}/notes`, { text }),
-    onSuccess: () => {
+    mutationFn: (v: { text: string; customer: boolean }) => (v.customer ? api.post(`/api/orders/${id}/customer-update`, { text: v.text }) : api.post(`/api/orders/${id}/notes`, { text: v.text })),
+    onSuccess: (_r, v) => {
       setNote('');
       invalidate();
+      if (v.customer) toast({ tone: 'success', title: 'Update added', body: 'The customer sees it on their order page.' });
     },
     onError: onErr,
   });
@@ -233,8 +240,8 @@ export default function OrderDetail() {
                         {SECONDARY_LABEL[t] ?? STATUS_LABEL[t]}
                       </button>
                     ))}
-                    {data.release?.allow_unpaid && can('payments.write') && o.status === 'packed' && o.finalized_at && o.payment_state !== 'paid' && (
-                      <button onClick={() => { setMoreOpen(false); setReleasing(true); }} className="flex w-full items-center rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-ochre-soft-ink hover:bg-sunken">Release before payment…</button>
+                    {can('payments.write') && ['packed', 'ready'].includes(o.status) && o.finalized_at && !['paid', 'waived'].includes(o.payment_state ?? '') && !o.released_unpaid_at && (
+                      <button onClick={() => { setMoreOpen(false); setReleasing(true); }} className="flex w-full items-center rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-ochre-soft-ink hover:bg-sunken">{o.fulfilment_type === 'collection' ? 'Release for collection unpaid…' : 'Send out for delivery unpaid…'}</button>
                     )}
                     {can('orders.cancel') && (
                       <>
@@ -275,6 +282,11 @@ export default function OrderDetail() {
         </Card>
       )}
       {o.status === 'on_hold' && <Card className="mb-5 bg-sunken p-4 text-[14.5px] text-ink-2">This order is on hold. Use “More” to put it back into the workflow.</Card>}
+      {o.released_unpaid_at && !['paid', 'waived'].includes(o.payment_state ?? '') && o.status !== 'cancelled' && (
+        <Card className="mb-5 border-ochre/50 bg-ochre-soft p-4 text-[14.5px] text-ochre-soft-ink" role="status">
+          <b>Released before payment</b> {dateTime(o.released_unpaid_at)}{o.released_unpaid_reason ? ` — “${o.released_unpaid_reason}”` : ''}. Payment is still outstanding.
+        </Card>
+      )}
 
       {openEx.length > 0 && (
         <section className="mb-6">
@@ -304,16 +316,25 @@ export default function OrderDetail() {
                       {i.preparation_label && <span className="text-[14px] font-medium text-brand">{i.preparation_label}</span>}
                     </div>
                     {i.special_instructions && <p className="mt-0.5 text-[14px] text-ink-2">“{i.special_instructions}”</p>}
-                    <div className="mt-1 flex flex-wrap items-center gap-3 text-[12.5px] text-ink-3">
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-ink-3">
+                      {i.weight_pref && <span>Preferred {i.weight_pref.label}{i.weight_pref.min_g ? ' each' : ''}</span>}
+                      {i.expected_g ? <span>Estimated {(i.expected_g / 1000).toLocaleString('en-ZA', { maximumFractionDigits: 2 })} kg</span> : null}
+                      {i.packed_weight_g ? <span className="font-semibold text-ink-2">Final {(i.packed_weight_g / 1000).toLocaleString('en-ZA', { maximumFractionDigits: 3 })} kg</span> : null}
+                      {i.price_cents != null && <span>{formatMoney(i.price_cents)}/{i.price_unit === 'kg' ? 'kg' : 'each'}</span>}
                       {i.cut_at && <span className="inline-flex items-center gap-1 text-field"><Scissors className="size-3" /> Cut</span>}
-                      {i.packed_at && <span className="inline-flex items-center gap-1 text-field"><Package className="size-3" /> Packed{i.packed_weight_g ? ` · ${(i.packed_weight_g / 1000).toFixed(2)}kg` : ''}</span>}
+                      {i.packed_at && <span className="inline-flex items-center gap-1 text-field"><Package className="size-3" /> Packed</span>}
                       {i.source_text && i.source_text !== 'Order form' && <span className="truncate">from “{i.source_text}”</span>}
                     </div>
+                    {canProduce && WEIGHABLE.includes(o.status) && i.price_unit === 'kg' && (
+                      <button type="button" onClick={() => setWeighItem(i)} className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-lg border border-line-strong px-3 text-[13px] font-semibold text-ink-2 hover:bg-sunken">
+                        <Scale className="size-3.5" />{i.packed_weight_g ? 'Change final weight' : 'Enter final weight'}
+                      </button>
+                    )}
                   </div>
                   <div className="shrink-0 text-right">
                     <div className="font-display text-[20px] font-semibold tabular">{i.qty_label}</div>
                     {i.final_cents != null ? (
-                      <div className="text-[12px] font-semibold text-ink-2">{formatMoney(i.final_cents)}</div>
+                      <div className="text-[12px] font-semibold text-ink-2">{formatMoney(i.final_cents)}{i.pricing !== 'exact' && i.packed_weight_g ? ' final' : ''}</div>
                     ) : (i.est_cents ?? estimateLinePrice(i.qty, i.price_cents, i.price_unit)) != null ? (
                       <div className="text-[12px] text-ink-3">{i.pricing === 'exact' ? '' : '≈ '}{formatMoney((i.est_cents ?? estimateLinePrice(i.qty, i.price_cents, i.price_unit))!)}</div>
                     ) : null}
@@ -345,10 +366,22 @@ export default function OrderDetail() {
                   <span className="font-semibold tabular">{formatMoney(total)}</span>
                 </div>
               )}
-              {total != null && total > 0 && o.fulfilment_type === 'delivery' && !!o.delivery_fee_cents && (
-                <div className="flex items-center justify-between border-t border-line bg-surface-2 px-5 py-3 text-[14px]">
-                  <span className="text-ink-3">With delivery ({formatMoney(o.delivery_fee_cents)})</span>
-                  <span className="font-semibold tabular">{formatMoney(total + o.delivery_fee_cents)}</span>
+              {total != null && total > 0 && !!o.delivery_fee_cents && (
+                <>
+                  <div className="flex items-center justify-between border-t border-line bg-surface-2 px-5 py-2 text-[14px]">
+                    <span className="text-ink-3">Delivery fee</span>
+                    <span className="tabular">{formatMoney(o.delivery_fee_cents)}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-line bg-surface-2 px-5 py-3 text-[14px]">
+                    <span className="text-ink-3">Total</span>
+                    <span className="font-semibold tabular">{formatMoney(total + o.delivery_fee_cents)}</span>
+                  </div>
+                </>
+              )}
+              {data.money?.balance_cents != null && data.money.paid_cents > 0 && (
+                <div className="flex items-center justify-between border-t border-line bg-surface-2 px-5 py-2 text-[14px]">
+                  <span className="text-ink-3">Paid {formatMoney(data.money.paid_cents)} · balance</span>
+                  <span className="font-semibold tabular">{formatMoney(data.money.balance_cents)}</span>
                 </div>
               )}
             </Card>
@@ -370,22 +403,29 @@ export default function OrderDetail() {
                   className="mt-5 flex gap-2"
                   onSubmit={(ev) => {
                     ev.preventDefault();
-                    if (note.trim()) addNote.mutate(note.trim());
+                    if (note.trim()) addNote.mutate({ text: note.trim(), customer: forCustomer });
                   }}
                 >
-                  <Input value={note} onChange={(ev) => setNote(ev.target.value)} placeholder="Add a note to the history…" aria-label="Add a note" />
-                  <Button type="submit" disabled={!note.trim()} loading={addNote.isPending}>Add</Button>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Segmented size="sm" value={forCustomer ? 'customer' : 'internal'} onChange={(v) => setForCustomer(v === 'customer')} options={[{ value: 'internal', label: 'Internal note' }, { value: 'customer', label: 'Update for the customer' }]} />
+                    <Input value={note} onChange={(ev) => setNote(ev.target.value)} placeholder={forCustomer ? 'Shown on the customer’s order page (not emailed)…' : 'Only staff see this…'} aria-label={forCustomer ? 'Update for the customer' : 'Add an internal note'} />
+                  </div>
+                  <Button type="submit" className="self-end" disabled={!note.trim()} loading={addNote.isPending}>Add</Button>
                 </form>
               )}
             </Card>
           </section>
 
-          <section>
-            <SectionTitle>Emails about this order</SectionTitle>
-            <Card className="overflow-hidden">
-              <NotificationList rows={data.notifications ?? []} canRetry={can('system.health')} compact />
-            </Card>
-          </section>
+          <CommunicationsPanel orderId={o.id} canWrite={canWrite} canPay={can('payments.write')} hasInvoice={!!data.invoice?.file} invoiceSent={!!data.invoice?.sent_at} paymentReady={!!o.finalized_at && !['paid', 'waived'].includes(o.payment_state ?? '')} onInvoiceNotify={() => setInvoiceNotify(true)} />
+
+          {can('system.health') && (data.notifications ?? []).length > 0 && (
+            <details className="group">
+              <summary className="cursor-pointer list-none text-[13.5px] font-semibold text-ink-2 [&::-webkit-details-marker]:hidden">All emails for this order, including to staff <ChevronDown className="inline size-3.5 transition group-open:rotate-180" /></summary>
+              <Card className="mt-2 overflow-hidden">
+                <NotificationList rows={data.notifications ?? []} canRetry compact />
+              </Card>
+            </details>
+          )}
         </div>
 
         <aside className="space-y-6">
@@ -395,31 +435,23 @@ export default function OrderDetail() {
             </SectionTitle>
             <Card className="px-4 py-1.5">
               <dl className="divide-y divide-line">
-                <KeyValue label="Fresh or frozen">
-                  <span className="inline-flex flex-wrap items-center gap-2">
-                    <StorageBadge storage={o.storage} size="sm" />
-                    {canWrite && !['completed', 'cancelled'].includes(o.status) && (
-                      <span className="inline-flex gap-1">
-                        {(['fresh', 'frozen'] as const).filter((x) => x !== o.storage).map((x) => (
-                          <button key={x} type="button" className="text-[12.5px] font-medium text-brand hover:underline" onClick={() => patch.mutate({ storage: x })}>Set {x}</button>
-                        ))}
-                      </span>
-                    )}
-                  </span>
-                </KeyValue>
-                {o.storage === 'fresh' && o.fulfilment_type !== 'collection' && o.delivery_address && <p className="py-2 text-[12.5px] text-ochre-soft-ink">Fresh on a delivery: check the journey is under the fresh limit (Settings → Orders & fulfilment), or suggest frozen.</p>}
+                {o.storage === 'fresh' && <KeyValue label="Packaging"><StorageBadge storage={o.storage} size="sm" /> <span className="text-[12.5px] text-ink-3">(older order; everything is frozen now)</span></KeyValue>}
                 <KeyValue label="Type">{o.fulfilment_type === 'delivery' ? 'Delivery' : o.fulfilment_type === 'collection' ? 'Collection' : <span className="text-ochre">Not set</span>}</KeyValue>
                 <KeyValue label={o.confirmed_at ? 'Date' : 'Preferred date'}>{o.requested_date ? longDate(o.requested_date) : <span className={o.confirmed_at ? 'text-ochre' : 'text-ink-3'}>{o.confirmed_at ? 'Not set' : 'No preference'}</span>}</KeyValue>
                 <ExpectedRow order={o} canWrite={canWrite} onChange={() => setTimeframe(true)} />
                 {o.time_window && <KeyValue label="Time">{o.time_window}</KeyValue>}
                 {o.fulfilment_type === 'delivery' && <KeyValue label="Address">{o.delivery_address ?? <span className="text-danger">Missing</span>}</KeyValue>}
                 {!o.fulfilment_type && o.delivery_address && <KeyValue label="Customer’s address">{o.delivery_address}</KeyValue>}
-                {o.fulfilment_type === 'delivery' && (
+                {o.fulfilment_type !== 'collection' && (
                   <KeyValue label="Delivery fee">
-                    {o.delivery_km == null ? <span className="text-ink-3">Add the distance (Edit)</span> : <>{o.delivery_fee_cents ? formatMoney(o.delivery_fee_cents) : 'Free'} <span className="text-ink-3">· {o.delivery_km} km</span></>}
+                    <span className="inline-flex flex-wrap items-center gap-x-2">
+                      <span>{o.delivery_arrangement === 'separate' ? 'Arranged separately' : o.delivery_fee_cents != null ? formatMoney(o.delivery_fee_cents) : <span className="text-ochre">Not set</span>}</span>
+                      {o.delivery_arrangement === 'custom' && <span className="text-[12.5px] text-ink-3">custom</span>}
+                      {canWrite && !['completed', 'cancelled'].includes(o.status) && <button type="button" className="text-[12.5px] font-medium text-brand hover:underline" onClick={() => setDeliveryOpen(true)}>Change</button>}
+                    </span>
                   </KeyValue>
                 )}
-                {o.delivery_notes && <KeyValue label="Notes">{o.delivery_notes}</KeyValue>}
+                {o.delivery_notes && <KeyValue label={o.fulfilment_type === 'collection' ? 'Notes' : 'Instructions'}>{o.delivery_notes}</KeyValue>}
               </dl>
               {['ready', 'out_for_delivery'].includes(o.status) && canProduce && (
                 <div className="border-t border-line py-3">
@@ -537,7 +569,10 @@ export default function OrderDetail() {
       <ItemEditor open={adding} onClose={() => setAdding(false)} saving={saveItem.isPending} onSave={(d) => saveItem.mutate({ d })} title="Add item" />
       <FinalWeighingSheet order={o} items={items} problems={data.finalization_problems ?? []} open={weighing} onClose={() => setWeighing(false)} onFinalized={() => { setWeighing(false); setRequesting(true); }} />
       <PaymentRequestSheet orderId={o.id} open={requesting} onClose={() => setRequesting(false)} />
-      {releasing && <ReleaseUnpaidSheet order={o} onClose={() => setReleasing(false)} />}
+      {releasing && <ReleaseUnpaidSheet order={o} balance={data.money?.balance_cents ?? null} onClose={() => setReleasing(false)} />}
+      {weighItem && <WeightSheet item={weighItem} order={o} onClose={() => setWeighItem(null)} onSaved={invalidate} />}
+      {deliveryOpen && <DeliverySheet order={o} standardFee={data.delivery?.fee_cents ?? null} onClose={() => setDeliveryOpen(false)} onSaved={invalidate} />}
+      {invoiceNotify && <InvoiceNotifySheet orderId={o.id} again={!!data.invoice?.sent_at} onClose={() => { setInvoiceNotify(false); invalidate(); qc.invalidateQueries({ queryKey: ['order-comms', o.id] }); }} />}
       {confirming && <ConfirmSheet order={o} problems={data.confirmation_problems ?? []} open onClose={() => setConfirming(false)} />}
       {timeframe && <TimeframeSheet order={o} open onClose={() => setTimeframe(false)} />}
       <FulfilmentSheet open={fulfilOpen} onClose={() => setFulfilOpen(false)} order={o} saving={patch.isPending} onSave={(v) => patch.mutate(v)} />
@@ -595,26 +630,20 @@ function EventItem({ e }: { e: OrderEvent }) {
 }
 
 function FulfilmentSheet({ open, onClose, order, onSave, saving }: { open: boolean; onClose: () => void; order: OrderSummary; onSave: (v: any) => void; saving: boolean }) {
-  const [type, setType] = useState(order.fulfilment_type ?? 'collection');
+  const [type, setType] = useState(order.fulfilment_type ?? 'delivery');
   const [date, setDate] = useState(order.requested_date ?? '');
   const [time, setTime] = useState(order.time_window ?? '');
   const [address, setAddress] = useState(order.delivery_address ?? '');
   const [notes, setNotes] = useState(order.delivery_notes ?? '');
-  const [km, setKm] = useState(order.delivery_km != null ? String(order.delivery_km) : '');
-  const { data: settings } = useQuery({ queryKey: ['public-info'], queryFn: () => api.get<any>('/api/public/info') });
-  const freeKm: number = settings?.fulfilment?.freeDeliveryKm ?? 60;
-  const rate: number = settings?.fulfilment?.deliveryRatePerKmCents ?? 0;
-  const kmNum = km.trim() === '' ? null : Number(km.replace(',', '.'));
-  const fee = deliveryFeeCents(kmNum, freeKm, rate);
   return (
     <Sheet
       open={open}
       onClose={onClose}
       title="Collection or delivery"
-      footer={<Button variant="primary" size="lg" full loading={saving} onClick={() => onSave({ fulfilment_type: type, requested_date: date || null, time_window: time || null, delivery_address: type === 'delivery' ? address || null : order.delivery_address, delivery_notes: notes || null, ...(type === 'delivery' && (kmNum == null || Number.isFinite(kmNum)) ? { delivery_km: kmNum } : {}) })}>Save</Button>}
+      footer={<Button variant="primary" size="lg" full loading={saving} onClick={() => onSave({ fulfilment_type: type, requested_date: date || null, time_window: time || null, delivery_address: type === 'delivery' ? address || null : order.delivery_address, delivery_notes: notes || null })}>Save</Button>}
     >
       <div className="space-y-5">
-        <Segmented full size="lg" value={type} onChange={setType} options={[{ value: 'collection', label: 'Collection' }, { value: 'delivery', label: 'Delivery' }]} />
+        <Segmented full size="lg" value={type} onChange={setType} options={[{ value: 'delivery', label: 'Delivery' }, { value: 'collection', label: 'Collection' }]} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
           <Field label="Time" optional><Input value={time} onChange={(e) => setTime(e.target.value)} placeholder="e.g. after 2pm" /></Field>
@@ -623,40 +652,111 @@ function FulfilmentSheet({ open, onClose, order, onSave, saving }: { open: boole
         {type === 'delivery' && (
           <>
             <Field label="Delivery address"><Textarea rows={2} value={address} onChange={(e) => setAddress(e.target.value)} /></Field>
-            <Field label="Delivery notes" optional><Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Gate code, call on arrival…" /></Field>
-            <Field label="Distance from the shop (km)" optional hint={rate > 0 ? `Free within ${freeKm} km, then R${(rate / 100).toFixed(2)} per km.` : 'Set the fee per km in Settings → Orders & fulfilment.'}>
-              <Input inputMode="decimal" value={km} onChange={(e) => setKm(e.target.value)} placeholder="e.g. 72" className="w-40" />
-            </Field>
-            {fee != null && <p className="-mt-2 text-[14px]">Delivery fee: <b>{fee ? formatMoney(fee) : 'Free'}</b>{fee ? <span className="text-ink-3"> ({(kmNum! - freeKm).toFixed(1).replace(/\.0$/, '')} km × R{(rate / 100).toFixed(2)})</span> : null}</p>}
+            <Field label="Delivery instructions" optional><Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Gate code, call on arrival…" /></Field>
+            <p className="text-[13px] text-ink-3">Change the delivery fee with “Change” next to Delivery fee.</p>
           </>
         )}
         {type === 'collection' && <Field label="Notes" optional><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>}
+        {type !== (order.fulfilment_type ?? 'delivery') && <p className="rounded-xl bg-surface-2 px-3 py-2 text-[13px] text-ink-2">{type === 'collection' ? 'Switching to collection removes the delivery fee.' : 'Switching to delivery adds the standard delivery fee.'}</p>}
       </div>
     </Sheet>
   );
 }
 
+const WEIGHABLE = ['cutting', 'cut', 'packing', 'packed', 'ready'];
 
-/** Manager override (only if switched on in Settings → Payments): release an unpaid order with a recorded reason. */
-function ReleaseUnpaidSheet({ order, onClose }: { order: OrderSummary; onClose: () => void }) {
+/** Enter or correct a final weight at any production stage. The order stays where it is; totals follow. */
+function WeightSheet({ item, order, onClose, onSaved }: { item: OrderItem; order: OrderSummary; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [kg, setKg] = useState(item.packed_weight_g ? String(item.packed_weight_g / 1000).replace('.', ',') : '');
+  const grams = Math.round(Number(kg.replace(',', '.')) * 1000);
+  const ok = Number.isFinite(grams) && grams > 0 && grams <= 200_000;
+  const save = useMutation({
+    mutationFn: () => api.post(`/api/items/${item.id}/weight`, { weight_g: grams }),
+    onSuccess: () => { toast({ tone: 'success', title: 'Weight saved', body: order.finalized_at ? 'The finalized amount was updated (new version).' : 'Totals updated. The order stays at this stage.' }); onSaved(); onClose(); },
+    onError: (e) => toast({ tone: 'error', title: e instanceof ApiError ? e.message : 'That did not work.' }),
+  });
+  const off = ok && item.expected_g ? Math.abs(grams - item.expected_g) / item.expected_g : 0;
+  return (
+    <Sheet open onClose={onClose} title={`Final weight · ${item.product_name}`} subtitle={`${item.qty_label}${item.weight_pref ? ` · preferred ${item.weight_pref.label}` : ''}`} footer={<Button full size="lg" variant="primary" disabled={!ok} loading={save.isPending} onClick={() => save.mutate()}>Save weight</Button>}>
+      <div className="space-y-4">
+        <dl className="grid grid-cols-2 gap-3 text-[14px]">
+          <div className="rounded-xl bg-surface-2 p-3"><dt className="text-[12px] text-ink-3">Estimated</dt><dd className="font-semibold">{item.expected_g ? `${(item.expected_g / 1000).toLocaleString('en-ZA', { maximumFractionDigits: 2 })} kg` : '—'}</dd></div>
+          <div className="rounded-xl bg-surface-2 p-3"><dt className="text-[12px] text-ink-3">Price</dt><dd className="font-semibold">{item.price_cents != null ? `${formatMoney(item.price_cents)}/kg` : '—'}</dd></div>
+        </dl>
+        <Field label="Actual weight (kg)">
+          <Input big inputMode="decimal" autoFocus value={kg} onChange={(e) => setKg(e.target.value)} placeholder="e.g. 1,85" className="w-full max-w-[12rem]" />
+        </Field>
+        {ok && item.price_cents != null && <p className="text-[14.5px]">Line total: <b className="tabular">{formatMoney(Math.round((grams / 1000) * item.price_cents))}</b></p>}
+        {off > 0.35 && <p className="rounded-xl bg-ochre-soft px-3 py-2 text-[13.5px] text-ochre-soft-ink">That’s quite different from the estimate — please double-check. It will be flagged for a second look.</p>}
+        {order.finalized_at && <p className="rounded-xl bg-surface-2 px-3 py-2 text-[13px] text-ink-2">This order is already finalized: saving writes a new finalized version{order.payment_state !== 'not_requested' ? ' and the payment request is updated to the new amount' : ''}. The change is recorded in the history.</p>}
+      </div>
+    </Sheet>
+  );
+}
+
+/** Delivery fee for this order: the standard fee, a custom fee, arranged separately, or collection. */
+function DeliverySheet({ order, standardFee, onClose, onSaved }: { order: OrderSummary; standardFee: number | null; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [arr, setArr] = useState<'standard' | 'custom' | 'separate' | 'collection'>((order.delivery_arrangement as any) ?? (order.fulfilment_type === 'collection' ? 'collection' : 'standard'));
+  const [fee, setFee] = useState(order.delivery_fee_cents != null && order.delivery_arrangement === 'custom' ? (order.delivery_fee_cents / 100).toFixed(2) : '');
+  const [note, setNote] = useState('');
+  const cents = Math.round(Number(fee.replace(/[^\d.,]/g, '').replace(',', '.')) * 100);
+  const ok = arr !== 'custom' || (Number.isFinite(cents) && cents >= 0 && fee.trim() !== '');
+  const save = useMutation({
+    mutationFn: () => api.patch(`/api/orders/${order.id}/delivery`, { arrangement: arr, fee_cents: arr === 'custom' ? cents : null, note: note.trim() || null }),
+    onSuccess: () => { toast({ tone: 'success', title: 'Delivery updated', body: 'Totals were recalculated.' }); onSaved(); onClose(); },
+    onError: (e) => toast({ tone: 'error', title: e instanceof ApiError ? e.message : 'That did not work.' }),
+  });
+  const opts = [
+    { v: 'standard' as const, t: 'Standard local delivery', d: standardFee != null ? formatMoney(standardFee) : 'Set the fee in Settings' },
+    { v: 'custom' as const, t: 'Custom fee', d: 'Outside the regular area, agreed with the customer' },
+    { v: 'separate' as const, t: 'Arranged separately', d: 'No delivery fee on this order' },
+    { v: 'collection' as const, t: 'Collection', d: 'No delivery' },
+  ];
+  return (
+    <Sheet open onClose={onClose} title="Delivery fee" subtitle={`Order #${order.order_number}`} footer={<Button full size="lg" variant="primary" disabled={!ok} loading={save.isPending} onClick={() => save.mutate()}>Save</Button>}>
+      <div className="space-y-4">
+        <div className="grid gap-2" role="radiogroup" aria-label="Delivery arrangement">
+          {opts.map((x) => (
+            <button key={x.v} type="button" role="radio" aria-checked={arr === x.v} onClick={() => setArr(x.v)} className={cx('rounded-xl border px-4 py-3 text-left', arr === x.v ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface')}>
+              <div className="text-[15px] font-semibold">{x.t}</div>
+              <div className="text-[13px] opacity-80">{x.d}</div>
+            </button>
+          ))}
+        </div>
+        {arr === 'custom' && <Field label="Delivery fee for this order (R)"><Input inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} className="w-40" autoFocus /></Field>}
+        <Field label="Note" optional hint="e.g. where it’s going or what was agreed. Added to the delivery instructions."><Input value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+        {order.finalized_at && <p className="rounded-xl bg-surface-2 px-3 py-2 text-[13px] text-ink-2">The order is finalized: a changed fee writes a new finalized version and updates any open payment request.</p>}
+      </div>
+    </Sheet>
+  );
+}
+
+/** A manager can send an unpaid order out with a warning, a confirmation and a recorded reason. Payment stays as it is. */
+function ReleaseUnpaidSheet({ order, balance, onClose }: { order: OrderSummary; balance: number | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [reason, setReason] = useState('');
+  const [sure, setSure] = useState(false);
+  const to = order.fulfilment_type === 'collection' ? 'ready' : 'out_for_delivery';
   const go = useMutation({
-    mutationFn: () => api.post(`/api/orders/${order.id}/transition`, { to: 'ready', unpaid_reason: reason }),
+    mutationFn: () => api.post(`/api/orders/${order.id}/transition`, { to, unpaid_reason: reason }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['order', order.id] });
       qc.invalidateQueries({ queryKey: ['orders'] });
-      toast({ tone: 'success', title: 'Released before payment', body: 'The reason is recorded in the history.' });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast({ tone: 'success', title: to === 'ready' ? 'Released for collection — still unpaid' : 'Out for delivery — still unpaid', body: 'Your name, the time and the reason are in the history.' });
       onClose();
     },
     onError: (e) => toast({ tone: 'error', title: e instanceof ApiError ? e.message : 'That did not work.' }),
   });
   return (
-    <Sheet open onClose={onClose} title="Release before payment?" footer={<Button full size="lg" variant="danger" disabled={reason.trim().length < 3} loading={go.isPending} onClick={() => go.mutate()}>Release unpaid</Button>}>
+    <Sheet open onClose={onClose} title={to === 'ready' ? 'Release for collection before payment?' : 'Send out for delivery before payment?'} footer={<Button full size="lg" variant="danger" disabled={reason.trim().length < 3 || !sure} loading={go.isPending} onClick={() => go.mutate()}>{to === 'ready' ? 'Release unpaid' : 'Send out unpaid'}</Button>}>
       <div className="space-y-4 text-[14.5px]">
-        <p className="text-ink-2">Payment for #{order.order_number} hasn’t been confirmed. Only release it if you’ve agreed another arrangement with the customer.</p>
-        <Field label="Reason (kept in the history)"><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Pays cash on collection" /></Field>
+        <p className="rounded-xl bg-ochre-soft px-3 py-2.5 text-ochre-soft-ink"><b>Payment for #{order.order_number} hasn’t been confirmed{balance ? ` (${formatMoney(balance)} outstanding)` : ''}.</b> The order will move on, but its payment status won’t change: it stays on the dashboard as money owed until it’s paid or waived.</p>
+        <Field label="Reason (kept in the history)"><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Regular customer, pays on delivery" autoFocus /></Field>
+        <label className="flex items-start gap-3"><input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} className="mt-0.5 size-5 shrink-0 accent-[var(--brand)]" /><span>I understand this order is going out without confirmed payment.</span></label>
       </div>
     </Sheet>
   );

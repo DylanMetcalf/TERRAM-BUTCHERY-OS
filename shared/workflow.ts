@@ -66,7 +66,7 @@ const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   cutting: ['cut', 'confirmed', 'on_hold'],
   cut: ['packing', 'packed', 'cutting', 'on_hold'],
   packing: ['packed', 'cut', 'on_hold'],
-  packed: ['ready', 'packing'],
+  packed: ['ready', 'out_for_delivery', 'packing'],
   ready: ['out_for_delivery', 'completed', 'packed'],
   out_for_delivery: ['completed', 'ready'],
   completed: ['ready'],

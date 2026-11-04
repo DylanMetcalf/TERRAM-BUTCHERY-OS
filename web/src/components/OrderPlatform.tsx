@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ban, CalendarClock, Check, Copy, ExternalLink, FileText, Mail, Plus, RotateCcw, Send, X } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ItemEditor, type ItemDraft } from './ItemEditor';
 import { DeclarationsList, PaymentRequestSheet } from './FinalWeighing';
 import { Badge, Button, Card, cx, Field, Input, KeyValue, SectionTitle, Select, Sheet, Textarea, useToast, type Tone } from './ui';
@@ -24,6 +24,8 @@ export const PAYMENT_TONE: Record<PaymentState, Tone> = {
   paid: 'field',
   failed: 'danger',
   refunded: 'neutral',
+  rejected: 'danger',
+  waived: 'neutral',
 };
 
 function useOrderAction(orderId: string) {
@@ -159,6 +161,7 @@ export function PaymentPanel({ orderId, payment, declarations = [], finalized, c
   const [reviewing, setReviewing] = useState<any | null>(null);
   const [sending, setSending] = useState(false);
   const reverse = useMutation({ mutationFn: (v: { id: string; reason: string }) => api.post(`/api/payments/${v.id}/reverse`, { reason: v.reason }), onSuccess: () => a.done('Payment reversed'), onError: a.fail });
+  const waive = useMutation({ mutationFn: (v: { undo: boolean; reason: string }) => api.post(`/api/orders/${orderId}/payment-waive`, v), onSuccess: (_r, v) => a.done(v.undo ? 'Waiver removed' : 'Payment waived'), onError: a.fail });
   if (!payment) return null;
   const pendingProofs = payment.proofs.filter((p: any) => p.status === 'submitted');
   return (
@@ -200,7 +203,7 @@ export function PaymentPanel({ orderId, payment, declarations = [], finalized, c
               <li key={p.id} className="flex items-start justify-between gap-2 py-2">
                 <div className={cx(p.status !== 'verified' && 'text-ink-3 line-through')}>
                   <b>{formatMoney(p.amount_cents)}</b> · {p.method_label}{p.receipt_number ? ` · R${p.receipt_number}` : ''}
-                  <div className="text-[12.5px] text-ink-3 no-underline">{p.status === 'verified' ? (p.verified_by_kind === 'provider' ? 'Confirmed by PayFast' : 'Verified by staff') : p.status} · {dateTime(p.created_at)}</div>
+                  <div className="text-[12.5px] text-ink-3 no-underline">{p.status === 'verified' ? (p.verified_by_kind === 'provider' ? 'Confirmed by PayFast' : `Verified${p.verified_by_name ? ` by ${p.verified_by_name}` : ' by staff'}`) : p.status} · {p.paid_on ? `paid ${longDate(p.paid_on)} · ` : ''}recorded {dateTime(p.created_at)}{p.reference ? ` · ref ${p.reference}` : ''}</div>
                   {p.note && <div className="text-[12.5px] text-ink-3">{p.note}</div>}
                 </div>
                 {canPay && p.status === 'verified' && (
@@ -210,7 +213,14 @@ export function PaymentPanel({ orderId, payment, declarations = [], finalized, c
             ))}
           </ul>
         )}
-        {canPay && payment.state !== 'paid' && <Button full variant="ghost" icon={<Plus className="size-4" />} onClick={() => setRecording(true)}>Record a payment received</Button>}
+        {canPay && payment.state !== 'paid' && payment.state !== 'waived' && <Button full variant="ghost" icon={<Plus className="size-4" />} onClick={() => setRecording(true)}>Record a payment received (full or part)</Button>}
+        {canPay && finalized && payment.state !== 'paid' && (
+          payment.state === 'waived' ? (
+            <Button full variant="ghost" size="sm" loading={waive.isPending} onClick={() => waive.mutate({ undo: true, reason: '' })}>Undo payment waiver</Button>
+          ) : (
+            <Button full variant="ghost" size="sm" icon={<Ban className="size-3.5" />} loading={waive.isPending} onClick={() => { const reason = window.prompt('Why is payment for this order being waived? (kept in the history)'); if (reason && reason.trim().length >= 3) waive.mutate({ undo: false, reason: reason.trim() }); }}>Waive payment…</Button>
+          )
+        )}
         <p className="text-[12px] text-ink-3">An order is only marked paid when a payment is verified here or confirmed by PayFast’s server.</p>
       </Card>
       {recording && <RecordPaymentSheet orderId={orderId} due={payment.money.balance_cents} onClose={() => setRecording(false)} />}
@@ -227,13 +237,21 @@ function RecordPaymentSheet({ orderId, due, onClose }: { orderId: string; due: n
   const [method, setMethod] = useState<'eft' | 'cash' | 'card' | 'other'>('eft');
   const [amount, setAmount] = useState(due ? (due / 100).toFixed(2) : '');
   const [note, setNote] = useState('');
-  const save = useMutation({ mutationFn: () => api.post(`/api/orders/${orderId}/payments`, { method, amount_cents: toCents(amount), note: note || null }), onSuccess: () => { a.done('Payment recorded'); onClose(); }, onError: a.fail });
+  const [paidOn, setPaidOn] = useState(todayYmd());
+  const [reference, setReference] = useState('');
+  const cents = toCents(amount);
+  const save = useMutation({ mutationFn: () => api.post(`/api/orders/${orderId}/payments`, { method, amount_cents: cents, note: note || null, paid_on: ymdOk(paidOn) ? paidOn : null, reference: reference.trim() || null }), onSuccess: () => { a.done(due != null && cents < due ? 'Part payment recorded' : 'Payment recorded'); onClose(); }, onError: a.fail });
   return (
-    <Sheet open onClose={onClose} title="Record a payment" subtitle="Only record money you have confirmed has been received." footer={<Button full size="lg" variant="primary" disabled={!(toCents(amount) > 0)} loading={save.isPending} onClick={() => save.mutate()}>Record payment</Button>}>
+    <Sheet open onClose={onClose} title="Record a payment" subtitle="Only record money you have confirmed has been received." footer={<Button full size="lg" variant="primary" disabled={!(cents > 0)} loading={save.isPending} onClick={() => save.mutate()}>{due != null && cents > 0 && cents < due ? 'Record part payment' : 'Record payment'}</Button>}>
       <div className="space-y-4">
         <Field label="Method"><Select value={method} onChange={(e) => setMethod(e.target.value as any)}><option value="eft">EFT (checked in the bank)</option><option value="cash">Cash</option><option value="card">Card machine</option><option value="other">Other</option></Select></Field>
-        <Field label="Amount received (R)"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-40" /></Field>
-        <Field label="Note" optional hint="e.g. the bank reference"><Input value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Amount received (R)" hint={due != null ? `Outstanding: ${formatMoney(due)}` : undefined}><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+          <Field label="Date received"><Input type="date" max={todayYmd()} value={paidOn} onChange={(e) => setPaidOn(e.target.value)} /></Field>
+        </div>
+        {due != null && cents > 0 && cents < due && <p className="rounded-xl bg-ochre-soft px-3 py-2 text-[13.5px] text-ochre-soft-ink">This is a part payment. {formatMoney(due - cents)} will still be outstanding.</p>}
+        <Field label="Bank reference" optional hint="As it shows on the bank statement."><Input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={80} /></Field>
+        <Field label="Internal note" optional><Input value={note} onChange={(e) => setNote(e.target.value)} /></Field>
       </div>
     </Sheet>
   );
@@ -273,17 +291,20 @@ export const INVOICE_TONE: Record<string, Tone> = { not_requested: 'neutral', re
 
 export function InvoicePanel({ orderId, invoice, canWrite, canPay }: { orderId: string; invoice: any; canWrite: boolean; canPay: boolean }) {
   const a = useOrderAction(orderId);
-  const [editing, setEditing] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [asking, setAsking] = useState(false);
+  const [notifying, setNotifying] = useState(false);
   const upd = useMutation({ mutationFn: (body: any) => api.patch(`/api/orders/${orderId}/invoice`, body), onSuccess: () => a.done('Invoice updated'), onError: a.fail });
+  const remove = useMutation({ mutationFn: (reason: string) => api.del(`/api/orders/${orderId}/invoice/file`, { reason }), onSuccess: () => a.done('Invoice removed from the order'), onError: a.fail });
   if (!invoice) return null;
   const d = invoice.details;
+  const f = invoice.file;
   return (
-    <section>
+    <section id="invoice">
       <SectionTitle>Invoice</SectionTitle>
       <Card className="space-y-3 p-4 text-[14px]">
         <div className="flex items-center justify-between gap-2">
-          <Badge tone={INVOICE_TONE[invoice.status]}>{invoice.status_label}</Badge>
+          <Badge tone={INVOICE_TONE[invoice.status]}>{f && invoice.status === 'issued' ? 'Uploaded · customer not emailed' : invoice.status_label}</Badge>
           {invoice.reference && <span className="font-semibold">{invoice.reference}</span>}
         </div>
         {d && (
@@ -295,21 +316,34 @@ export function InvoicePanel({ orderId, invoice, canWrite, canPay }: { orderId: 
             {d.instructions && <div>“{d.instructions}”</div>}
           </div>
         )}
-        {invoice.issued_on && <div className="text-ink-3">Issued {longDate(invoice.issued_on)}{invoice.sent_at ? ` · sent ${dateTime(invoice.sent_at)}` : ''}</div>}
-        {invoice.file && <a href={`/api/files/${invoice.file.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 font-medium text-brand hover:underline"><FileText className="size-4" />{invoice.file.filename}</a>}
-        {canPay && invoice.status !== 'not_requested' && invoice.status !== 'cancelled' && (
-          <div className="flex flex-wrap gap-2">
-            {invoice.status === 'requested' && <Button size="sm" variant="secondary" loading={upd.isPending} onClick={() => upd.mutate({ status: 'in_progress' })}>Start</Button>}
-            {['requested', 'in_progress', 'issued'].includes(invoice.status) && <Button size="sm" variant="primary" onClick={() => setEditing(true)}>{invoice.status === 'issued' ? 'Update / mark sent' : 'Mark issued…'}</Button>}
-            {invoice.status !== 'sent' && <Button size="sm" variant="ghost" icon={<Ban className="size-3.5" />} loading={upd.isPending} onClick={() => window.confirm('Cancel this invoice request?') && upd.mutate({ status: 'cancelled' })}>Cancel request</Button>}
+        {f ? (
+          <div className="rounded-xl border border-line p-3">
+            <div className="flex items-start gap-2">
+              <FileText className="mt-0.5 size-4 shrink-0 text-ink-3" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-semibold">{f.filename}</div>
+                <div className="text-[12.5px] text-ink-3">Uploaded {dateTime(f.created_at)}{f.uploaded_by_name ? ` by ${f.uploaded_by_name}` : ''}{invoice.sent_at ? ` · customer emailed ${dateTime(invoice.sent_at)}` : ' · customer not emailed yet'}</div>
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <a href={`/api/files/${f.id}?inline=1`} target="_blank" rel="noreferrer"><Button size="sm" icon={<ExternalLink className="size-3.5" />}>View</Button></a>
+              <a href={`/api/files/${f.id}`} download><Button size="sm">Download</Button></a>
+              {canPay && <Button size="sm" variant="primary" icon={<Mail className="size-3.5" />} onClick={() => setNotifying(true)}>{invoice.sent_at ? 'Send notification again…' : 'Notify customer…'}</Button>}
+              {canPay && <Button size="sm" variant="ghost" onClick={() => setUploading(true)}>Replace</Button>}
+              {canPay && <Button size="sm" variant="ghost" className="text-danger" loading={remove.isPending} onClick={() => { const reason = window.prompt('Remove this invoice from the order? The customer will no longer be able to download it. Reason (optional):'); if (reason !== null) remove.mutate(reason); }}>Remove</Button>}
+            </div>
           </div>
+        ) : (
+          canPay && <Button full variant={invoice.status === 'requested' || invoice.status === 'in_progress' ? 'primary' : 'secondary'} icon={<Plus className="size-4" />} onClick={() => setUploading(true)}>Upload invoice (PDF)</Button>
         )}
-        {invoice.status === 'not_requested' && canWrite && <Button size="sm" variant="ghost" icon={<Plus className="size-3.5" />} onClick={() => setAsking(true)}>Customer wants an invoice</Button>}
-        {invoice.status === 'not_requested' && !canWrite && <p className="text-ink-3">No invoice requested.</p>}
-        <p className="text-[12px] text-ink-3">Invoices are prepared by hand in your accounting software. Terram tracks the request and can attach the file.</p>
+        {canPay && invoice.status === 'requested' && !f && <Button size="sm" variant="ghost" loading={upd.isPending} onClick={() => upd.mutate({ status: 'in_progress' })}>Mark as being prepared</Button>}
+        {canPay && ['requested', 'in_progress'].includes(invoice.status) && !f && <Button size="sm" variant="ghost" icon={<Ban className="size-3.5" />} loading={upd.isPending} onClick={() => window.confirm('Cancel this invoice request?') && upd.mutate({ status: 'cancelled' })}>Cancel request</Button>}
+        {invoice.status === 'not_requested' && canWrite && !f && <Button size="sm" variant="ghost" icon={<Plus className="size-3.5" />} onClick={() => setAsking(true)}>Customer wants an invoice</Button>}
+        <p className="text-[12px] text-ink-3">Prepare the invoice in your accounting software, then upload the PDF here. The customer downloads it securely from their order and payment pages. They’re only emailed when you choose to notify them.</p>
       </Card>
-      {editing && <InvoiceSheet orderId={orderId} invoice={invoice} onClose={() => setEditing(false)} />}
+      {uploading && <InvoiceSheet orderId={orderId} invoice={invoice} onClose={() => setUploading(false)} />}
       {asking && <InvoiceRequestSheet orderId={orderId} onClose={() => setAsking(false)} />}
+      {notifying && <InvoiceNotifySheet orderId={orderId} again={!!invoice.sent_at} onClose={() => setNotifying(false)} />}
     </section>
   );
 }
@@ -319,44 +353,78 @@ function InvoiceSheet({ orderId, invoice, onClose }: { orderId: string; invoice:
   const [ref, setRef] = useState(invoice.reference ?? '');
   const [date, setDate] = useState(invoice.issued_on ?? todayYmd());
   const [file, setFile] = useState<File | null>(null);
-  const [notify, setNotify] = useState(true);
+  const tooBig = !!file && file.size > 10 * 1024 * 1024;
   const save = useMutation({
-    mutationFn: async (status: 'issued' | 'sent') => {
-      if (file) {
-        const f = new FormData();
-        f.set('file', file);
-        await api.upload(`/api/orders/${orderId}/invoice/file`, f);
-      }
-      // Sent always follows issued: record the issue first (quietly), then the send
-      if (status === 'sent' && invoice.status !== 'issued') await api.patch(`/api/orders/${orderId}/invoice`, { status: 'issued', reference: ref.trim(), issued_on: date, notify_customer: false });
-      return api.patch(`/api/orders/${orderId}/invoice`, { status, reference: ref.trim(), issued_on: date, notify_customer: notify });
+    mutationFn: (notify: boolean) => {
+      const f = new FormData();
+      f.set('file', file!);
+      if (ref.trim()) f.set('reference', ref.trim());
+      if (ymdOk(date)) f.set('issued_on', date);
+      f.set('notify', notify ? 'true' : 'false');
+      return api.upload(`/api/orders/${orderId}/invoice/file`, f);
     },
-    onSuccess: (_r, status) => { a.done(status === 'sent' ? 'Invoice marked as sent' : 'Invoice marked as issued'); onClose(); },
+    onSuccess: (_r, notify) => { a.done(notify ? 'Invoice saved and the customer is being emailed' : 'Invoice saved — the customer was not emailed'); onClose(); },
     onError: a.fail,
   });
-  const ok = ref.trim().length > 0 && ymdOk(date);
   return (
     <Sheet
       open
       onClose={onClose}
-      title="Invoice details"
+      title={invoice.file ? 'Replace the invoice' : 'Upload the invoice'}
       footer={
-        <div className="flex gap-2">
-          <Button size="lg" variant="secondary" disabled={!ok} loading={save.isPending && save.variables === 'issued'} onClick={() => save.mutate('issued')}>Save as issued</Button>
-          <Button size="lg" variant="primary" full disabled={!ok} loading={save.isPending && save.variables === 'sent'} onClick={() => save.mutate('sent')}>Mark sent</Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button size="lg" variant="secondary" disabled={!file || tooBig} loading={save.isPending && save.variables === false} onClick={() => save.mutate(false)}>Save invoice only</Button>
+          <Button size="lg" variant="primary" full disabled={!file || tooBig} loading={save.isPending && save.variables === true} onClick={() => save.mutate(true)}>Save and notify customer</Button>
         </div>
       }
     >
       <div className="space-y-4">
-        <Field label="Invoice number / reference"><Input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="e.g. INV-0042" /></Field>
-        <Field label="Invoice date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Field label="Attach the invoice" optional hint={invoice.file ? `Currently attached: ${invoice.file.filename}. Choosing a new file replaces it.` : 'PDF, JPG or PNG, up to 10 MB. The customer can download it from their order page.'}>
+        <Field label="Invoice file" hint={invoice.file ? `Currently: ${invoice.file.filename}. The new file replaces it for the customer; the old one stays in the history.` : 'PDF (or JPG/PNG), up to 10 MB.'}>
           <input type="file" accept="application/pdf,image/jpeg,image/png" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-[14px] file:mr-3 file:h-10 file:rounded-xl file:border-0 file:bg-sunken file:px-4 file:font-semibold" />
         </Field>
-        <label className="flex items-start gap-2 text-[14px]"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="mt-0.5 size-5 accent-[var(--brand)]" />Email the customer that their invoice is ready</label>
+        {tooBig && <p className="text-[13.5px] text-danger">That file is bigger than 10 MB.</p>}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Invoice number" optional><Input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="e.g. INV-0042" /></Field>
+          <Field label="Invoice date" optional><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        </div>
+        <p className="rounded-xl bg-surface-2 px-3 py-2 text-[13px] text-ink-2"><b>Save invoice only</b> puts it on the customer’s order and payment pages without emailing them. <b>Save and notify</b> also emails a link to download it.</p>
       </div>
     </Sheet>
   );
+}
+
+export function InvoiceNotifySheet({ orderId, again, onClose }: { orderId: string; again: boolean; onClose: () => void }) {
+  const a = useOrderAction(orderId);
+  const [preview, setPreview] = useState<{ to: string[]; subject: string; text: string } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffectOnce(() => {
+    api.get<{ to: string[]; subject: string; text: string }>(`/api/orders/${orderId}/invoice/notify/preview`).then(setPreview).catch((e) => setErr(e instanceof ApiError ? e.message : 'Could not load the email.'));
+  });
+  const send = useMutation({ mutationFn: () => api.post(`/api/orders/${orderId}/invoice/notify`, {}), onSuccess: () => { a.done('Invoice notification sent'); onClose(); }, onError: a.fail });
+  return (
+    <Sheet open onClose={onClose} title={again ? 'Send the invoice notification again' : 'Email the customer their invoice'} footer={<Button full size="lg" variant="primary" disabled={!preview?.to.length} loading={send.isPending} onClick={() => send.mutate()}>{again ? 'Send again' : 'Send email'}</Button>}>
+      {err ? <p className="text-danger">{err}</p> : !preview ? <p className="text-ink-3">Loading…</p> : <EmailPreview to={preview.to} subject={preview.subject} text={preview.text} />}
+    </Sheet>
+  );
+}
+
+/** What an email will look like before it's sent. */
+export function EmailPreview({ to, subject, text }: { to: string[] | string | null; subject: string | null; text: string | null }) {
+  const list = Array.isArray(to) ? to : to ? [to] : [];
+  return (
+    <div className="space-y-3 text-[14px]">
+      <div><span className="text-ink-3">To: </span><b className="break-all">{list.length ? list.join(', ') : 'No email address'}</b></div>
+      <div><span className="text-ink-3">Subject: </span><b>{subject}</b></div>
+      <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-line bg-surface-2 p-3 font-sans text-[13.5px] text-ink-2">{text}</pre>
+    </div>
+  );
+}
+
+function useEffectOnce(fn: () => void) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    fn();
+  }, []);
 }
 
 function InvoiceRequestSheet({ orderId, onClose }: { orderId: string; onClose: () => void }) {

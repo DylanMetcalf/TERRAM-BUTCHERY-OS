@@ -90,10 +90,11 @@ describe('customer order form', () => {
     return nextWeekday(addDays(today, 1), 6); // a Saturday at least a day away
   };
   const payload = (ref: string, extra: any = {}) => ({
-    customer: { name: 'Naledi Zulu', phone: '071 555 3380' },
+    customer: { name: 'Naledi Zulu', phone: '071 555 3380', email: 'naledi@example.com' },
     items: [{ product_id: productId('beef_mince'), qty: { kind: 'weight', weight_g: 1000 } }],
     fulfilment_type: 'collection',
     delivery_address: '12 Kerk Street, Pretoria',
+    delivery_instructions: 'Ring the bell at the gate',
     requested_date: nextCollectionDay(),
     client_ref: ref,
     storage: 'fresh',

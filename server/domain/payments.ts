@@ -7,7 +7,7 @@ import { notify } from '../services/notify.js';
 import { orderUrl, payUrl, siteUrl } from '../services/links.js';
 import { formatTimeframe, layout, money, signOff } from '../services/templates.js';
 import { paymentMethods } from '../services/payment-config.js';
-import { raiseException } from './exceptions.js';
+import { raiseException, resolveOrderExceptions } from './exceptions.js';
 import { addEvent, orderMoney, requireOrder, transition, type PaymentState } from './orders.js';
 import { customerContact, staffEmails } from './lifecycle.js';
 
@@ -28,6 +28,8 @@ export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {
   requested: 'Payment requested',
   pending: 'Online payment in progress',
   proof_submitted: 'Awaiting verification',
+  rejected: 'Payment not confirmed',
+  waived: 'Payment waived',
   partially_paid: 'Partly paid',
   paid: 'Paid',
   failed: 'Payment failed',
@@ -51,18 +53,24 @@ export function recomputePayment(orderId: string): PaymentState {
   const req = openRequest(orderId);
   const lastFail = db().prepare("SELECT created_at FROM payments WHERE order_id = ? AND status = 'failed' ORDER BY created_at DESC LIMIT 1").get(orderId) as { created_at: string } | undefined;
   const manualPaid = paid === 0 && o.payment_status === 'paid' && o.payment_state === 'paid';
+  const waived = (db().prepare('SELECT payment_waived_at FROM orders WHERE id = ?').get(orderId) as any)?.payment_waived_at;
+  const lastRejected = db().prepare("SELECT MAX(reviewed_at) t FROM (SELECT reviewed_at FROM payment_proofs WHERE order_id = ? AND status = 'rejected' UNION ALL SELECT reviewed_at FROM payment_declarations WHERE order_id = ? AND status = 'rejected')").get(orderId, orderId) as { t: string | null };
   let state: PaymentState;
   if (manualPaid) state = 'paid';
+  else if (waived && !(paid > 0 && due != null && paid >= due)) state = 'waived';
   else if (paid > 0 && (due == null ? false : paid >= due)) state = 'paid';
   else if (paid > 0) state = 'partially_paid';
   else if (proofs > 0) state = 'proof_submitted';
   else if (req && o.payment_state === 'pending') state = 'pending';
   else if (req && lastFail && lastFail.created_at > req.created_at) state = 'failed';
+  else if (req && lastRejected?.t && lastRejected.t > req.created_at) state = 'rejected';
   else if (req) state = 'requested';
   else state = 'not_requested';
-  const legacy = state === 'paid' ? 'paid' : ['partially_paid', 'proof_submitted', 'pending', 'requested', 'failed'].includes(state) ? 'pending' : 'unpaid';
+  const legacy = state === 'paid' || state === 'waived' ? 'paid' : ['partially_paid', 'proof_submitted', 'pending', 'requested', 'failed', 'rejected'].includes(state) ? 'pending' : 'unpaid';
   db().prepare('UPDATE orders SET amount_paid_cents = ?, payment_state = ?, payment_status = ?, updated_at = ? WHERE id = ?').run(paid, state, legacy, now(), orderId);
-  if (state === 'paid' && req) db().prepare("UPDATE payment_requests SET status = 'paid', closed_at = ?, closed_reason = 'Paid' WHERE id = ?").run(now(), req.id);
+  if ((state === 'paid' || state === 'waived') && req) db().prepare("UPDATE payment_requests SET status = 'paid', closed_at = ?, closed_reason = ? WHERE id = ?").run(now(), state === 'waived' ? 'Waived' : 'Paid', req.id);
+  // Nothing left to check about money on this order
+  if (state === 'paid' || state === 'waived') resolveOrderExceptions(orderId, { keyPrefixes: ['proof:', 'declared:', 'pay-superseded:', 'pay-blocked:'] }, state);
   return state;
 }
 
@@ -102,6 +110,7 @@ export function createPaymentRequest(orderId: string, actor: Actor, opts: { noti
     if (existing) db().prepare("UPDATE payment_requests SET status = 'superseded', closed_at = ?, closed_reason = ? WHERE id = ?").run(now(), `Replaced by a request for ${money(amount)}`, existing.id);
     db().prepare("INSERT INTO payment_requests (id, order_id, amount_cents, status, created_by_kind, created_by, created_at, expires_at, finalization_id) VALUES (?,?,?,'open',?,?,?,?,?)").run(rid, orderId, amount, actor.kind, actor.userId, now(), expires, fin?.id ?? null);
     addEvent(orderId, 'payment_requested', `Payment requested: ${money(amount)}${existing ? ` (replaces ${money(existing.amount_cents)})` : ''}`, actor, { request_id: rid, amount_cents: amount });
+    resolveOrderExceptions(orderId, { keyPrefixes: ['pay-superseded:', 'pay-blocked:'] }, 'new request');
     audit(actor, 'payment.requested', 'order', orderId, `Payment of ${money(amount)} requested`, { request_id: rid });
     recomputePayment(orderId);
   });
@@ -168,6 +177,9 @@ export interface RecordPaymentInput {
   provider_ref?: string | null;
   proof_id?: string | null;
   note?: string | null;
+  /** When the money was paid (yyyy-mm-dd) and the bank reference, as recorded by staff. */
+  paid_on?: string | null;
+  reference?: string | null;
 }
 
 /** Records money that has been VERIFIED as received. Gives it a receipt number and tells the customer and staff. */
@@ -183,8 +195,8 @@ export function recordVerifiedPayment(orderId: string, input: RecordPaymentInput
   tx(() => {
     receipt = nextCounter('receipt_number');
     db()
-      .prepare("INSERT INTO payments (id, order_id, request_id, method, amount_cents, status, provider, provider_ref, receipt_number, verified_by, verified_by_kind, proof_id, note, created_at) VALUES (?,?,?,?,?,'verified',?,?,?,?,?,?,?,?)")
-      .run(pid, orderId, input.request_id ?? null, input.method, input.amount_cents, input.provider ?? null, input.provider_ref ?? null, receipt, actor.userId, verifiedBy, input.proof_id ?? null, input.note?.trim().slice(0, 500) || null, now());
+      .prepare("INSERT INTO payments (id, order_id, request_id, method, amount_cents, status, provider, provider_ref, receipt_number, verified_by, verified_by_kind, proof_id, note, paid_on, reference, created_at) VALUES (?,?,?,?,?,'verified',?,?,?,?,?,?,?,?,?,?)")
+      .run(pid, orderId, input.request_id ?? null, input.method, input.amount_cents, input.provider ?? null, input.provider_ref ?? null, receipt, actor.userId, verifiedBy, input.proof_id ?? null, input.note?.trim().slice(0, 500) || null, input.paid_on ?? null, input.reference?.trim().slice(0, 80) || null, now());
     addEvent(orderId, 'payment_verified', `Payment verified: ${money(input.amount_cents)} by ${METHOD_LABEL[input.method]} (receipt R${receipt})`, actor, { payment_id: pid, amount_cents: input.amount_cents, method: input.method, verified_by: verifiedBy, provider_ref: input.provider_ref ?? null });
     audit(actor, 'payment.verified', 'order', orderId, `#${o.order_number}: ${money(input.amount_cents)} ${METHOD_LABEL[input.method]} verified (${verifiedBy})`, { payment_id: pid });
     const state = recomputePayment(orderId);
@@ -268,7 +280,7 @@ export function paymentSummary(orderId: string, opts: { forCustomer?: boolean } 
   const o = requireOrder(orderId);
   const m = orderMoney(orderId);
   const req = openRequest(orderId);
-  const payments = db().prepare("SELECT id, method, amount_cents, status, receipt_number, provider_ref, note, verified_by_kind, created_at FROM payments WHERE order_id = ? ORDER BY created_at").all(orderId) as any[];
+  const payments = db().prepare("SELECT p.id, p.method, p.amount_cents, p.status, p.receipt_number, p.provider_ref, p.note, p.verified_by_kind, p.paid_on, p.reference, u.name AS verified_by_name, p.created_at FROM payments p LEFT JOIN users u ON u.id = p.verified_by WHERE p.order_id = ? ORDER BY p.created_at").all(orderId) as any[];
   const proofs = db().prepare('SELECT p.id, p.file_id, p.amount_claimed_cents, p.note, p.status, p.review_note, p.created_at, f.filename, f.mime, f.size FROM payment_proofs p JOIN files f ON f.id = p.file_id WHERE p.order_id = ? ORDER BY p.created_at').all(orderId) as any[];
   const methods = paymentMethods();
   return {
@@ -281,7 +293,7 @@ export function paymentSummary(orderId: string, opts: { forCustomer?: boolean } 
     blocker: opts.forCustomer ? null : paymentBlocker(orderId),
     payments: payments
       .filter((p) => !opts.forCustomer || p.status === 'verified')
-      .map((p) => ({ ...p, note: opts.forCustomer ? null : p.note, method_label: METHOD_LABEL[p.method as PaymentMethod] })),
+      .map((p) => ({ ...p, note: opts.forCustomer ? null : p.note, verified_by_name: opts.forCustomer ? null : p.verified_by_name, method_label: METHOD_LABEL[p.method as PaymentMethod] })),
     proofs: proofs.map((p) => ({ ...p, file_id: opts.forCustomer ? undefined : p.file_id, review_note: p.status === 'rejected' || !opts.forCustomer ? p.review_note : null })),
   };
 }
@@ -303,8 +315,7 @@ export function submitProof(orderId: string, fileId: string, input: { amount_cen
     recomputePayment(orderId);
   });
   raiseException({ type: 'payment_issue', severity: 'info', title: `Check the EFT for #${o.order_number}`, detail: `${o.customer_name} uploaded proof of payment${input.amount_cents ? ` for ${money(input.amount_cents)}` : ''}. Check the bank, then verify or reject it on the order.`, order_id: orderId, dedupe_key: `proof:${pid}` });
-  const e = layout({ subject: `Proof of payment for #${o.order_number} — please check the bank`, preheader: o.customer_name, intro: [`${o.customer_name} uploaded proof of an EFT for order #${o.order_number}${input.amount_cents ? ` (${money(input.amount_cents)})` : ''}.`, 'The order is NOT marked paid until someone checks the money is in the account and verifies it in Terram.'], cta: { label: 'Review the payment', url: `${siteUrl()}/orders/${orderId}` } });
-  notify({ key: `staff_proof:${pid}`, kind: 'staff_proof', audience: 'staff', to: staffEmails(), ...e, orderId });
+  sendPaymentReviewEmail(orderId, { key: `staff_proof:${pid}`, amount_cents: input.amount_cents, reference: null, proofFileId: fileId, what: 'uploaded proof of payment' });
   const c = customerContact(orderId);
   if (c.email) {
     const ce = layout({ subject: `We've received your proof of payment for #${o.order_number}`, preheader: 'We’ll confirm once we’ve checked it.', greeting: `Hi ${c.firstName},`, intro: ['Thank you. We’ve received your proof of payment and will confirm once we’ve checked that the money has arrived in our account.'], cta: { label: 'View my order', url: orderUrl(orderId) }, closing: signOff() });
@@ -344,4 +355,49 @@ export function reviewProof(proofId: string, decision: { accept: true; amount_ce
   }
   publish(['orders', 'exceptions'], { orderId: p.order_id });
   return null;
+}
+
+/** A manager settles an order's payment without money changing hands (e.g. a gift or an agreed write-off). Reversible. */
+export function waivePayment(orderId: string, reason: string, actor: Actor, undo = false) {
+  const o = requireOrder(orderId);
+  const why = reason.trim();
+  if (!undo && !why) throw badRequest('Say why the payment is being waived.');
+  if (!undo && o.payment_state === 'paid') throw conflict('This order is already paid.');
+  tx(() => {
+    if (undo) db().prepare('UPDATE orders SET payment_waived_at = NULL, payment_waived_by = NULL, payment_waived_reason = NULL WHERE id = ?').run(orderId);
+    else db().prepare('UPDATE orders SET payment_waived_at = ?, payment_waived_by = ?, payment_waived_reason = ? WHERE id = ?').run(now(), actor.userId, why.slice(0, 300), orderId);
+    addEvent(orderId, undo ? 'payment_unwaived' : 'payment_waived', undo ? 'Payment waiver removed — payment is owed again' : `Payment waived: ${why}`, actor, { reason: why || null });
+    audit(actor, undo ? 'payment.unwaived' : 'payment.waived', 'order', orderId, `#${o.order_number}: payment ${undo ? 'waiver removed' : `waived (${why})`}`);
+    recomputePayment(orderId);
+  });
+  publish(['orders'], { orderId });
+  return requireOrder(orderId);
+}
+
+/** Who is asked to check the bank when a customer says they've paid (Settings → Emails). */
+export function paymentReviewRecipients(): string[] {
+  const s = getSettings();
+  return s.notifications.paymentReviewEmails?.length ? s.notifications.paymentReviewEmails : staffEmails();
+}
+
+/**
+ * "Payment Verification Required": sent to whoever checks the bank (Sharon by default, Settings →
+ * Emails). It never says the payment is verified — it asks for it to be checked. One email per
+ * submission (dedupe key), so repeated taps don't spam, but a new proof or declaration does alert.
+ */
+export function sendPaymentReviewEmail(orderId: string, x: { key: string; amount_cents: number | null; reference: string | null; proofFileId: string | null; what: string }) {
+  const o = requireOrder(orderId);
+  const to = paymentReviewRecipients();
+  if (!to.length) return;
+  const due = orderMoney(orderId).balance_cents;
+  const when = new Date().toLocaleString('en-ZA', { timeZone: getSettings().business.timezone, dateStyle: 'medium', timeStyle: 'short' });
+  const e = layout({
+    subject: `Payment Verification Required — ${getSettings().business.name} — #${o.order_number}`,
+    preheader: `Please check the bank for ${o.customer_name}'s payment.`,
+    intro: [`${o.customer_name} ${x.what} for order #${o.order_number}. Please check the bank account to see whether the money has reflected.`, 'This payment has NOT been verified yet. Only confirm it in Terram once you can see it in the account.'],
+    blocks: [{ facts: [['Customer', o.customer_name], ['Order', `#${o.order_number}`], ['Amount they say they paid', x.amount_cents ? money(x.amount_cents) : 'Not given'], ['Amount due', due != null ? money(due) : '—'], ['Submitted', when], ['Payment reference', x.reference || `${o.order_number} (order number)`], ['Proof of payment', x.proofFileId ? 'Attached in Terram (open the order to view it)' : 'None — the customer says they have paid']] }],
+    cta: { label: 'Review the payment', url: `${siteUrl()}/orders/${orderId}#payment` },
+    links: x.proofFileId ? [{ label: 'Open the proof of payment (sign in required)', url: `${siteUrl()}/api/files/${x.proofFileId}?inline=1` }] : [],
+  });
+  notify({ key: x.key, kind: 'staff_payment_review', audience: 'staff', to, ...e, orderId });
 }

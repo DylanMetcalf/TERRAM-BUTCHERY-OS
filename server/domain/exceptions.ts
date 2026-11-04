@@ -25,7 +25,8 @@ export type ExceptionType =
   | 'integration_failure'
   | 'payment_issue'
   | 'amendment_declined'
-  | 'delivery_check';
+  | 'delivery_check'
+  | 'weight_check';
 
 export type Severity = 'blocking' | 'warning' | 'info';
 
@@ -136,4 +137,40 @@ export function closeException(exceptionId: string, status: 'resolved' | 'dismis
 export function openExceptionCount(): { total: number; blocking: number } {
   const r = db().prepare("SELECT COUNT(*) total, SUM(CASE WHEN severity = 'blocking' THEN 1 ELSE 0 END) blocking FROM exceptions WHERE status = 'open'").get() as any;
   return { total: r.total ?? 0, blocking: r.blocking ?? 0 };
+}
+
+/**
+ * Closes an order's open items that no longer need anyone (e.g. "check the EFT" once the payment is
+ * verified), so the Attention list only shows real, unresolved work. Matches by type and/or by the
+ * start of the dedupe key.
+ */
+export function resolveOrderExceptions(orderId: string, match: { types?: ExceptionType[]; keyPrefixes?: string[] }, resolution: string) {
+  const conds: string[] = [];
+  const vals: unknown[] = [];
+  if (match.types?.length) {
+    conds.push(`type IN (${match.types.map(() => '?').join(',')})`);
+    vals.push(...match.types);
+  }
+  for (const k of match.keyPrefixes ?? []) {
+    conds.push('dedupe_key LIKE ?');
+    vals.push(`${k}%`);
+  }
+  if (!conds.length) return 0;
+  const r = db()
+    .prepare(`UPDATE exceptions SET status = 'resolved', resolution = ?, resolved_at = ? WHERE order_id = ? AND status = 'open' AND (${conds.join(' OR ')})`)
+    .run(resolution, now(), orderId, ...vals);
+  if (r.changes) publish(['exceptions'], { orderId });
+  return r.changes;
+}
+
+/**
+ * When an order is finished, its open questions no longer need anyone: a cancelled order closes all of
+ * them; a completed order closes everything except money questions (an unpaid delivered order stays
+ * visible until the payment is sorted out).
+ */
+export function closeExceptionsForFinishedOrder(orderId: string, status: 'completed' | 'cancelled') {
+  const keep = status === 'completed' ? " AND COALESCE(dedupe_key,'') NOT LIKE 'proof:%' AND COALESCE(dedupe_key,'') NOT LIKE 'declared:%' AND COALESCE(dedupe_key,'') NOT LIKE 'pay%' AND COALESCE(dedupe_key,'') NOT LIKE 'paid-%'" : '';
+  const r = db().prepare(`UPDATE exceptions SET status = 'resolved', resolution = ?, resolved_at = ? WHERE order_id = ? AND status = 'open'${keep}`).run(`order_${status}`, now(), orderId);
+  if (r.changes) publish(['exceptions'], { orderId });
+  return r.changes;
 }

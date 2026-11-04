@@ -8,12 +8,14 @@ import { ChangeOrderButtons, ChangeOrderLink } from '../components/ChangeOrder';
 import { QuantityInput } from '../components/quantity-input';
 import { Button, Card, cx, Field, Input, Segmented, Sheet, Spinner, Textarea } from '../components/ui';
 import { api, ApiError, newKey } from '../lib/api';
-import { addDays, formatMoney, formatQty, friendlyDate, longDate } from '../lib/format';
+import { addDays, dateTime, formatMoney, formatQty, friendlyDate, longDate } from '../lib/format';
 import { useOnline } from '../lib/realtime';
 import { REORDER_KEY, rememberOrder } from '../lib/customer';
 import { DeviceOrders, GoogleReviewCard, InstagramCard } from '../components/Social';
 import type { Qty, QuantityType } from '../lib/types';
-import { priceLine, withSurcharge, type Pricing } from '../../../shared/pricing';
+import { priceLine, withSurcharge, type OrderMethod, type Pricing, type WeightRange } from '../../../shared/pricing';
+import { validMobile } from '../../../shared/text';
+import { SiteFooter, SiteHeader } from '../components/SiteChrome';
 
 /**
  * The customer order form. Products, sizes and prices come from the one central catalogue; the
@@ -43,8 +45,13 @@ export interface CatProduct {
   price_unit: 'kg' | 'each' | null;
   sale_options: SaleOpt[];
   options: { group: string; options: { name: string; is_default: boolean; surcharge_pct: number }[] }[];
+  /** How this product is ordered: packs, counted items with a preferred weight, by weight, whole… */
+  order_method: OrderMethod;
+  weight_ranges: WeightRange[];
+  /** A parent that's only a heading for its variations (e.g. Brisket → Whole / Smoked). */
+  group_only: boolean;
 }
-interface Line { key: string; product_id: string; sale_option?: string | null; qty: Qty; preparation: Record<string, string>; special_instructions: string }
+interface Line { key: string; product_id: string; sale_option?: string | null; qty: Qty; preparation: Record<string, string>; special_instructions: string; /** Preferred weight per piece, e.g. '300-400' or 'other'. */ weight_pref?: string | null }
 interface InvoiceForm { wanted: boolean; billing_name: string; company: string; billing_email: string; billing_address: string; vat_number: string; instructions: string }
 interface State {
   step: 0 | 1 | 2 | 3;
@@ -55,6 +62,8 @@ interface State {
   fulfilment: 'collection' | 'delivery';
   date: string;
   address: string;
+  /** Directions, gate code, where to leave it. */
+  instructions?: string;
   notes: string;
   client_ref: string;
   accepted?: boolean;
@@ -64,12 +73,12 @@ interface State {
   storage?: 'fresh' | 'frozen' | '';
 }
 interface QuoteLine { index: number; ok: boolean; problem: string | null; product_id: string; label?: string; pricing: Pricing | null; cents: number | null; unit_price_cents?: number | null; price_unit?: 'kg' | 'each' | null }
-interface Quote { lines: QuoteLine[]; total: { estimate_cents: number | null; exact: boolean; pending_lines: number } }
+interface Quote { lines: QuoteLine[]; total: { estimate_cents: number | null; exact: boolean; pending_lines: number }; delivery?: { method: string; fee_cents: number | null; area: string; policy: string } }
 
 const KEY = 'terram:customer-order';
 /** The customer's own details, kept on their device after an order so they don't retype them next time. */
 const ME_KEY = 'terram:customer-me';
-type Me = { name: string; phone: string; email: string; address: string };
+type Me = { name: string; phone: string; email: string; address: string; instructions?: string };
 const BLANK_INVOICE: InvoiceForm = { wanted: false, billing_name: '', company: '', billing_email: '', billing_address: '', vat_number: '', instructions: '' };
 
 function loadMe(): Me | null {
@@ -92,8 +101,22 @@ function initial(): State {
     /* ignore */
   }
   const me = loadMe();
-  return { step: 0, lines: [], name: me?.name ?? '', phone: me?.phone ?? '', email: me?.email ?? '', fulfilment: 'collection', date: '', address: me?.address ?? '', notes: '', client_ref: newKey(), invoice: BLANK_INVOICE, reminders: false };
+  return blankState(me);
 }
+
+function blankState(me: Me | null = loadMe()): State {
+  return { step: 0, lines: [], name: me?.name ?? '', phone: me?.phone ?? '', email: me?.email ?? '', fulfilment: 'delivery', date: '', address: me?.address ?? '', instructions: me?.instructions ?? '', notes: '', client_ref: newKey(), invoice: BLANK_INVOICE, reminders: false };
+}
+
+/** Has the customer actually started an order worth keeping? */
+const hasProgress = (x: State) => x.lines.length > 0 || !!x.special?.trim();
+
+/** The weight per piece we price an estimate on: the chosen range's midpoint, else the usual piece weight. */
+export function pieceGrams(p: CatProduct, weightPref?: string | null): number | null {
+  const r = weightPref ? p.weight_ranges.find((w) => w.id === weightPref) : null;
+  return r ? Math.round((r.min_g + r.max_g) / 2) : p.typical_piece_g;
+}
+const gramsText = (g: number) => (g >= 1000 ? `${(g / 1000).toLocaleString('en-ZA', { maximumFractionDigits: 2 })} kg` : `${g} g`);
 
 /** Same arithmetic as the server (shared/pricing.ts), for instant feedback while choosing. */
 export function lineQuote(l: Line, p: CatProduct | undefined): { pricing: Pricing; cents: number | null; label: string } {
@@ -101,8 +124,9 @@ export function lineQuote(l: Line, p: CatProduct | undefined): { pricing: Pricin
   const opt = l.sale_option ? p.sale_options.find((o) => o.id === l.sale_option) : null;
   const surcharge = p.options.reduce((t, g) => t + (g.options.find((o) => o.name === l.preparation[g.group])?.surcharge_pct ?? 0), 0);
   const unit = p.price_cents == null ? null : withSurcharge(p.price_cents, surcharge);
-  const q = priceLine({ qty: l.qty, unitPriceCents: unit, priceUnit: p.price_unit, saleKind: opt?.kind ?? null, pieceGrams: opt ? opt.grams : p.typical_piece_g });
-  const label = opt && opt.kind === 'piece' ? `${l.qty.count} × ${opt.label}` : formatQty(l.qty, p.piece_noun);
+  const q = priceLine({ qty: l.qty, unitPriceCents: unit, priceUnit: p.price_unit, saleKind: opt?.kind ?? null, pieceGrams: opt ? opt.grams : pieceGrams(p, l.weight_pref) });
+  const range = l.weight_pref ? p.weight_ranges.find((w) => w.id === l.weight_pref) : null;
+  const label = opt && opt.kind === 'piece' ? `${l.qty.count} × ${opt.label}` : opt && opt.kind === 'pack' && opt.grams ? `${l.qty.count} × ${gramsText(opt.grams)}` : `${formatQty(l.qty, p.piece_noun)}${range ? ` (${range.label} each)` : l.weight_pref === 'other' ? ' (special size)' : ''}`;
   return { ...q, label };
 }
 
@@ -147,6 +171,9 @@ export default function PublicOrder() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ReactNode | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
+  /** An unfinished order saved on the server for this device (offered when this browser has nothing). */
+  const [found, setFound] = useState<{ draft: State; saved_at: string } | null>(null);
+  const draftChecked = useRef(false);
   const typing = useTypingOnTouch();
   const [touch] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches);
   const [searching, setSearching] = useState(false);
@@ -170,6 +197,37 @@ export default function PublicOrder() {
   useEffect(() => {
     document.title = info ? `Order · ${info.business.name}` : 'Order';
   }, [info]);
+  // Unfinished orders are also kept privately on the server for this device for 14 days, so a cleared
+  // browser or an app that reloads doesn't lose them. Offered back, never applied without asking.
+  useEffect(() => {
+    if (draftChecked.current) return;
+    draftChecked.current = true;
+    if (hasProgress(s)) return;
+    api.get<{ draft: State | null; saved_at?: string }>('/api/public/draft').then((r) => {
+      if (r.draft && Array.isArray(r.draft.lines) && (r.draft.lines.length || r.draft.special)) setFound({ draft: r.draft, saved_at: r.saved_at ?? '' });
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (done || !hasProgress(s)) return;
+    const t = setTimeout(() => {
+      const { accepted: _a, ...keep } = s;
+      api.put('/api/public/draft', { draft: { ...keep, invoice: s.invoice } }).catch(() => undefined);
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [s, done]);
+  const startNew = () => {
+    api.del('/api/public/draft').catch(() => undefined);
+    try {
+      localStorage.removeItem(KEY);
+    } catch {
+      /* ignore */
+    }
+    setFound(null);
+    setNotice(null);
+    setQuote(null);
+    setS(blankState());
+  };
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [s.step]);
@@ -241,18 +299,18 @@ export default function PublicOrder() {
   const localExact = local.length > 0 && local.every((l) => l.pricing === 'exact');
 
   const payload = () => ({
-    customer: { name: s.name, phone: s.phone, email: s.email || undefined },
-    items: s.lines.map((l) => ({ product_id: l.product_id, sale_option: l.sale_option ?? null, qty: l.qty, preparation: l.preparation, special_instructions: l.special_instructions || null })),
+    customer: { name: s.name.trim(), phone: s.phone, email: s.email.trim() },
+    items: s.lines.map((l) => ({ product_id: l.product_id, sale_option: l.sale_option ?? null, qty: l.qty, preparation: l.preparation, special_instructions: l.special_instructions || null, weight_pref: l.weight_pref ?? null })),
     fulfilment_type: info?.fulfilment?.customerChooses ? s.fulfilment : null,
     requested_date: s.date || null,
     delivery_address: !info?.fulfilment?.customerChooses || s.fulfilment === 'delivery' ? s.address : null,
+    delivery_instructions: !info?.fulfilment?.customerChooses || s.fulfilment === 'delivery' ? s.instructions?.trim() || null : null,
     notes: s.notes || null,
     special_request: s.special?.trim() || null,
     invoice: s.invoice?.wanted
       ? { billing_name: s.invoice.billing_name, company: s.invoice.company || null, billing_email: s.invoice.billing_email, billing_address: s.invoice.billing_address || null, vat_number: s.invoice.vat_number || null, instructions: s.invoice.instructions || null }
       : null,
     marketing_consent: !!s.reminders,
-    storage: s.storage || undefined,
     seen_total_cents: quote?.total.estimate_cents ?? null,
     client_ref: s.client_ref,
   });
@@ -275,7 +333,7 @@ export default function PublicOrder() {
       if (r.order_number && r.order_url) rememberOrder({ number: r.order_number, url: r.order_url, at: new Date().toISOString() });
       try {
         localStorage.removeItem(KEY);
-        localStorage.setItem(ME_KEY, JSON.stringify({ name: s.name, phone: s.phone, email: s.email, address: s.address || loadMe()?.address || '' }));
+        localStorage.setItem(ME_KEY, JSON.stringify({ name: s.name, phone: s.phone, email: s.email, address: s.address || loadMe()?.address || '', instructions: s.instructions || loadMe()?.instructions || '' }));
       } catch {
         /* ignore */
       }
@@ -327,7 +385,10 @@ export default function PublicOrder() {
             <p className="mt-1 text-[14px] text-ink-2">Message or call us with your reference number and we’ll update your order.</p>
             <div className="mt-3"><ChangeOrderButtons phone={info.business.phone} email={info.business.email} reference={done.number} name={s.name.split(' ')[0]} /></div>
           </div>
-          <Button className="mt-8" variant="ghost" onClick={() => { setDone(null); setS({ ...initial(), step: 0, lines: [], client_ref: newKey() }); }}>Place another order</Button>
+          <div className="mt-8 flex flex-wrap justify-center gap-2">
+            <Button variant="ghost" onClick={() => { setDone(null); setS(blankState()); }}>Place another order</Button>
+            <Link to="/" className="inline-flex h-11 items-center rounded-xl px-4 text-[15px] font-semibold text-ink-2 hover:bg-sunken">Back to home</Link>
+          </div>
         </div>
       </Shell>
     );
@@ -336,29 +397,41 @@ export default function PublicOrder() {
   const chooses: boolean = !!info.fulfilment.customerChooses;
   const allowedDays: number[] = !chooses ? [...new Set<number>([...info.fulfilment.collectionDays, ...info.fulfilment.deliveryDays])] : s.fulfilment === 'delivery' ? info.fulfilment.deliveryDays : info.fulfilment.collectionDays;
   const dates = Array.from({ length: 45 }, (_, i) => addDays(info.earliest_date, i)).filter((d) => allowedDays.includes(new Date(d + 'T00:00:00Z').getUTCDay())).slice(0, 12);
-  const rate: number = info.fulfilment.deliveryRatePerKmCents ?? 0;
-  const feeLine: string | null = info.fulfilment.showDeliveryFees
-    ? `Delivery is free within ${info.fulfilment.freeDeliveryKm} km of ${info.fulfilment.collectionPlace ?? 'our shop'}.${rate > 0 ? ` Further away it’s ${formatMoney(rate, info.currency)} per km beyond that.` : ' Further away, we’ll quote you a delivery fee.'}`
-    : null;
+  const deliveryFee: number | null = info.delivery?.fee_cents ?? null;
+  const isDelivery = !chooses || s.fulfilment === 'delivery';
+  const feeForOrder: number | null = isDelivery ? deliveryFee : 0;
+  const deliveryWording = 'We deliver within our regular local delivery area. Other locations can be arranged separately. We will contact you to confirm the delivery arrangements.';
   const terms: string[] = (info.form.terms ?? '').split('\n').map((t: string) => t.trim()).filter(Boolean);
-  const detailsOk = s.name.trim().length >= 2 && s.phone.replace(/\D/g, '').length >= 9 && (!s.email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email));
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email.trim());
+  const phoneOk = !!validMobile(s.phone);
+  const detailsOk = s.name.trim().length >= 2 && phoneOk && emailOk;
   const inv = s.invoice ?? BLANK_INVOICE;
   const invoiceOk = !inv.wanted || (inv.billing_name.trim().length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inv.billing_email));
   const needsAddress = !chooses || s.fulfilment === 'delivery';
   const dateOk = !s.date || (s.date >= info.earliest_date && s.date <= addDays(info.today, 90) && allowedDays.includes(new Date(s.date + 'T00:00:00Z').getUTCDay()));
-  const whenOk = dateOk && (!needsAddress || s.address.trim().length > 5) && !!s.storage;
-  const steps = ['Choose', 'Your details', chooses ? 'Collection or delivery' : 'Address', 'Check & send'];
+  const whenOk = dateOk && (!needsAddress || (s.address.trim().length >= 8 && (s.instructions ?? '').trim().length >= 3));
+  const steps = ['Choose', 'Your details', chooses ? 'Collection or delivery' : 'Delivery', 'Check & send'];
   const quoteProblems = quote?.lines.filter((l) => !l.ok) ?? [];
-  const shownTotal = quote?.total.estimate_cents ?? (local.length ? localTotal : null);
+  const productsTotal = quote?.total.estimate_cents ?? (local.length ? localTotal : null);
+  const shownTotal = productsTotal != null ? productsTotal + (feeForOrder ?? 0) : null;
   const shownExact = quote ? quote.total.exact : localExact;
   const pricedOnWeight = quote ? quote.lines.some((l) => l.pricing === 'estimate' || l.pricing === 'by_weight') : local.some((l) => l.pricing === 'estimate' || l.pricing === 'by_weight');
   const cartCount = s.lines.length + (s.special?.trim() ? 1 : 0);
   const hideBar = typing && s.step === 0; // keyboard up while searching: give the search box and results the room
 
   const totalBlock = shownTotal != null && shownTotal > 0 && (
-    <div className="flex items-baseline justify-between gap-3 text-[15px]">
-      <span className="text-ink-2">{shownExact ? 'Total' : 'Estimated total'}</span>
-      <span className="font-semibold tabular">{formatMoney(shownTotal, info.currency)}</span>
+    <div className="space-y-1">
+      {feeForOrder != null && feeForOrder > 0 && (
+        <>
+          <div className="flex items-baseline justify-between gap-3 text-[14.5px] text-ink-2"><span>Products</span><span className="tabular">{shownExact ? '' : '≈ '}{formatMoney(productsTotal ?? 0, info.currency)}</span></div>
+          <div className="flex items-baseline justify-between gap-3 text-[14.5px] text-ink-2"><span>Delivery fee</span><span className="tabular">{formatMoney(feeForOrder, info.currency)}</span></div>
+        </>
+      )}
+      <div className="flex items-baseline justify-between gap-3 text-[15px]">
+        <span className="text-ink-2">{shownExact ? 'Total' : 'Estimated total'}</span>
+        <span className="font-semibold tabular">{formatMoney(shownTotal, info.currency)}</span>
+      </div>
+      {isDelivery && feeForOrder == null && <p className="text-[13px] text-ink-3">We’ll confirm the delivery fee with you.</p>}
     </div>
   );
   const priceNote = (
@@ -387,9 +460,24 @@ export default function PublicOrder() {
         </div>
       )}
 
+      {found && (
+        <div className="mb-5 rounded-2xl border border-brand/30 bg-brand-soft p-4 text-[14.5px] text-brand-soft-ink" role="status">
+          <b>You have an unfinished order</b> with {found.draft.lines.length} item{found.draft.lines.length === 1 ? '' : 's'}{found.saved_at ? `, saved ${dateTime(found.saved_at)}` : ''}.
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="primary" onClick={() => { setS({ ...blankState(), ...found.draft, step: 0, accepted: false, invoice: { ...BLANK_INVOICE, ...(found.draft.invoice ?? {}) } }); setFound(null); }}>Continue that order</Button>
+            <Button onClick={startNew}>Start a new order</Button>
+          </div>
+        </div>
+      )}
+
       {s.step === 0 && (
         <div className="animate-rise">
           <h1 className="font-display text-[30px] font-semibold leading-tight">What would you like?</h1>
+          {hasProgress(s) && (
+            <button type="button" onClick={() => { if (window.confirm('Clear this order and start again?')) startNew(); }} className="mt-1 text-[13.5px] font-medium text-ink-3 underline underline-offset-2 hover:text-ink">
+              Clear and start a new order
+            </button>
+          )}
           <p className="mt-2 max-w-2xl text-[15.5px] text-ink-2">{info.form.intro}</p>
           <p className="mt-2 flex max-w-2xl items-start gap-2 text-[14px] text-ink-2"><CalendarClock className="mt-0.5 size-4 shrink-0 text-ink-3" />{info.form.leadTime}</p>
           <ChangeOrderLink phone={info.business.phone} email={info.business.email} className="mt-2 text-[14px] font-medium text-brand underline-offset-2 hover:underline" />
@@ -480,9 +568,9 @@ export default function PublicOrder() {
                         <div className="mt-1.5 text-[13px] text-ink-3">
                           {p.price_cents != null && <span className="font-medium text-ink-2">{formatMoney(p.price_cents, info.currency)}/{p.price_unit}</span>}
                           {p.price_cents != null && ' · '}
-                          {p.sale_options.length ? p.sale_options.map((o) => o.label).join(', ') : p.quantity_type === 'weight' ? 'by weight' : p.quantity_type === 'count' ? `per ${p.piece_noun}` : `by weight or per ${p.piece_noun}`}
+                          {p.sale_options.length ? p.sale_options.map((o) => o.label).join(', ') : p.weight_ranges?.length && (p.order_method === 'items_weighed' || p.order_method === 'items') ? `per ${p.piece_noun} · ${p.weight_ranges.map((w) => w.label).join(', ')}` : p.order_method === 'by_weight' || p.quantity_type === 'weight' ? 'by weight' : p.quantity_type === 'count' ? `per ${p.piece_noun}` : `by weight or per ${p.piece_noun}`}
                         </div>
-                        {family.length > 1 && <div className="mt-1 text-[13px] text-ink-3">{family.map((f) => f.variant_label ?? f.name).join(' or ')}</div>}
+                        {family.length > 1 && <div className="mt-1 text-[13px] text-ink-3">{family.filter((f) => !f.group_only).map((f) => f.variant_label ?? f.name).join(' or ')}</div>}
                         {inCart.length > 0 && <div className="mt-2 text-[13px] font-semibold text-brand">In your order: {inCart.map((l) => lineQuote(l, byId.get(l.product_id)).label).join(', ')}</div>}
                       </div>
                       <span className={cx('flex size-10 shrink-0 items-center justify-center rounded-xl', inCart.length ? 'bg-brand text-brand-ink' : 'bg-sunken text-ink-2')} aria-hidden>{inCart.length ? <Check className="size-4" /> : <Plus className="size-4" />}</span>
@@ -513,9 +601,11 @@ export default function PublicOrder() {
             </button>
           )}
           <div className="mt-6 space-y-4">
-            <Field label="Name"><Input big autoComplete="name" value={s.name} onChange={(e) => set({ name: e.target.value })} /></Field>
-            <Field label="Mobile number" hint="We’ll call or WhatsApp you if we need to check anything."><Input big type="tel" inputMode="tel" autoComplete="tel" value={s.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
-            <Field label="Email" optional hint="For your order updates and a link to track your order." error={s.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email) ? 'That email address doesn’t look right.' : undefined}>
+            <Field label="Full name"><Input big autoComplete="name" value={s.name} onChange={(e) => set({ name: e.target.value })} /></Field>
+            <Field label="Mobile number" hint="We’ll call or WhatsApp you if we need to check anything." error={s.phone.replace(/\D/g, '').length >= 9 && !phoneOk ? 'Please enter a valid mobile number, e.g. 071 234 5678.' : undefined}>
+              <Input big type="tel" inputMode="tel" autoComplete="tel" value={s.phone} onChange={(e) => set({ phone: e.target.value })} placeholder="e.g. 071 234 5678" />
+            </Field>
+            <Field label="Email" hint="For your order confirmation, payment details and updates." error={s.email && !emailOk ? 'Please enter a valid email address.' : undefined}>
               <Input big type="email" autoComplete="email" value={s.email} onChange={(e) => set({ email: e.target.value })} />
             </Field>
 
@@ -541,7 +631,7 @@ export default function PublicOrder() {
               )}
             </fieldset>
 
-            {s.email && (
+            {emailOk && (
               <label className="flex items-start gap-3 rounded-2xl border border-line bg-surface p-4 text-[14.5px]">
                 <input type="checkbox" checked={!!s.reminders} onChange={(e) => set({ reminders: e.target.checked })} className="mt-0.5 size-5 shrink-0 accent-[var(--brand)]" />
                 <span>Send me an occasional reminder when it’s time to stock up again. <span className="text-ink-3">Optional. You can stop them any time.</span></span>
@@ -563,18 +653,31 @@ export default function PublicOrder() {
                 ) : (
                   <p className="text-ink-2">Orders are for collection from {info.fulfilment.collectionPlace ?? 'our shop'}.</p>
                 )}
-                <p className="mt-2 text-[13.5px] text-ink-3">{s.fulfilment === 'collection' ? [`Collect from ${info.fulfilment.collectionPlace ?? 'our shop'}${info.fulfilment.collectionAddress ? `, ${info.fulfilment.collectionAddress}` : ''}`, info.fulfilment.collectionHours && `Hours: ${info.fulfilment.collectionHours}`].filter(Boolean).join(' · ') : info.fulfilment.deliveryNotes}</p>
-                {s.fulfilment === 'delivery' && feeLine && <p className="mt-2 rounded-xl bg-brand-soft px-3 py-2 text-[13.5px] text-brand-soft-ink">{feeLine}</p>}
+                <p className="mt-2 text-[13.5px] text-ink-3">{s.fulfilment === 'collection' ? [`Collect from ${info.fulfilment.collectionPlace ?? 'our shop'}${info.fulfilment.collectionAddress ? `, ${info.fulfilment.collectionAddress}` : ''}`, info.fulfilment.collectionHours && `Hours: ${info.fulfilment.collectionHours}`].filter(Boolean).join(' · ') : null}</p>
               </div>
             </>
           ) : (
             <>
-              <h1 className="font-display text-[28px] font-semibold">Where should we bring it?</h1>
-              <p className="mt-1 text-ink-2">Give us your address. We’ll contact you to arrange delivery or collection.</p>
-              {feeLine && <p className="mt-3 rounded-xl bg-brand-soft px-3 py-2 text-[13.5px] text-brand-soft-ink">{feeLine}</p>}
+              <h1 className="font-display text-[28px] font-semibold">Delivery</h1>
             </>
           )}
-          {needsAddress && <Field label={chooses ? 'Delivery address' : 'Your address'} hint={chooses ? undefined : 'Street address and suburb, e.g. 12 Kerk Street, Pretoria East.'} className="mt-5"><Textarea rows={3} value={s.address} onChange={(e) => set({ address: e.target.value })} autoComplete="street-address" /></Field>}
+          {isDelivery && (
+            <div className="mt-4 rounded-2xl border border-line bg-surface p-4 text-[14.5px]" id="delivery-info">
+              <p className="text-ink-2">{deliveryWording}</p>
+              {info.delivery?.area && <p className="mt-2 text-[13.5px] text-ink-3">{info.delivery.area}</p>}
+              <p className="mt-3 font-semibold">{deliveryFee != null ? `Delivery fee: ${formatMoney(deliveryFee, info.currency)}` : 'We’ll confirm the delivery fee with you.'}</p>
+            </div>
+          )}
+          {needsAddress && (
+            <>
+              <Field label="Delivery address" hint="Street address, estate or farm name and town." className="mt-5" error={s.address.trim().length > 0 && s.address.trim().length < 8 ? 'Please enter your full address, including the area or town.' : undefined}>
+                <Textarea rows={3} value={s.address} onChange={(e) => set({ address: e.target.value })} autoComplete="street-address" />
+              </Field>
+              <Field label="Delivery instructions" hint="Directions, gate code, or where to leave your order." className="mt-4">
+                <Textarea rows={2} value={s.instructions ?? ''} onChange={(e) => set({ instructions: e.target.value })} maxLength={800} placeholder="e.g. Gate code 1234, second house on the left" />
+              </Field>
+            </>
+          )}
           <div className="mt-6 flex gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-[13.5px] text-ink-2"><CalendarClock className="mt-0.5 size-4 shrink-0 text-ink-3" /><span>{info.form.leadTime} We’ll confirm the expected date when we confirm your order.</span></div>
           <Field label="Preferred date" optional className="mt-5" hint="Tell us if you need it by a particular day, e.g. for an event.">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -603,24 +706,6 @@ export default function PublicOrder() {
               )}
             </div>
           </Field>
-          <fieldset className="mt-6">
-            <legend className="text-[15px] font-semibold">Fresh or frozen?</legend>
-            <p className="mt-1 text-[13.5px] text-ink-2">Choose how you’d like your order. Everything is vacuum-packed.</p>
-            <div className="mt-3 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Fresh or frozen">
-              {(['fresh', 'frozen'] as const).map((v) => (
-                <button key={v} type="button" role="radio" aria-checked={s.storage === v} onClick={() => set({ storage: v })} className={cx('rounded-xl border px-4 py-3 text-left', s.storage === v ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface')}>
-                  <div className="text-[15.5px] font-semibold">{v === 'fresh' ? 'Fresh' : 'Frozen'}</div>
-                  <div className="text-[13px] opacity-80">{v === 'fresh' ? 'Best for collection or a short delivery trip' : 'Recommended for longer delivery journeys'}</div>
-                </button>
-              ))}
-            </div>
-            {(s.storage === 'fresh' && (needsAddress)) || !s.storage ? (
-              <p className={cx('mt-3 rounded-xl px-3 py-2.5 text-[13.5px]', s.storage === 'fresh' ? 'bg-ochre-soft text-ochre-soft-ink' : 'bg-surface-2 text-ink-2')}>
-                For delivery journeys longer than about {info.form.freshMaxHours ?? 2} hours, we can’t guarantee fresh products stay in the required condition, so we recommend frozen. Not sure how far you are?{' '}
-                {info.help?.whatsapp ? <a href={info.help.whatsapp} target="_blank" rel="noreferrer" className="font-semibold underline">Chat to us on WhatsApp</a> : 'Contact us'} before you order.
-              </p>
-            ) : null}
-          </fieldset>
           <Field label="Anything we should know?" optional className="mt-5"><Textarea rows={2} value={s.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="e.g. it’s for a braai for 10 people" /></Field>
         </div>
       )}
@@ -673,11 +758,13 @@ export default function PublicOrder() {
             </Card>
           )}
           <Card className="mt-3 space-y-1 p-4 text-[14.5px]">
-            <div><b>{s.name}</b> · {s.phone}{s.email ? ` · ${s.email}` : ''}</div>
-            <div>{chooses ? (s.fulfilment === 'delivery' ? `Delivery to ${s.address}` : 'Collection') : s.address}</div>
+            <div className="break-words"><b>{s.name}</b> · {validMobile(s.phone) ?? s.phone} · {s.email}</div>
+            <div>{isDelivery ? `Delivery to ${s.address}` : 'Collection'}</div>
+            {isDelivery && s.instructions?.trim() && <div className="text-ink-2">Instructions: {s.instructions.trim()}</div>}
+            {isDelivery && <div className="text-ink-2">{deliveryFee != null ? `Delivery fee ${formatMoney(deliveryFee, info.currency)}` : 'Delivery fee to be confirmed'}</div>}
             <div className="text-ink-2">{s.date ? `Preferred date: ${longDate(s.date)}` : 'No preferred date'}</div>
-            <div className="font-semibold">{s.storage === 'frozen' ? 'Frozen' : s.storage === 'fresh' ? 'Fresh' : ''} · vacuum-packed</div>
-            {!chooses && <div className="text-[13.5px] text-ink-3">We’ll contact you to arrange delivery or collection.</div>}
+            <div className="text-ink-2">Frozen · vacuum-packed</div>
+            {isDelivery && <div className="text-[13.5px] text-ink-3">We will contact you to confirm the delivery arrangements.</div>}
             {s.notes && <div className="text-ink-2">“{s.notes}”</div>}
             {inv.wanted && <div className="flex items-center gap-1.5 text-ink-2"><Receipt className="size-4 text-ink-3" />Invoice to {inv.billing_name}{inv.company ? ` (${inv.company})` : ''}, {inv.billing_email}</div>}
             <button type="button" onClick={() => set({ step: 1 })} className="pt-1 text-[13.5px] font-medium text-brand underline-offset-2 hover:underline">Change details</button>
@@ -833,13 +920,17 @@ function Stepper({ value, onChange, min = 1, max = 99, label }: { value: number;
   );
 }
 
-function AddSheet({ family, start, line, existing, onAdd, onRemove, onClose, currency }: { family: CatProduct[]; start: CatProduct; line?: Line; existing: Line[]; onAdd: (l: Line) => void; onRemove: (key: string) => void; onClose: () => void; currency: string }) {
-  const [pid, setPid] = useState(line?.product_id ?? start.id);
-  const p = family.find((f) => f.id === pid) ?? start;
+function AddSheet({ family: allFamily, start, line, existing, onAdd, onRemove, onClose, currency }: { family: CatProduct[]; start: CatProduct; line?: Line; existing: Line[]; onAdd: (l: Line) => void; onRemove: (key: string) => void; onClose: () => void; currency: string }) {
+  // A heading-only parent (e.g. Brisket) isn't orderable itself: the customer picks one of its variations
+  const family = allFamily.filter((f) => !(f.group_only && allFamily.length > 1));
+  const firstChoice = family.find((f) => f.id === (line?.product_id ?? start.id) && !f.out_of_stock) ?? family.find((f) => !f.out_of_stock) ?? family[0] ?? start;
+  const [pid, setPid] = useState(firstChoice.id);
+  const p = family.find((f) => f.id === pid) ?? firstChoice;
   const defaults = (prod: CatProduct) => Object.fromEntries(prod.options.map((g) => [g.group, g.options.find((o) => o.is_default)?.name ?? g.options[0]?.name]).filter(([, v]) => v));
   const [qty, setQty] = useState<Qty | null>(line?.qty ?? null);
   const [option, setOption] = useState<string | null>(line?.sale_option ?? p.sale_options[0]?.id ?? null);
   const [count, setCount] = useState<number>(line?.qty.count ?? Math.max(1, p.min_qty ?? 1));
+  const [weightPref, setWeightPref] = useState<string | null>(line?.weight_pref ?? null);
   const [prep, setPrep] = useState<Record<string, string>>(() => line?.preparation ?? defaults(p));
   const [note, setNote] = useState(line?.special_instructions ?? '');
   const firstPid = useRef(pid);
@@ -850,75 +941,94 @@ function AddSheet({ family, start, line, existing, onAdd, onRemove, onClose, cur
     setOption(p.sale_options[0]?.id ?? null);
     setPrep(defaults(p));
     setQty(null);
+    setWeightPref(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid]);
+  const method = p.order_method;
   const usesOptions = p.sale_options.length > 0;
+  const counted = !usesOptions && (method === 'items' || method === 'items_weighed');
+  const ranges = counted ? p.weight_ranges : [];
   const opt = usesOptions ? p.sale_options.find((o) => o.id === option) ?? null : null;
-  const finalQty: Qty | null = usesOptions ? (opt ? (opt.kind === 'pack' ? { kind: 'portions', count, weight_g: opt.grams } : { kind: 'count', count, weight_g: null }) : null) : qty;
-  const draft: Line | null = finalQty ? { key: line?.key ?? newKey(), product_id: p.id, sale_option: usesOptions ? option : null, qty: finalQty, preparation: prep, special_instructions: note.trim() } : null;
+  const finalQty: Qty | null = usesOptions
+    ? opt ? (opt.kind === 'pack' ? { kind: 'portions', count, weight_g: opt.grams } : { kind: 'count', count, weight_g: null }) : null
+    : counted ? { kind: 'count', count, weight_g: null } : qty;
+  const draft: Line | null = finalQty && method !== 'custom' ? { key: line?.key ?? newKey(), product_id: p.id, sale_option: usesOptions ? option : null, qty: finalQty, preparation: prep, special_instructions: note.trim(), weight_pref: ranges.length ? weightPref : null } : null;
   const lq = draft ? lineQuote(draft, p) : null;
-  const invalidPack = !usesOptions && !!p.pack_size && (!qty || (qty.count ?? 0) % p.pack_size !== 0);
+  const invalidPack = !usesOptions && !counted && !!p.pack_size && (!qty || (qty.count ?? 0) % p.pack_size !== 0);
+  const needsRange = ranges.length > 0 && !weightPref;
+  const needsNote = weightPref === 'other' && note.trim().length < 3;
   const priceLabel = lq ? priceText(lq.pricing, lq.cents, p, currency) : null;
+  const perPiece = ranges.length && weightPref && weightPref !== 'other' ? pieceGrams(p, weightPref) : null;
   return (
     <Sheet
       open
       onClose={onClose}
-      title={family.length > 1 ? family[0].name : p.name}
-      subtitle={p.description ?? undefined}
+      title={allFamily.length > 1 ? allFamily[0].name : p.name}
+      subtitle={(allFamily.length > 1 ? allFamily[0].description : p.description) ?? undefined}
       footer={
-        <Button variant="primary" size="lg" full disabled={!draft || invalidPack || p.out_of_stock} onClick={() => draft && onAdd(draft)} icon={<ShoppingBag className="size-4" />}>
-          {line ? 'Update' : 'Add to order'}
-          {priceLabel && lq?.pricing !== 'by_weight' ? ` · ${priceLabel}` : ''}
-        </Button>
+        method === 'custom' ? (
+          <Button size="lg" full onClick={() => { onClose(); setTimeout(() => document.getElementById('special-requests')?.scrollIntoView({ behavior: 'smooth' }), 50); }}>Ask for it under Special requests</Button>
+        ) : (
+          <Button variant="primary" size="lg" full disabled={!draft || invalidPack || needsRange || needsNote || p.out_of_stock} onClick={() => draft && onAdd(draft)} icon={<ShoppingBag className="size-4" />}>
+            {line ? 'Update' : 'Add to order'}
+            {priceLabel && lq?.pricing !== 'by_weight' ? ` · ${priceLabel}` : ''}
+          </Button>
+        )
       }
     >
       <div className="space-y-6">
         {existing.length > 0 && (
           <div className="space-y-2">
             {existing.map((l) => (
-              <div key={l.key} className="flex items-center justify-between rounded-xl bg-brand-soft px-3 py-2 text-[14px] text-brand-soft-ink">
-                <span>Already added: <b>{lineQuote(l, p).label}</b></span>
-                <button onClick={() => onRemove(l.key)} className="flex size-10 items-center justify-center rounded-lg hover:bg-white/40" aria-label="Remove"><Trash2 className="size-4" /></button>
+              <div key={l.key} className="flex items-center justify-between gap-2 rounded-xl bg-brand-soft px-3 py-2 text-[14px] text-brand-soft-ink">
+                <span className="min-w-0">Already added: <b>{lineQuote(l, p).label}</b></span>
+                <button onClick={() => onRemove(l.key)} className="flex size-10 shrink-0 items-center justify-center rounded-lg hover:bg-white/40" aria-label="Remove"><Trash2 className="size-4" /></button>
               </div>
             ))}
           </div>
         )}
         {family.length > 1 && (
-          <Field label="Choose">
-            <div className="flex flex-wrap gap-2">
+          <Field label="Choose an option">
+            <div className="grid gap-2 sm:grid-cols-2">
               {family.map((f) => (
-                <button key={f.id} type="button" disabled={f.out_of_stock} onClick={() => setPid(f.id)} className={cx('min-h-12 rounded-xl border px-4 py-2 text-left text-[14.5px] font-medium disabled:opacity-50', pid === f.id ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface text-ink-2')}>
+                <button key={f.id} type="button" disabled={f.out_of_stock} onClick={() => setPid(f.id)} aria-pressed={pid === f.id} className={cx('min-h-12 rounded-xl border px-4 py-2 text-left text-[14.5px] font-medium disabled:opacity-50', pid === f.id ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface text-ink-2')}>
                   {f.variant_label ?? f.name}
                   {f.price_cents != null && <span className="block text-[12.5px] font-normal">{formatMoney(f.price_cents, currency)}/{f.price_unit}{f.out_of_stock ? ' · out of stock' : ''}</span>}
+                  {f.variant_label && f.description && f.description !== allFamily[0]?.description && <span className="mt-0.5 block text-[12.5px] font-normal opacity-80">{f.description}</span>}
                 </button>
               ))}
             </div>
           </Field>
         )}
-        {usesOptions ? (
+        {method === 'custom' ? (
+          <p className="rounded-xl bg-surface-2 px-4 py-3 text-[14.5px] text-ink-2">This is made to order. Tell us what you’d like under <b>Special requests</b> and we’ll confirm the details and price with you.</p>
+        ) : usesOptions ? (
           <>
-            <Field label="Size">
-              <div className="grid gap-2 sm:grid-cols-2">
-                {p.sale_options.map((o) => {
-                  const each = priceText(o.pricing, o.price_cents, p, currency);
-                  return (
-                    <button key={o.id} type="button" onClick={() => setOption(o.id)} className={cx('rounded-xl border px-4 py-3 text-left', option === o.id ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface')}>
-                      <div className="text-[15px] font-semibold">{o.label}</div>
-                      {each && <div className="text-[13px] opacity-80">{o.pricing === 'by_weight' ? each : `${each} each`}</div>}
-                    </button>
-                  );
-                })}
-              </div>
-              {opt?.kind === 'pack' && <p className="mt-2 text-[13px] text-ink-3">Fixed-weight vacuum packs.</p>}
-              {opt?.kind === 'piece' && <p className="mt-2 text-[13px] text-ink-3">Priced on the actual weight once cut{opt.grams ? `; about ${opt.grams >= 1000 ? `${opt.grams / 1000} kg` : `${opt.grams} g`} each` : ''}.</p>}
+            <Field label={opt?.kind === 'pack' || p.sale_options.every((o) => o.kind === 'pack') ? 'Pack size' : 'Size'}>
+              {p.sale_options.length === 1 && opt ? (
+                <p className="text-[15px] font-semibold">{opt.label}{opt.price_cents != null ? <span className="font-normal text-ink-2"> · {priceText(opt.pricing, opt.price_cents, p, currency)}{opt.pricing === 'by_weight' ? '' : ' each'}</span> : null}</p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {p.sale_options.map((o) => {
+                    const each = priceText(o.pricing, o.price_cents, p, currency);
+                    return (
+                      <button key={o.id} type="button" onClick={() => setOption(o.id)} aria-pressed={option === o.id} className={cx('rounded-xl border px-4 py-3 text-left', option === o.id ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface')}>
+                        <div className="text-[15px] font-semibold">{o.label}</div>
+                        {each && <div className="text-[13px] opacity-80">{o.pricing === 'by_weight' ? each : `${each} each`}</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {opt?.kind === 'piece' && <p className="mt-2 text-[13px] text-ink-3">Priced on the actual weight once cut{opt.grams ? `; about ${gramsText(opt.grams)} each` : ''}.</p>}
             </Field>
-            <Field label={opt?.kind === 'pack' ? 'How many packs?' : 'How many?'}>
+            <Field label={opt?.kind === 'pack' ? 'How many packets?' : 'How many?'}>
               <Stepper value={count} onChange={setCount} min={Math.max(1, p.min_qty ?? 1)} max={p.max_qty ?? 50} label="Quantity" />
               {opt?.kind === 'pack' && opt.grams && (
                 <>
-                  <p className="mt-2 text-[14px] font-medium text-ink" aria-live="polite">= {count} × {opt.grams >= 1000 ? `${opt.grams / 1000} kg` : `${opt.grams} g`} packs, {(count * opt.grams) / 1000} kg in total</p>
+                  <p className="mt-2 text-[14px] font-medium text-ink" aria-live="polite">{count} × {gramsText(opt.grams)} packet{count === 1 ? '' : 's'} = {gramsText(count * opt.grams)} estimated total</p>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-ink-3">
-                    <span>Total:</span>
+                    <span>Quick pick:</span>
                     {[1000, 2000, 3000, 5000].filter((t) => t % opt.grams! === 0 && t / opt.grams! >= Math.max(1, p.min_qty ?? 1) && t / opt.grams! <= (p.max_qty ?? 50)).map((t) => (
                       <button key={t} type="button" onClick={() => setCount(t / opt.grams!)} className={cx('h-9 rounded-full border px-3 font-medium', count * opt.grams! === t ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface text-ink-2')}>{t / 1000} kg</button>
                     ))}
@@ -927,22 +1037,42 @@ function AddSheet({ family, start, line, existing, onAdd, onRemove, onClose, cur
               )}
             </Field>
           </>
+        ) : counted ? (
+          <>
+            <Field label={`How many ${p.piece_noun}s?`}>
+              <Stepper value={count} onChange={setCount} min={Math.max(1, p.min_qty ?? 1)} max={p.max_qty ?? 50} label={`Number of ${p.piece_noun}s`} />
+            </Field>
+            {ranges.length > 0 && (
+              <Field label={`Preferred weight per ${p.piece_noun}`} hint="A preference, not an exact weight: every cut is a little different, and you pay for the actual weight.">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label={`Preferred weight per ${p.piece_noun}`}>
+                  {[...ranges.map((r) => ({ id: r.id, label: r.label })), { id: 'other', label: 'Other / special request' }].map((r) => (
+                    <button key={r.id} type="button" role="radio" aria-checked={weightPref === r.id} onClick={() => setWeightPref(r.id)} className={cx('min-h-12 rounded-xl border px-3 py-2 text-left text-[14.5px] font-semibold', weightPref === r.id ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface text-ink-2')}>
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+                {perPiece != null && <p className="mt-2 text-[14px] font-medium text-ink" aria-live="polite">{count} × about {gramsText(perPiece)} ≈ {gramsText(count * perPiece)} estimated total</p>}
+                {weightPref === 'other' && <p className="mt-2 text-[13.5px] font-medium text-ink-2">Tell us the size you’d like in the note below.</p>}
+              </Field>
+            )}
+            {!ranges.length && p.typical_piece_g && p.price_unit === 'kg' && <p className="text-[13px] text-ink-3">One {p.piece_noun} is about {gramsText(p.typical_piece_g)}; priced on its actual weight.</p>}
+          </>
         ) : (
           <Field label="How much?">
-            <QuantityInput value={qty} onChange={setQty} quantityType={p.quantity_type} allowsPortions={p.allows_portions} pieceNoun={p.piece_noun} packSize={p.pack_size ?? undefined} />
+            <QuantityInput value={qty} onChange={setQty} quantityType={method === 'by_weight' ? 'weight' : p.quantity_type} allowsPortions={method === 'by_weight' ? false : p.allows_portions} pieceNoun={p.piece_noun} packSize={p.pack_size ?? undefined} />
             {p.pack_size && (
               <p className={cx('mt-2 text-[13px]', qty && (qty.count ?? 0) % p.pack_size !== 0 ? 'font-medium text-danger' : 'text-ink-3')}>
                 {qty && (qty.count ?? 0) % p.pack_size === 0 && (qty.count ?? 0) > 0 ? `${(qty.count ?? 0) / p.pack_size} × ${p.pack_size} ${p.piece_noun}s` : `Sold in lots of ${p.pack_size}: ${p.pack_size}, ${p.pack_size * 2}, ${p.pack_size * 3}…`}
               </p>
             )}
-            {p.typical_piece_g && p.quantity_type !== 'weight' && <p className="mt-2 text-[13px] text-ink-3">One {p.piece_noun} is about {p.typical_piece_g >= 1000 ? `${p.typical_piece_g / 1000}kg` : `${p.typical_piece_g}g`}.</p>}
+            {p.typical_piece_g && p.quantity_type !== 'weight' && method !== 'by_weight' && <p className="mt-2 text-[13px] text-ink-3">One {p.piece_noun} is about {gramsText(p.typical_piece_g)}.</p>}
           </Field>
         )}
-        {p.options.map((g) => (
+        {method !== 'custom' && p.options.map((g) => (
           <Field key={g.group} label={g.group}>
             <div className="flex flex-wrap gap-2">
               {g.options.map((o) => (
-                <button key={o.name} type="button" onClick={() => setPrep((x) => ({ ...x, [g.group]: o.name }))} className={cx('min-h-11 rounded-xl border px-4 text-[14.5px] font-medium', prep[g.group] === o.name ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface text-ink-2')}>
+                <button key={o.name} type="button" onClick={() => setPrep((x) => ({ ...x, [g.group]: o.name }))} aria-pressed={prep[g.group] === o.name} className={cx('min-h-11 rounded-xl border px-4 text-[14.5px] font-medium', prep[g.group] === o.name ? 'border-brand bg-brand-soft text-brand-soft-ink' : 'border-line-strong bg-surface text-ink-2')}>
                   {o.name}
                   {o.surcharge_pct > 0 && <span className="ml-1 text-[12.5px] font-semibold">+{o.surcharge_pct}%</span>}
                 </button>
@@ -955,35 +1085,28 @@ function AddSheet({ family, start, line, existing, onAdd, onRemove, onClose, cur
             )}
           </Field>
         ))}
-        {priceLabel && <p className="rounded-xl bg-surface-2 px-3 py-2 text-[14px] text-ink-2">{lq?.pricing === 'exact' ? 'Price' : 'Estimated price'}: <b className="text-ink">{priceLabel}</b></p>}
-        <Field label="Notes for this item" optional><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder={p.quantity_type === 'count' && !p.options.length ? 'Anything we should know' : 'e.g. extra thick, 2 per pack'} /></Field>
+        {priceLabel && <p className="rounded-xl bg-surface-2 px-3 py-2 text-[14px] text-ink-2">{lq?.pricing === 'exact' ? 'Price' : 'Estimated price'}: <b className="text-ink">{priceLabel}</b>{lq?.pricing !== 'exact' ? ' · final price on the actual weight' : ''}</p>}
+        {method !== 'custom' && (
+          <Field label={weightPref === 'other' ? 'What size would you like?' : 'Notes for this item'} optional={weightPref !== 'other'} error={needsNote && note.length > 0 ? 'Please tell us the size you’d like.' : undefined}>
+            <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder={weightPref === 'other' ? 'e.g. about 700 g each, or 2 cm thick' : counted ? 'e.g. extra thick, 2 per pack' : 'Anything we should know'} />
+          </Field>
+        )}
       </div>
     </Sheet>
   );
 }
 
 function Shell({ children, business, cartCount, onCart, barHidden }: { children: ReactNode; business?: any; cartCount?: number; onCart?: () => void; barHidden?: boolean }) {
+  void business;
   return (
     <div className="min-h-dvh bg-bg">
-      <header className="bg-charcoal text-white">
-        <div className="mx-auto flex h-[72px] max-w-5xl items-center justify-between gap-3 px-5 sm:px-8">
-          <Link to="/" className="flex min-w-0 items-center gap-3">
-            <Logo withWord={false} tone="light" />
-            <div className="min-w-0">
-              <div className="truncate font-display text-[19px] font-bold leading-none">{business?.name ?? 'Terram Farm'}</div>
-              <div className="mt-1 text-[12.5px] font-medium opacity-80">Order form</div>
-            </div>
-          </Link>
-          {!!cartCount && <button onClick={onCart} className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-3.5 text-[13.5px] font-semibold" aria-label={`Your order: ${cartCount} item${cartCount === 1 ? '' : 's'}`}><ShoppingBag className="size-4" />{cartCount}</button>}
-        </div>
-      </header>
+      <SiteHeader
+        subtitle="Order form"
+        right={!!cartCount && <button onClick={onCart} className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-3.5 text-[13.5px] font-semibold" aria-label={`Your order: ${cartCount} item${cartCount === 1 ? '' : 's'}`}><ShoppingBag className="size-4" />{cartCount}</button>}
+      />
       <main className="mx-auto max-w-5xl px-5 py-7 sm:px-8 sm:py-10">{children}</main>
       {!barHidden && <BackToTop className="bottom-[calc(96px+env(safe-area-inset-bottom))]" />}
-      {business?.phone && (
-        <footer className="mx-auto max-w-5xl px-5 pb-32 text-center text-[13px] text-ink-3 sm:px-8">
-          Questions? Call or WhatsApp <a className="font-semibold text-ink-2" href={`tel:${business.phone.replace(/\s/g, '')}`}>{business.phone}</a>
-        </footer>
-      )}
+      <SiteFooter extraBottom />
     </div>
   );
 }
@@ -1015,8 +1138,8 @@ function useVisibleArea(active: boolean) {
 
 /**
  * Phone search. The panel always covers exactly the part of the screen the keyboard leaves free,
- * with the search box at the very top and results right under it, so what the customer types and
- * what matches are always in view. It stays mounted (invisible) so a tap can focus it directly.
+ * with the search box at the bottom (right above the keyboard, where the thumb is) and the results
+ * stacked above it, so what the customer types and what matches are always in view. It stays mounted (invisible) so a tap can focus it directly.
  */
 function SearchPanel({ open, inputRef, q, setQ, results, variantsOf, inCart, currency, categories, onCategory, onPick, onSpecial, onClose }: {
   open: boolean;
@@ -1034,6 +1157,12 @@ function SearchPanel({ open, inputRef, q, setQ, results, variantsOf, inCart, cur
   onClose: () => void;
 }) {
   const box = useVisibleArea(open);
+  const listRef = useRef<HTMLDivElement>(null);
+  // Results sit just above the search box (which is just above the keyboard): keep the best matches in view
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [q, results.length, open]);
   useEffect(() => {
     if (!open) return;
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -1049,30 +1178,8 @@ function SearchPanel({ open, inputRef, q, setQ, results, variantsOf, inCart, cur
       aria-hidden={!open || undefined}
       aria-label="Search products"
     >
-      <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2.5">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-[18px] -translate-y-1/2 text-ink-3" aria-hidden />
-          <input
-            ref={inputRef}
-            type="search"
-            enterKeyHint="search"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            tabIndex={open ? 0 : -1}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
-            placeholder="Search — e.g. mince, rump, wors"
-            className="h-12 w-full rounded-[10px] border border-brand bg-surface pl-10 pr-10 text-[16px] text-ink caret-[var(--brand)] outline-none ring-3 ring-brand/15 [&::-webkit-search-cancel-button]:hidden"
-            aria-label="Search products"
-          />
-          {q && <button type="button" tabIndex={open ? 0 : -1} onClick={() => { setQ(''); inputRef.current?.focus(); }} className="absolute right-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-lg text-ink-3" aria-label="Clear search"><X className="size-4" /></button>}
-        </div>
-        <button type="button" tabIndex={open ? 0 : -1} onClick={onClose} className="h-12 shrink-0 rounded-xl px-3 text-[15px] font-semibold text-brand">Done</button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={listRef}>
+        <div className="flex min-h-full flex-col justify-end">
         {!q.trim() ? (
           <div className="p-4">
             <p className="text-[14px] text-ink-3">Type what you’re looking for, or choose a section:</p>
@@ -1111,6 +1218,30 @@ function SearchPanel({ open, inputRef, q, setQ, results, variantsOf, inCart, cur
             <button type="button" tabIndex={open ? 0 : -1} onClick={onSpecial} className="font-semibold text-brand underline">ask for it as a special request</button>.
           </div>
         )}
+      </div>
+        </div>
+      <div className="flex shrink-0 items-center gap-2 border-t border-line bg-surface px-3 py-2.5">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-[18px] -translate-y-1/2 text-ink-3" aria-hidden />
+          <input
+            ref={inputRef}
+            type="search"
+            enterKeyHint="search"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            tabIndex={open ? 0 : -1}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
+            placeholder="Search — e.g. mince, rump, wors"
+            className="h-12 w-full rounded-[10px] border border-brand bg-surface pl-10 pr-10 text-[16px] text-ink caret-[var(--brand)] outline-none ring-3 ring-brand/15 [&::-webkit-search-cancel-button]:hidden"
+            aria-label="Search products"
+          />
+          {q && <button type="button" tabIndex={open ? 0 : -1} onClick={() => { setQ(''); inputRef.current?.focus(); }} className="absolute right-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-lg text-ink-3" aria-label="Clear search"><X className="size-4" /></button>}
+        </div>
+        <button type="button" tabIndex={open ? 0 : -1} onClick={onClose} className="h-12 shrink-0 rounded-xl px-3 text-[15px] font-semibold text-brand">Done</button>
       </div>
     </div>
   );
