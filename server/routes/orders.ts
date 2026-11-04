@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { db } from '../db/db.js';
 import { ORDER_STATUSES, OPEN_STATUSES, allowedTransitions, type OrderStatus } from '../../shared/workflow.js';
 import { can } from '../../shared/permissions.js';
-import { badRequest } from '../lib/errors.js';
+import { badRequest, forbidden } from '../lib/errors.js';
 import { addDays as addDaysYmd, localDate } from '../lib/time.js';
 import { businessTz } from '../services/settings.js';
 import { listExceptions } from '../domain/exceptions.js';
@@ -373,6 +373,8 @@ r.post('/:id/customer-update', requirePerm('orders.write'), async (c) => {
 // ── Delivery arrangement and payment waiver ──────────────────
 r.patch('/:id/delivery', requirePerm('orders.write'), async (c) => {
   const input = await body(c, z.object({ arrangement: z.enum(['standard', 'custom', 'separate', 'collection']), fee_cents: z.number().int().min(0).max(10_000_000).nullable().optional(), note: z.string().max(500).nullable().optional() }));
+  // A custom fee changes what the customer owes, so only people who handle payments can set one
+  if (input.arrangement === 'custom' && !can(roleOf(c), 'payments.write')) throw forbidden('Only a manager can set a custom delivery fee.');
   return c.json({ order: setDeliveryArrangement(c.req.param('id'), input, actorOf(c)) });
 });
 

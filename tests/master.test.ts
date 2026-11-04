@@ -111,10 +111,12 @@ describe('delivery fee', () => {
   it('staff can set a custom fee or mark a delivery as arranged separately; totals follow and it is recorded', async () => {
     const id = await placed();
     const staff = await signedIn('staff');
-    const r = await staff.req('PATCH', `/api/orders/${id}/delivery`, { arrangement: 'custom', fee_cents: 35000, note: 'Phalaborwa — outside the area' });
+    expect((await staff.req('PATCH', `/api/orders/${id}/delivery`, { arrangement: 'custom', fee_cents: 35000 })).status).toBe(403); // money: managers only
+    const manager = await signedIn('manager');
+    const r = await manager.req('PATCH', `/api/orders/${id}/delivery`, { arrangement: 'custom', fee_cents: 35000, note: 'Phalaborwa — outside the area' });
     expect(r.status).toBe(200);
     expect(requireOrder(id)).toMatchObject({ delivery_fee_cents: 35000, estimated_total_cents: 25000 + 35000 });
-    expect((await staff.req('PATCH', `/api/orders/${id}/delivery`, { arrangement: 'custom' })).status).toBe(400); // fee needed
+    expect((await manager.req('PATCH', `/api/orders/${id}/delivery`, { arrangement: 'custom' })).status).toBe(400); // fee needed
     await staff.req('PATCH', `/api/orders/${id}/delivery`, { arrangement: 'separate' });
     expect(requireOrder(id)).toMatchObject({ delivery_fee_cents: 0, delivery_arrangement: 'separate' });
     const ev = db().prepare("SELECT summary FROM order_events WHERE order_id = ? AND type = 'delivery_changed' ORDER BY created_at").all(id) as any[];

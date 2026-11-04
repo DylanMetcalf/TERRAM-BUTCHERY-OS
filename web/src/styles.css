@@ -139,6 +139,8 @@
 
 @layer base {
   html {
+    /* Opening a sheet locks page scrolling; keep the scrollbar's space so nothing jumps sideways (Windows/desktop scrollbars) */
+    scrollbar-gutter: stable;
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
     /* Feels like an app: no double-tap zoom, no sideways wobble */
