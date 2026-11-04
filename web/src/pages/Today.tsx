@@ -20,7 +20,12 @@ interface Dash {
   undated: number;
   activity: any[];
   top_exceptions: any[];
+  stages: { key: string; label: string; n: number; sub: string | null }[];
+  waiting: { key: string; label: string; n: number; to: string }[];
+  attention: { key: string; label: string; n: number; to: string }[];
 }
+
+const STAGE_ICON: Record<string, any> = { new: ClipboardCheck, cutting: Scissors, packing: Package, packed: CheckCircle2, out: Truck, delivered: Store };
 
 export default function Today() {
   const me = useMe();
@@ -30,15 +35,10 @@ export default function Today() {
   if (error) return <ErrorState error={error} retry={refetch} />;
   if (isLoading || !data) return <LoadingBlock rows={6} />;
   const c = data.counts;
-  const attention = data.exceptions.total + c.to_review;
   const maxWeek = Math.max(1, ...data.week.map((w) => w.orders));
-
-  const flow = [
-    { key: 'review', label: 'To review', n: c.to_review, to: '/orders?view=review', icon: ClipboardCheck, tone: c.to_review ? 'ochre' : 'quiet' },
-    { key: 'cut', label: 'To cut', n: c.to_cut + c.cutting, sub: c.cutting ? `${c.cutting} in progress` : undefined, to: '/cutting', icon: Scissors, tone: 'brand' },
-    { key: 'pack', label: 'To pack', n: c.to_pack, to: '/packing', icon: Package, tone: 'brand' },
-    { key: 'ready', label: 'Ready', n: c.ready + c.out_for_delivery, sub: c.out_for_delivery ? `${c.out_for_delivery} out for delivery` : undefined, to: '/fulfilment', icon: CheckCircle2, tone: 'field' },
-  ] as const;
+  const canPay = can('payments.write');
+  const attention = (data.attention ?? []).filter((a) => a.key !== 'emails' || can('system.health')).filter((a) => a.key !== 'products' || can('settings.write'));
+  const waiting = (data.waiting ?? []).filter((w) => w.key !== 'invoice' || canPay);
 
   return (
     <div className="animate-rise space-y-7">
@@ -57,75 +57,28 @@ export default function Today() {
         )}
       </header>
 
-      {/* Needs attention */}
-      {attention > 0 ? (
-        <Card className="overflow-hidden border-brand/20">
-          <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-            <div className="flex items-start gap-4">
-              <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-brand text-brand-ink">
-                <AlertCircle className="size-6" />
-              </span>
-              <div>
-                <h2 className="font-display text-[22px] font-semibold leading-snug">
-                  {attention === 1 ? '1 thing needs' : `${attention} things need`} your attention
-                </h2>
-                <p className="mt-1 text-[15px] text-ink-2">
-                  {[data.exceptions.total ? `${data.exceptions.total} question${data.exceptions.total === 1 ? '' : 's'} to decide` : null, c.to_review ? `${c.to_review} order${c.to_review === 1 ? '' : 's'} to review` : null].filter(Boolean).join(' · ')}
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              {data.exceptions.total > 0 && <Link to="/exceptions"><Button variant="primary" iconRight={<ArrowRight className="size-4" />}>Decide</Button></Link>}
-              {c.to_review > 0 && <Link to="/orders?view=review"><Button>Review orders</Button></Link>}
-            </div>
-          </div>
-          {data.top_exceptions.length > 0 && (
-            <ul className="divide-y divide-line border-t border-line bg-surface-2">
-              {data.top_exceptions.slice(0, 3).map((e) => (
-                <li key={e.id}>
-                  <Link to="/exceptions" className="flex items-center gap-3 px-5 py-3 text-[14.5px] hover:bg-sunken sm:px-6">
-                    <span className={cx('size-2 shrink-0 rounded-full', e.severity === 'blocking' ? 'bg-brand' : e.severity === 'warning' ? 'bg-ochre' : 'bg-slate')} />
-                    <span className="flex-1 truncate">{e.title}</span>
-                    <span className="shrink-0 text-[12px] text-ink-3">{timeAgo(e.created_at)}</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      ) : (
-        <Card className="flex items-center gap-4 p-5">
-          <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-field-soft text-field">
-            <CheckCircle2 className="size-6" />
-          </span>
-          <div>
-            <h2 className="font-display text-[20px] font-semibold">Everything is under control</h2>
-            <p className="text-[15px] text-ink-2">No questions waiting and no orders to review.</p>
-          </div>
-        </Card>
-      )}
-
-      {data.queues && <Queues q={data.queues} canPay={can('payments.write')} canHealth={can('system.health')} />}
-
-      {/* The flow of the day */}
-      <section>
-        <SectionTitle>Where things are</SectionTitle>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {flow.map((f) => (
-            <Link key={f.key} to={f.to} className="group">
-              <Card className="h-full p-4 transition group-hover:-translate-y-0.5 group-hover:shadow-float sm:p-5">
-                <div className="flex items-center justify-between">
-                  <span className={cx('flex size-9 items-center justify-center rounded-xl', f.tone === 'ochre' ? 'bg-ochre-soft text-ochre' : f.tone === 'field' ? 'bg-field-soft text-field' : f.tone === 'quiet' ? 'bg-sunken text-ink-3' : 'bg-brand-soft text-brand')}>
-                    <f.icon className="size-[18px]" />
-                  </span>
-                  <ArrowRight className="size-4 text-ink-3 opacity-0 transition group-hover:opacity-100" />
-                </div>
-                <div className="mt-4 font-display text-[40px] font-semibold leading-none tabular">{f.n}</div>
-                <div className="mt-1.5 text-[15px] font-medium text-ink">{f.label}</div>
-                {'sub' in f && f.sub && <div className="text-[13px] text-ink-3">{f.sub}</div>}
-              </Card>
-            </Link>
-          ))}
+      {/* 1. Where things are: every open order in exactly one stage */}
+      <section aria-labelledby="where">
+        <SectionTitle><span id="where">Where things are</span></SectionTitle>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+          {data.stages.map((st) => {
+            const Icon = STAGE_ICON[st.key] ?? Package;
+            return (
+              <Link key={st.key} to={`/orders?view=stage_${st.key}`} className="group min-w-0">
+                <Card className="h-full p-4 transition group-hover:-translate-y-0.5 group-hover:shadow-float">
+                  <div className="flex items-center justify-between">
+                    <span className={cx('flex size-9 items-center justify-center rounded-xl', st.key === 'delivered' ? 'bg-field-soft text-field' : st.n ? 'bg-brand-soft text-brand' : 'bg-sunken text-ink-3')}>
+                      <Icon className="size-[18px]" />
+                    </span>
+                    <ArrowRight className="size-4 text-ink-3 opacity-0 transition group-hover:opacity-100" />
+                  </div>
+                  <div className="mt-3 font-display text-[36px] font-semibold leading-none tabular">{st.n}</div>
+                  <div className="mt-1.5 text-[14.5px] font-medium leading-snug text-ink">{st.label}</div>
+                  {st.sub && <div className="text-[12.5px] text-ink-3">{st.sub}</div>}
+                </Card>
+              </Link>
+            );
+          })}
         </div>
       </section>
 
@@ -150,6 +103,51 @@ export default function Today() {
               No collections or deliveries are booked for today.
             </EmptyState>
           )}
+          {/* 3. Waiting on us: work only we can move forward */}
+          <div className="mt-7">
+            <SectionTitle>Waiting on us</SectionTitle>
+            {waiting.length ? (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {waiting.map((r) => <QueueCard key={r.key} n={r.n} label={r.label} to={r.to} />)}
+              </div>
+            ) : (
+              <Card className="flex items-center gap-3 p-4 text-[14.5px] text-ink-2"><CheckCircle2 className="size-5 text-field" />Nothing is waiting on us right now.</Card>
+            )}
+          </div>
+
+          {/* 4. Attention: real problems that are still open */}
+          <div className="mt-7">
+            <SectionTitle>Attention</SectionTitle>
+            {attention.length ? (
+              <Card className="overflow-hidden border-brand/20">
+                <div className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2">
+                  {attention.map((r) => <QueueCard key={r.key} n={r.n} label={r.label} to={r.to} urgent />)}
+                </div>
+                {data.top_exceptions.length > 0 && (
+                  <ul className="divide-y divide-line border-t border-line bg-surface-2">
+                    {data.top_exceptions.slice(0, 3).map((e) => (
+                      <li key={e.id}>
+                        <Link to={e.order_id ? `/orders/${e.order_id}` : '/exceptions'} className="flex items-center gap-3 px-4 py-3 text-[14.5px] hover:bg-sunken">
+                          <span className={cx('size-2 shrink-0 rounded-full', e.severity === 'blocking' ? 'bg-brand' : e.severity === 'warning' ? 'bg-ochre' : 'bg-slate')} />
+                          <span className="min-w-0 flex-1 truncate">{e.title}</span>
+                          <span className="shrink-0 text-[12px] text-ink-3">{timeAgo(e.created_at)}</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            ) : (
+              <Card className="flex items-center gap-4 p-4">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-field-soft text-field"><CheckCircle2 className="size-5" /></span>
+                <div>
+                  <h3 className="font-semibold">Everything is under control</h3>
+                  <p className="text-[14px] text-ink-2">No open problems.</p>
+                </div>
+              </Card>
+            )}
+          </div>
+
           {data.overdue.length > 0 && (
             <div className="mt-7">
               <SectionTitle>Overdue · {data.overdue.length}</SectionTitle>
@@ -219,37 +217,14 @@ function Pill({ icon, label }: { icon: React.ReactNode; label: string }) {
   );
 }
 
-/** Customer-platform work queues: only shown when something is waiting. */
-function Queues({ q, canPay, canHealth }: { q: Record<string, number>; canPay: boolean; canHealth: boolean }) {
-  const rows = [
-    { n: q.awaiting_confirmation, label: 'Awaiting confirmation', to: '/orders?view=review', show: true },
-    { n: q.awaiting_weighing, label: 'Packed · awaiting final weighing', to: '/packing', show: true, urgent: true },
-    { n: q.finalized_not_requested, label: 'Finalized · payment request not sent', to: '/orders?view=to_request', show: true, urgent: true },
-    { n: q.awaiting_verification, label: 'Payments to verify', to: '/orders?view=verify', show: true, urgent: true },
-    { n: q.requests_sent, label: 'Payment requested · waiting', to: '/orders?view=requested', show: true },
-    { n: q.paid_ready, label: 'Paid · ready for delivery or collection', to: '/fulfilment', show: true },
-    { n: q.out_for_delivery, label: 'Out for delivery', to: '/fulfilment', show: true },
-    { n: q.in_preparation, label: 'In preparation', to: '/cutting', show: true },
-    { n: q.being_packed, label: 'Being packed', to: '/packing', show: true },
-    { n: q.awaiting_customer, label: 'Waiting for the customer to answer', to: '/orders?view=awaiting_customer', show: true },
-    { n: q.invoices_outstanding, label: 'Invoices to prepare', to: '/invoices', show: canPay },
-    { n: q.failed_notifications, label: 'Emails that didn’t send', to: '/settings?tab=messages', show: canHealth, urgent: true },
-  ].filter((r) => r.show && r.n > 0);
-  if (!rows.length) return null;
+function QueueCard({ n, label, to, urgent }: { n: number; label: string; to: string; urgent?: boolean }) {
   return (
-    <section>
-      <SectionTitle>Waiting on us</SectionTitle>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {rows.map((r) => (
-          <Link key={r.label} to={r.to} className="group">
-            <Card className="flex items-center gap-3 p-3.5 transition group-hover:shadow-float">
-              <span className={cx('flex size-10 shrink-0 items-center justify-center rounded-xl font-display text-[18px] font-semibold tabular', r.urgent ? 'bg-ochre-soft text-ochre-soft-ink' : 'bg-sunken text-ink')}>{r.n}</span>
-              <span className="min-w-0 flex-1 text-[14.5px] font-medium">{r.label}</span>
-              <ArrowRight className="size-4 shrink-0 text-ink-3" />
-            </Card>
-          </Link>
-        ))}
-      </div>
-    </section>
+    <Link to={to} className="group min-w-0">
+      <Card className="flex items-center gap-3 p-3.5 transition group-hover:shadow-float">
+        <span className={cx('flex size-10 shrink-0 items-center justify-center rounded-xl font-display text-[18px] font-semibold tabular', urgent ? 'bg-ochre-soft text-ochre-soft-ink' : 'bg-sunken text-ink')}>{n}</span>
+        <span className="min-w-0 flex-1 text-[14.5px] font-medium">{label}</span>
+        <ArrowRight className="size-4 shrink-0 text-ink-3" />
+      </Card>
+    </Link>
   );
 }

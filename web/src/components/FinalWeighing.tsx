@@ -53,18 +53,18 @@ function WeighLine({ item, onSaved }: { item: OrderItem; onSaved: () => void }) 
     if (g !== (item.packed_weight_g ?? null)) save.mutate(g);
   };
   return (
-    <div className="grid grid-cols-[1fr_auto] items-center gap-3 px-4 py-3">
+    <div className="grid min-w-0 grid-cols-1 gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-3">
       <div className="min-w-0">
-        <div className="font-semibold">{item.qty_label} {item.product_name}</div>
+        <div className="break-words font-semibold">{item.qty_label} {item.product_name}</div>
         <div className="text-[13px] text-ink-3">{[item.preparation_label, rate != null ? `${formatMoney(rate)}/${item.price_unit}` : 'No price'].filter(Boolean).join(' · ')}</div>
         {!valid && <div className="text-[12.5px] font-medium text-danger">Enter the weight in kg, e.g. 1.25</div>}
       </div>
-      <div className="flex items-center gap-2">
-        <div className="relative">
-          <Input inputMode="decimal" aria-label={`Packed weight of ${item.product_name} in kg`} value={kg} onChange={(e) => setKg(e.target.value.replace(/[^\d.,]/g, ''))} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()} placeholder="0.000" className={cx('h-11 w-28 pr-8 text-right text-[16px] tabular', !item.packed_weight_g && 'border-ochre')} />
+      <div className="flex min-w-0 items-center justify-between gap-2 sm:justify-end">
+        <div className="relative w-32 shrink-0">
+          <Input inputMode="decimal" aria-label={`Packed weight of ${item.product_name} in kg`} value={kg} onChange={(e) => setKg(e.target.value.replace(/[^\d.,]/g, ''))} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()} placeholder="0.000" className={cx('h-11 w-full pr-8 text-right text-[16px] tabular', !item.packed_weight_g && 'border-ochre')} />
           <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[13px] text-ink-3">kg</span>
         </div>
-        <div className="w-24 text-right text-[14px] font-semibold tabular">{save.isPending ? <Spinner className="ml-auto size-4" /> : live != null ? formatMoney(live) : '—'}</div>
+        <div className="min-w-[5.5rem] whitespace-nowrap text-right text-[14px] font-semibold tabular">{save.isPending ? <Spinner className="ml-auto size-4" /> : live != null ? formatMoney(live) : '—'}</div>
       </div>
     </div>
   );

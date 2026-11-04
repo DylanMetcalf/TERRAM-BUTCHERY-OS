@@ -17,6 +17,7 @@ import {
   createOrder,
   getItem,
   getItems,
+  expectedGrams,
   markCustomerNotified,
   removeItem,
   requireOrder,
@@ -171,7 +172,7 @@ function flagDuplicates(order: OrderSummary) {
 
 r.get('/:id', requirePerm('orders.read'), (c) => {
   const order = requireOrder(c.req.param('id'));
-  const items = getItems(order.id, true);
+  const items = getItems(order.id, true).map((i) => ({ ...i, expected_g: i.status === 'active' ? expectedGrams(i) : null }));
   const events = (
     db()
       .prepare(
