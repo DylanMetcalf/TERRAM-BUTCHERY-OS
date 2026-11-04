@@ -8,7 +8,8 @@ import { layout, money, signOff } from '../services/templates.js';
 import { getSettings } from '../services/settings.js';
 import { addEvent, getItems, recomputeTotals, requireOrder } from './orders.js';
 import { customerContact } from './lifecycle.js';
-import { openRequest, recomputePayment } from './payments.js';
+import { openRequest, recomputePayment, supersedeIfAmountChanged } from './payments.js';
+import { raiseException } from './exceptions.js';
 
 /**
  * FINAL WEIGHING. After packing, staff enter the actual weight of every weighed line and confirm
@@ -89,37 +90,7 @@ export function finalizeOrder(orderId: string, actor: Actor, opts: { packsConfir
   let fid = '';
   tx(() => {
     recomputeTotals(orderId);
-    const o = requireOrder(orderId);
-    const fresh = getItems(orderId);
-    const lines: FinalLine[] = fresh.map((i) => {
-      if (i.final_cents == null) throw conflict(`${i.name_snapshot} has no final price.`);
-      return {
-        item_id: i.id,
-        name: i.name_snapshot,
-        size: i.sale_option ?? null,
-        qty_label: i.qty_label,
-        preparation: i.preparation_label || null,
-        pricing: i.pricing ?? 'exact',
-        weight_g: needsWeight(i.pricing) ? i.packed_weight_g : null,
-        unit_price_cents: i.price_cents,
-        price_unit: i.price_unit,
-        pack_count: i.sale_option_kind === 'pack' && i.qty.count ? i.qty.count : null,
-        pack_price_cents: i.sale_option_kind === 'pack' && i.qty.count ? Math.round(i.final_cents / i.qty.count) : null,
-        line_cents: i.final_cents,
-      };
-    });
-    const fee = o.delivery_fee_cents ?? 0;
-    const total = lines.reduce((t, l) => t + l.line_cents, fee);
-    if (o.final_total_cents !== total) throw conflict('The total didn’t add up. Please try again.');
-    const version = (o.finalized_version ?? 0) + 1;
-    const ts = now();
-    const snapshot: FinalSnapshot = { version, order_number: o.order_number, customer_name: o.customer_name, storage: o.storage ?? null, lines, delivery_fee_cents: fee, total_cents: total, finalized_at: ts, finalized_by: actor.name ?? null };
-    fid = id('fin_');
-    db().prepare('INSERT INTO order_finalizations (id, order_id, version, snapshot, total_cents, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?)').run(fid, orderId, version, JSON.stringify(snapshot), total, actor.userId, actor.name ?? null, ts);
-    db().prepare('UPDATE orders SET finalized_at = ?, finalized_by = ?, finalized_version = ?, updated_at = ? WHERE id = ?').run(ts, actor.userId, version, ts, orderId);
-    addEvent(orderId, 'finalized', `Final weighing done — order finalized at ${money(total)}${version > 1 ? ` (version ${version})` : ''}`, actor, { finalization_id: fid, version, total_cents: total });
-    audit(actor, 'order.finalized', 'order', orderId, `#${o.order_number} finalized at ${money(total)} (v${version})`, { finalization_id: fid });
-    recomputePayment(orderId);
+    fid = writeFinalization(orderId, actor, null);
   });
   publish(['orders'], { orderId });
   return latestFinalization(orderId)!;
@@ -165,4 +136,64 @@ export function reopenFinalized(orderId: string, reason: string, actor: Actor) {
   }
   publish(['orders'], { orderId });
   return requireOrder(orderId);
+}
+
+/** Copies the current lines, weights, rates and total into a new finalized version. */
+function writeFinalization(orderId: string, actor: Actor, reason: string | null): string {
+  const o = requireOrder(orderId);
+  const fresh = getItems(orderId);
+  const lines: FinalLine[] = fresh.map((i) => {
+    if (i.final_cents == null) throw conflict(`${i.name_snapshot} has no final price.`);
+    return {
+      item_id: i.id,
+      name: i.name_snapshot,
+      size: i.sale_option ?? null,
+      qty_label: i.qty_label,
+      preparation: i.preparation_label || null,
+      pricing: i.pricing ?? 'exact',
+      weight_g: needsWeight(i.pricing) ? i.packed_weight_g : null,
+      unit_price_cents: i.price_cents,
+      price_unit: i.price_unit,
+      pack_count: i.sale_option_kind === 'pack' && i.qty.count ? i.qty.count : null,
+      pack_price_cents: i.sale_option_kind === 'pack' && i.qty.count ? Math.round(i.final_cents / i.qty.count) : null,
+      line_cents: i.final_cents,
+    };
+  });
+  const fee = o.delivery_fee_cents ?? 0;
+  const total = lines.reduce((t, l) => t + l.line_cents, fee);
+  if (o.final_total_cents !== total) throw conflict('The total didn’t add up. Please try again.');
+  const version = (o.finalized_version ?? 0) + 1;
+  const ts = now();
+  const snapshot: FinalSnapshot = { version, order_number: o.order_number, customer_name: o.customer_name, storage: o.storage ?? null, lines, delivery_fee_cents: fee, total_cents: total, finalized_at: ts, finalized_by: actor.name ?? null };
+  const fid = id('fin_');
+  db().prepare('INSERT INTO order_finalizations (id, order_id, version, snapshot, total_cents, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?)').run(fid, orderId, version, JSON.stringify(snapshot), total, actor.userId, actor.name ?? null, ts);
+  db().prepare('UPDATE orders SET finalized_at = ?, finalized_by = ?, finalized_version = ?, updated_at = ? WHERE id = ?').run(ts, actor.userId, version, ts, orderId);
+  addEvent(orderId, 'finalized', reason ? `Final amount updated to ${money(total)} (version ${version}): ${reason}` : `Final weighing done — order finalized at ${money(total)}${version > 1 ? ` (version ${version})` : ''}`, actor, { finalization_id: fid, version, total_cents: total, reason });
+  audit(actor, 'order.finalized', 'order', orderId, `#${o.order_number} finalized at ${money(total)} (v${version})${reason ? `: ${reason}` : ''}`, { finalization_id: fid });
+  recomputePayment(orderId);
+  return fid;
+}
+
+/**
+ * A weight or the delivery fee changed on an order that was already finalized: keep the old version,
+ * write a new one with the new total, and make sure no out-of-date payment request stays payable
+ * (it is withdrawn and staff are asked to send the new amount). Customers are never left with an
+ * old total. Does nothing if the order isn't finalized or the total is unchanged.
+ */
+export function refreshFinalization(orderId: string, actor: Actor, reason: string) {
+  const o = requireOrder(orderId);
+  if (!o.finalized_at) return null;
+  const cur = latestFinalization(orderId);
+  if (o.final_total_cents == null || (cur && cur.total_cents === o.final_total_cents && cur.snapshot.lines.length === getItems(orderId).length && !/weight/i.test(reason))) return null;
+  const before = cur?.total_cents ?? null;
+  tx(() => {
+    db().prepare('UPDATE order_finalizations SET superseded_at = ?, superseded_by = ?, superseded_reason = ? WHERE order_id = ? AND superseded_at IS NULL').run(now(), actor.userId, reason.slice(0, 500), orderId);
+    writeFinalization(orderId, actor, reason);
+    supersedeIfAmountChanged(orderId);
+  });
+  const after = requireOrder(orderId);
+  if (before != null && after.final_total_cents !== before && (after.amount_paid_cents ?? 0) > 0)
+    raiseException({ type: 'payment_issue', severity: 'warning', title: `#${o.order_number}: total changed after a payment`, detail: `The final amount changed from ${money(before)} to ${money(after.final_total_cents!)} after ${money(after.amount_paid_cents)} was received. Check the balance with the customer.`, order_id: orderId, dedupe_key: `paid-total-changed:${orderId}:${after.finalized_version}` });
+  publish(['orders'], { orderId });
+  return latestFinalization(orderId);
 }

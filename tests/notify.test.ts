@@ -25,6 +25,7 @@ const order = (ref: string, extra: any = {}) => ({
   items: [{ product_id: productId('beef_rump'), qty: { kind: 'count', count: 4, weight_g: null } }, { product_id: productId('eggs'), qty: { kind: 'count', count: 30, weight_g: null } }],
   fulfilment_type: 'collection',
   delivery_address: '12 Kerk Street, Pretoria',
+    delivery_instructions: 'Ring the bell at the gate',
   requested_date: day(),
   client_ref: ref,
   storage: 'frozen',

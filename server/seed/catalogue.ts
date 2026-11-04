@@ -273,9 +273,17 @@ export interface OrderingRule {
   variant_of?: string;
   variant_label?: string;
 }
-const MINCE_PACKS = [
-  { id: '500g', label: '500 g pack', kind: 'pack' as const, grams: 500 },
-  { id: '1kg', label: '1 kg pack', kind: 'pack' as const, grams: 1000 },
+/** Mince is sold in standard 500 g packets (the earlier 500 g + 1 kg option set is moved over once). */
+const MINCE_PACKS = [{ id: '500g', label: '500 g packet', kind: 'pack' as const, grams: 500 }];
+export const OLD_MINCE_PACKS_JSON = JSON.stringify([
+  { id: '500g', label: '500 g pack', kind: 'pack', grams: 500 },
+  { id: '1kg', label: '1 kg pack', kind: 'pack', grams: 1000 },
+]);
+/** Preferred weight per steak customers can pick (editable per product under Products). */
+export const STEAK_WEIGHT_RANGES = [
+  { id: '300-400', label: '300–400 g', min_g: 300, max_g: 400 },
+  { id: '400-500', label: '400–500 g', min_g: 400, max_g: 500 },
+  { id: '500-600', label: '500–600 g', min_g: 500, max_g: 600 },
 ];
 const WORS_PACKS = [{ id: '1kg', label: '1 kg pack', kind: 'pack' as const, grams: 1000 }];
 export const ORDERING_RULES: Record<string, OrderingRule> = {

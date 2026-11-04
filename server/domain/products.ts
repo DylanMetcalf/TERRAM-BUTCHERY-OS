@@ -1,6 +1,7 @@
+import { inferOrderMethod, ORDER_METHODS, parseWeightRanges, type OrderMethod, type WeightRange } from '../../shared/pricing.js';
 import { db, id, json, now, tx } from '../db/db.js';
 import { normalise } from '../../shared/text.js';
-import { CATALOGUE, DRY_AGED_SURCHARGE_PCT, ORDERING_RULES, type SeedProduct } from '../seed/catalogue.js';
+import { CATALOGUE, DRY_AGED_SURCHARGE_PCT, OLD_MINCE_PACKS_JSON, ORDERING_RULES, STEAK_WEIGHT_RANGES, type SeedProduct } from '../seed/catalogue.js';
 import { audit, SYSTEM, type Actor } from '../services/audit.js';
 import { publish } from '../services/realtime.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
@@ -51,6 +52,13 @@ export interface Product {
   /** Why it can't be ordered right now, shown to customers when out of stock. */
   unavailable_reason: string | null;
   image: string | null;
+  /** How customers order it (see shared/pricing.ts). `order_method_reviewed` false = worked out automatically. */
+  order_method: OrderMethod;
+  order_method_reviewed: boolean;
+  /** Preferred weight per item the customer may choose (items_weighed). */
+  weight_ranges: WeightRange[];
+  /** A parent that only groups its variations; customers choose one of the variations. */
+  group_only: boolean;
   aliases: { id: string; alias: string; source: string }[];
   preparations: Preparation[];
 }
@@ -87,6 +95,10 @@ function rowToProduct(r: any, aliases: any[], preps: any[]): Product {
     variant_label: r.variant_label ?? null,
     unavailable_reason: r.unavailable_reason ?? null,
     image: r.image ?? null,
+    order_method: (r.order_method as OrderMethod) ?? inferOrderMethod({ sale_options: parseSaleOptions(r.sale_options), quantity_type: r.quantity_type, price_unit: r.price_unit, typical_piece_g: r.typical_piece_g }),
+    order_method_reviewed: !!r.order_method_reviewed,
+    weight_ranges: parseWeightRanges(r.weight_ranges),
+    group_only: !!r.group_only,
     aliases: aliases.map((a) => ({ id: a.id, alias: a.alias, source: a.source })),
     preparations: preps.map((p) => ({
       id: p.id,
@@ -209,6 +221,9 @@ export interface ProductInput {
   variant_label?: string | null;
   unavailable_reason?: string | null;
   image?: string | null;
+  order_method?: OrderMethod | null;
+  weight_ranges?: WeightRange[] | null;
+  group_only?: boolean;
   aliases?: string[];
   preparations?: Array<{ group_name: string; name: string; keywords?: string[]; is_default?: boolean; customer_visible?: boolean; active?: boolean; surcharge_pct?: number }>;
 }
@@ -268,6 +283,19 @@ function writeRules(productId: string, input: Partial<ProductInput>) {
   }
   if ('variant_label' in input) f.variant_label = input.variant_label?.trim() || null;
   if ('unavailable_reason' in input) f.unavailable_reason = input.unavailable_reason?.trim().slice(0, 200) || null;
+  if ('order_method' in input) {
+    const m = input.order_method;
+    if (m != null && !ORDER_METHODS.includes(m)) throw badRequest('Choose how this product is ordered.');
+    f.order_method = m ?? null;
+    // Choosing a method by hand marks it reviewed
+    f.order_method_reviewed = m ? 1 : 0;
+  }
+  if ('weight_ranges' in input) {
+    const ranges = parseWeightRanges(input.weight_ranges ?? []);
+    if ((input.weight_ranges ?? []).length !== ranges.length) throw badRequest('Each weight range needs a lowest and highest weight in grams (lowest first).');
+    f.weight_ranges = ranges.length ? JSON.stringify(ranges) : null;
+  }
+  if ('group_only' in input) f.group_only = input.group_only ? 1 : 0;
   if ('image' in input) {
     const img = input.image ?? null;
     if (img && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(img) || img.length > 400_000)) throw badRequest('Use a PNG, JPG or WebP image under 300 KB.');
@@ -382,7 +410,7 @@ export function seedCatalogue(catalogue: SeedProduct[] = CATALOGUE) {
   applyOrderingRules(true);
 }
 
-const ORDERING_RULES_VERSION = 2;
+const ORDERING_RULES_VERSION = 3;
 
 /**
  * One-time defaults for how customers order (packs, whole/half pieces, variants, dry-aged surcharge,
@@ -405,6 +433,10 @@ export function applyOrderingRules(force = false) {
     // customers and staff alike (rows kept, switched off, so past orders still read correctly)
     db().prepare("UPDATE product_preparations SET customer_visible = 0, active = 0 WHERE group_name = 'Packing'").run();
     db().prepare("UPDATE products SET packaging = 'Vacuum-packed' WHERE packaging IS NULL OR packaging != 'Vacuum-packed'").run();
+    // v3: mince in standard 500 g packets (only where the original seeded options are still in place)
+    db().prepare("UPDATE products SET sale_options = ? WHERE slug IN ('beef_mince_lean','beef_mince_8020') AND sale_options = ?").run(JSON.stringify(ORDERING_RULES.beef_mince_lean.sale_options), OLD_MINCE_PACKS_JSON);
+    // v3: steaks are ordered by number of steaks + preferred weight each (ranges left for the family to review)
+    db().prepare("UPDATE products SET weight_ranges = ? WHERE weight_ranges IS NULL AND sale_options IS NULL AND category LIKE '%Steaks%' AND price_unit = 'kg' AND quantity_type IN ('count','either')").run(JSON.stringify(STEAK_WEIGHT_RANGES));
     db().prepare("UPDATE product_preparations SET surcharge_pct = ? WHERE group_name = 'Ageing' AND name = 'Dry-aged' AND surcharge_pct = 0").run(DRY_AGED_SURCHARGE_PCT);
     db()
       .prepare("INSERT INTO settings (key, value, updated_at) VALUES ('ordering_rules_version', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")

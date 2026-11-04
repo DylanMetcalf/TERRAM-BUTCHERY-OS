@@ -8,6 +8,7 @@ export interface BusinessSettings {
     /** Links shown to customers after ordering (blank = not shown). Never invented: entered by the farm. */
     instagramUrl: string;
     googleReviewUrl: string;
+    facebookUrl: string;
   };
   orders: {
     /** Kept for older installs; online orders always wait for a person to confirm them. */
@@ -36,8 +37,16 @@ export interface BusinessSettings {
     showDeliveryFees: boolean;
     /** …and each km beyond it costs this much (cents). 0 = no distance fee. */
     deliveryRatePerKmCents: number;
-    /** Fresh meat on a delivery journey longer than this (hours) can't be guaranteed; frozen is recommended. */
+    /** Kept for older orders; products are frozen, so customers are no longer asked. */
     freshMaxHours: number;
+    /** 'flat': one fee per standard local delivery. 'per_km' is kept only for older orders. */
+    deliveryPricing: 'flat' | 'per_km';
+    /** The standard local delivery fee (cents), stored on each order when it's placed. */
+    flatDeliveryFeeCents: number;
+    /** Shown at checkout and on the FAQ: where the standard fee applies. */
+    deliveryAreaText: string;
+    /** Shown at checkout: how delivery is arranged. */
+    deliveryPolicyText: string;
   };
   ai: {
     enabled: boolean;
@@ -69,12 +78,14 @@ export interface BusinessSettings {
     /** How long a payment-page link in an email keeps working. */
     linkDays: number;
   };
-  /** Questions and answers on the Help page. Edited in Settings. */
-  help: { faq: { q: string; a: string }[] };
+  /** Questions and answers on the FAQ page, in categories. Edited in Settings. */
+  help: { faq: { q: string; a: string; category?: string }[] };
+  /** Editable website text (About page). Only what the farm says about itself — nothing is invented. */
+  content: { aboutIntro: string; aboutSections: { title: string; body: string }[] };
   /** Reorder reminders and feedback after an order is completed. */
   retention: { remindersEnabled: boolean; reminderDays: number; feedbackEnabled: boolean };
   /** Who is told what (customer emails are always the essential ones; these are optional extras). */
-  notifications: { staffEmails: string[]; notifyPreparation: boolean; invoiceReadyEmail: boolean };
+  notifications: { staffEmails: string[]; notifyPreparation: boolean; invoiceReadyEmail: boolean; /** Who checks the bank when a customer says they've paid. */ paymentReviewEmails: string[] };
   /** Stock section housekeeping (starter items are added once). */
   stock: { seeded: boolean };
   customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean; terms: string; /** Shown when choosing a date. */ noticeNote: string; /** Who gets an email for every online order. */ notifyEmails: string[]; /** Email the customer a copy of their order when they give an address. */ emailCustomer: boolean };
@@ -97,6 +108,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     siteUrl: 'https://www.terramfarm.co.za',
     instagramUrl: '',
     googleReviewUrl: '',
+    facebookUrl: '',
   },
   orders: {
     formOrdersRequireReview: true,
@@ -119,6 +131,10 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     customerChooses: false,
     showDeliveryFees: false,
     freshMaxHours: 2,
+    deliveryPricing: 'flat',
+    flatDeliveryFeeCents: 15000,
+    deliveryAreaText: 'We deliver within our regular local delivery area: the local town and the areas around the farmhouse shop and Hoodspruit Wildlife Estates. Other locations can be arranged separately.',
+    deliveryPolicyText: 'We will contact you to confirm the delivery arrangements for your order.',
   },
   ai: { enabled: true, model: 'claude-opus-5', effort: 'low', learningThreshold: 2 },
   printing: { showPrices: false, paper: 'A4' },
@@ -142,25 +158,36 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   },
   help: {
     faq: [
-      { q: 'How does ordering work?', a: 'Choose your products on the order form, add your details and send the order. Sending an order doesn’t commit you to pay yet: we first check the products, quantities and availability, then confirm the order with you.' },
-      { q: 'When is my order confirmed?', a: 'Your order is only confirmed once we’ve reviewed it. You’ll get an email with the confirmation and the expected timeframe, and your order page shows the latest status.' },
-      { q: 'How long does an order take?', a: '{{leadTime}} We’ll give you the expected date when we confirm your order.' },
-      { q: 'Why can the final price differ from the estimate?', a: 'Many cuts are priced per kilogram, and every piece weighs slightly differently. We weigh your order once it is packed and the final amount is based on the actual weights. Fixed packs, like mince, have a set price per pack.' },
-      { q: 'When do I pay?', a: 'Once your order is packed and weighed, we send you a payment request with the final amount and a secure payment page. Payment must reflect in our account before your order is released for delivery or collection.' },
-      { q: 'How do I pay by EFT?', a: 'Your payment page shows our banking details, the exact amount and your payment reference (your order number). Pay from your banking app, then upload your proof of payment or tap “I’ve made payment” on the same page.' },
-      { q: 'Does uploading proof of payment mean my order is paid?', a: 'Not yet. We check that the money has reflected in our bank account first. Your order page shows “awaiting verification” until then, and we let you know as soon as it’s confirmed.' },
-      { q: 'Should I choose fresh or frozen?', a: 'Choose fresh if you’ll collect or if delivery is a short trip. For delivery journeys longer than about {{freshMaxHours}} hours we can’t guarantee fresh products stay in the right condition, so we recommend frozen. If you’re not sure, chat to us before you order.' },
-      { q: 'How are the products packed?', a: 'Packaged products are prepared using our standard vacuum packaging to help maintain freshness.' },
-      { q: 'What mince pack sizes are there?', a: 'Mince comes in 500 g vacuum packs, and in 1 kg packs where we offer them. For 2 kg of mince, for example, choose 4 × 500 g packs.' },
-      { q: 'How does delivery work?', a: 'Tell us your address when you order. We’ll confirm how and when your order reaches you, and any delivery cost, when we confirm the order. Orders are released once payment has reflected.' },
-      { q: 'What if something isn’t available?', a: 'If we can’t supply something exactly as ordered, we’ll suggest a change on your order page. Nothing changes until you accept it.' },
-      { q: 'Can I change or cancel my order?', a: 'Before we confirm it, you can cancel on your order page. After that, message us with your order number and we’ll help.' },
-      { q: 'Can I get an invoice?', a: 'Yes. Choose “I need an invoice” when you order (or ask us), and we’ll prepare it and send it to you.' },
-      { q: 'How do I contact Terram Farm?', a: 'Chat to us on WhatsApp or call us on the number below, or reply to any of our emails. Have your order number handy.' },
+      { category: 'Ordering', q: 'How does ordering work?', a: 'Choose your products on the order form, add your details and send the order. We first check the products, quantities and availability, then confirm your order with you.' },
+      { category: 'Ordering', q: 'When is my order confirmed?', a: 'Only once we have reviewed it. You will get an email confirming your order and the expected timeframe, and your order page always shows the latest status.' },
+      { category: 'Ordering', q: 'How long does an order take?', a: '{{leadTime}} We give you the expected date when we confirm your order.' },
+      { category: 'Ordering', q: 'Can I change or cancel my order?', a: 'Before we confirm it, you can cancel on your order page. After that, message us with your order number and we will help.' },
+      { category: 'Products and packaging', q: 'Are your products fresh or frozen?', a: 'Our products are supplied frozen and vacuum-packed.' },
+      { category: 'Products and packaging', q: 'Why can the final price differ from the estimate?', a: 'Many cuts are priced per kilogram and every piece weighs a little differently. The weight you choose (for example 300–400 g a steak) is a preference, not an exact weight. We weigh your order when it is packed and the final amount is based on the actual weights. Fixed packs, like mince, have a set price per pack.' },
+      { category: 'Products and packaging', q: 'How is mince sold?', a: 'Mince comes in standard 500 g packets. For 2 kg, choose 4 packets.' },
+      { category: 'Products and packaging', q: 'Can I ask for a different cut or size?', a: 'Yes. Add a note to the item, or describe what you need under Special requests, and we will confirm it with you.' },
+      { category: 'Payment', q: 'When do I pay?', a: 'Once your order is packed and weighed we send you a payment request with the final amount and a secure payment page.' },
+      { category: 'Payment', q: 'How do I pay by EFT?', a: 'Your payment page shows our banking details, the amount and your payment reference (your order number). Pay from your banking app, then tap “Already paid?” on the same page. Proof of payment is optional.' },
+      { category: 'Payment', q: 'Does telling you I have paid mean my order is paid?', a: 'Not yet. We check that the money has reflected in our bank account, then confirm. Your order page shows the status.' },
+      { category: 'Invoices', q: 'Can I get an invoice?', a: 'Yes. Ask when you order (or message us) and we will prepare it. When it is ready you can download it from your order or payment page.' },
+      { category: 'Delivery', q: 'Where do you deliver and what does it cost?', a: '{{deliveryArea}} The standard delivery fee is {{deliveryFee}} per order. Deliveries outside our regular area are arranged and priced separately.' },
+      { category: 'Delivery', q: 'How is delivery arranged?', a: 'Give us your full address and any directions or gate information when you order. We will contact you to confirm the delivery arrangements.' },
+      { category: 'Collection', q: 'Can I collect my order?', a: 'Ask us when you order and we will confirm a collection time with you.' },
+      { category: 'Order updates', q: 'How do I see my orders?', a: 'Use the link in any of our emails, or choose “View my orders” on our home page and enter your mobile number or email address. We will send you a code to open them.' },
+      { category: 'Product availability', q: 'What if something is not available?', a: 'If we cannot supply something exactly as ordered, we will suggest a change on your order page. Nothing changes until you accept it.' },
+      { category: 'Contact', q: 'How do I contact Terram Farm?', a: 'Chat to us on WhatsApp, call us, or reply to any of our emails. Please have your order number handy.' },
     ],
   },
   retention: { remindersEnabled: true, reminderDays: 14, feedbackEnabled: true },
-  notifications: { staffEmails: [], notifyPreparation: false, invoiceReadyEmail: true },
+  notifications: { staffEmails: [], notifyPreparation: false, invoiceReadyEmail: true, paymentReviewEmails: ['Sharonm@Imagine.co.za'] },
+  content: {
+    aboutIntro: 'Terram Farm raises beef and lamb on our family farm, and prepares and packs it for local families from our farmhouse shop.',
+    aboutSections: [
+      { title: 'What we offer', body: 'Farm-raised beef and farm-raised lamb, cut to order and vacuum-packed. Some cuts are sold in fixed packs (like our 500 g mince packets) and others are weighed, so the final price follows the actual weight.' },
+      { title: 'How it works', body: 'You order online, we confirm your order, then cut, pack and weigh it. Once the final amount is known we send you a secure payment page, and we arrange delivery or collection with you.' },
+      { title: 'Where we are', body: 'Our farmhouse shop serves the local town and the surrounding areas, including Hoodspruit Wildlife Estates.' },
+    ],
+  },
   stock: { seeded: false },
   customerForm: {
     enabled: true,

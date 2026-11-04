@@ -28,7 +28,8 @@ const TYPE_LABEL: Record<string, string> = {
   import_failure: 'Import problem',
   integration_failure: 'Integration problem',
   payment_issue: 'Payment to check',
-  delivery_check: 'Check delivery time',
+  delivery_check: 'Check delivery',
+  weight_check: 'Check a weight',
   amendment_declined: 'Change declined',
 };
 

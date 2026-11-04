@@ -43,6 +43,7 @@ const form = (items: any[], extra: any = {}) => ({
   customer: { name: 'Naledi Zulu', phone: '071 555 3380', email: 'naledi@example.com' },
   items,
   delivery_address: '12 Kerk Street, Pretoria',
+    delivery_instructions: 'Ring the bell at the gate',
   requested_date: weekday(),
   client_ref: `test-ref-${Date.now()}-${++ref}`,
   storage: 'frozen',
@@ -69,17 +70,17 @@ afterEach(() => {
 
 // ── Products & prices ────────────────────────────────────────
 describe('product rules and prices', () => {
-  it('mince only in 500 g and 1 kg packs, priced exactly', async () => {
+  it('mince only in 500 g packets, priced exactly', async () => {
     const mince = productId('beef_mince_lean'); // R125/kg
     expect((await send(form([{ product_id: mince, qty: kg(750) }]))).status).toBe(400); // no arbitrary weights
     expect((await send(form([{ product_id: mince, sale_option: '750g', qty: { kind: 'count', count: 1 } }]))).status).toBe(400);
     const q = await pub().post('/api/public/quote', { items: [{ product_id: mince, sale_option: '500g', qty: { kind: 'count', count: 3 } }] });
     expect(q.body.lines[0]).toMatchObject({ ok: true, pricing: 'exact', cents: 18750, label: '3 × 500g' });
     expect(q.body.total).toMatchObject({ estimate_cents: 18750, exact: true });
-    const r = await send(form([{ product_id: mince, sale_option: '1kg', qty: { kind: 'count', count: 2 } }]));
+    const r = await send(form([{ product_id: mince, sale_option: '500g', qty: { kind: 'count', count: 4 } }]));
     expect(r.status).toBe(200);
     const o = db().prepare('SELECT id FROM orders WHERE order_number = ?').get(r.body.order_number) as any;
-    expect(getItems(o.id)[0]).toMatchObject({ qty: { kind: 'portions', count: 2, weight_g: 1000 }, pricing: 'exact', est_cents: 25000, sale_option: '1 kg pack' });
+    expect(getItems(o.id)[0]).toMatchObject({ qty: { kind: 'portions', count: 4, weight_g: 500 }, pricing: 'exact', est_cents: 25000, sale_option: '500 g packet' });
   });
 
   it('wors only in 1 kg packs; fillet whole/half; a size is required on the form', async () => {
@@ -106,10 +107,12 @@ describe('product rules and prices', () => {
     const rump = cat.find((p: any) => p.name === 'Rump');
     expect(rump.options.map((g: any) => g.group)).not.toContain('Packing');
     expect(rump.options.find((g: any) => g.group === 'Ageing').options.find((o: any) => o.name === 'Dry-aged').surcharge_pct).toBe(25);
-    const q = await pub().post('/api/public/quote', { items: [{ product_id: productId('beef_rump'), qty: kg(2000), preparation: { Ageing: 'Dry-aged' } }] });
-    expect(q.body.lines[0]).toMatchObject({ unit_price_cents: 23125, cents: 46250, pricing: 'estimate', surcharge_pct: 25 });
+    // Steaks are ordered by count with a preferred weight per steak: 4 × 400–500 g ≈ 1.8 kg
+    const q = await pub().post('/api/public/quote', { items: [{ product_id: productId('beef_rump'), qty: { kind: 'count', count: 4 }, weight_pref: '400-500', preparation: { Ageing: 'Dry-aged' } }] });
+    expect(q.body.lines[0]).toMatchObject({ unit_price_cents: 23125, cents: 41625, pricing: 'estimate', surcharge_pct: 25, est_weight_g: 1800 });
+    expect((await pub().post('/api/public/quote', { items: [{ product_id: productId('beef_rump'), qty: kg(2000) }] })).body.lines[0].ok).toBe(false); // steaks are counted, not ordered by the kilo
     expect(withSurcharge(18500, 25)).toBe(23125);
-    expect((await send(form([{ product_id: productId('beef_rump'), qty: kg(1000), preparation: { Packing: 'Individually packed' } }]))).status).toBe(400);
+    expect((await send(form([{ product_id: productId('beef_rump'), qty: { kind: 'count', count: 2 }, weight_pref: '300-400', preparation: { Packing: 'Individually packed' } }]))).status).toBe(400);
   });
 
   it('saving a product from the editor keeps its sizes, limits and surcharges', async () => {
@@ -146,7 +149,7 @@ describe('product rules and prices', () => {
   });
 
   it('a price change in the catalogue never rewrites an existing order', () => {
-    const o = createOrder({ customer: { new: { name: 'Snapshot' } }, source: 'phone', status: 'confirmed', fulfilment_type: 'collection', items: [{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 1, weight_g: null } }] }, STAFF);
+    const o = createOrder({ customer: { new: { name: 'Snapshot' } }, source: 'phone', status: 'confirmed', fulfilment_type: 'collection', items: [{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2, weight_g: null } }] }, STAFF);
     updateProduct(productId('beef_mince_lean'), { price_cents: 99900, customer_name: 'Renamed Mince' }, STAFF);
     expect(getItems(o.id)[0]).toMatchObject({ price_cents: 12500, est_cents: 12500, name_snapshot: 'Lean Mince' });
     expect(requireOrder(o.id).estimated_total_cents).toBe(12500);
@@ -236,7 +239,7 @@ describe('received, then confirmed by a person', () => {
   });
 
   it('asks the customer to look again if prices changed while their basket was open', async () => {
-    const items = [{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 1 } }];
+    const items = [{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2 } }];
     const r = await send(form(items, { seen_total_cents: 11000 }));
     expect(r.status).toBe(409);
     expect(r.body.code).toBe('prices_changed');
@@ -259,8 +262,8 @@ describe('received, then confirmed by a person', () => {
 // ── Secure links & accounts ──────────────────────────────────
 describe('customer access', () => {
   it('order links are signed, scoped to one order and revocable; an order number alone opens nothing', async () => {
-    const a = createOrder({ customer: { new: { name: 'Alice', email: 'alice@example.com' } }, source: 'phone', status: 'review', items: [{ product_id: productId('beef_rump'), qty: kg(1000) }] }, STAFF);
-    const b = createOrder({ customer: { new: { name: 'Bob', email: 'bob@example.com' } }, source: 'phone', status: 'review', items: [{ product_id: productId('beef_rump'), qty: kg(1000) }] }, STAFF);
+    const a = createOrder({ customer: { new: { name: 'Alice', email: 'alice@example.com' } }, source: 'phone', status: 'review', items: [{ product_id: productId('beef_brisket'), qty: kg(1000) }] }, STAFF);
+    const b = createOrder({ customer: { new: { name: 'Bob', email: 'bob@example.com' } }, source: 'phone', status: 'review', items: [{ product_id: productId('beef_brisket'), qty: kg(1000) }] }, STAFF);
     const ta = orderToken(a.id);
     expect((await pub().get(`/api/public/o/${ta}`)).body.order.customer_name).toBe('Alice');
     const sig = ta.split('.')[1];
@@ -277,8 +280,8 @@ describe('customer access', () => {
   });
 
   it('order history needs a code sent to the email address; no enumeration; only your own orders', async () => {
-    createOrder({ customer: { new: { name: 'Alice', email: 'alice@example.com' } }, source: 'phone', status: 'review', customer_email: 'alice@example.com', items: [{ product_id: productId('beef_rump'), qty: kg(1000) }] }, STAFF);
-    createOrder({ customer: { new: { name: 'Bob', email: 'bob@example.com' } }, source: 'phone', status: 'review', customer_email: 'bob@example.com', items: [{ product_id: productId('beef_rump'), qty: kg(1000) }] }, STAFF);
+    createOrder({ customer: { new: { name: 'Alice', email: 'alice@example.com' } }, source: 'phone', status: 'review', customer_email: 'alice@example.com', items: [{ product_id: productId('beef_brisket'), qty: kg(1000) }] }, STAFF);
+    createOrder({ customer: { new: { name: 'Bob', email: 'bob@example.com' } }, source: 'phone', status: 'review', customer_email: 'bob@example.com', items: [{ product_id: productId('beef_brisket'), qty: kg(1000) }] }, STAFF);
     const c = pub();
     expect((await c.get('/api/public/account')).status).toBe(401);
     const unknown = await c.post('/api/public/account/code', { email: 'nobody@example.com' });
@@ -314,7 +317,7 @@ describe('customer access', () => {
 // ── Amendments ───────────────────────────────────────────────
 describe('changes proposed to the customer', () => {
   function confirmed() {
-    const o = createOrder({ customer: { new: { name: 'Change Me', email: 'change@example.com' } }, source: 'phone', status: 'confirmed', customer_email: 'change@example.com', fulfilment_type: 'collection', items: [{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 4, weight_g: null } }] }, STAFF);
+    const o = createOrder({ customer: { new: { name: 'Change Me', email: 'change@example.com' } }, source: 'phone', status: 'confirmed', customer_email: 'change@example.com', fulfilment_type: 'collection', items: [{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 8, weight_g: null } }] }, STAFF);
     return o;
   }
 
@@ -322,10 +325,10 @@ describe('changes proposed to the customer', () => {
     const o = confirmed();
     const item = getItems(o.id)[0];
     const staff = await signedIn('staff');
-    const p = await staff.post(`/api/orders/${o.id}/amendments`, { kind: 'change_qty', item_id: item.id, sale_option: '1kg', qty: { kind: 'count', count: 3 }, reason: 'We only have 3 kg of lean mince' });
+    const p = await staff.post(`/api/orders/${o.id}/amendments`, { kind: 'change_qty', item_id: item.id, sale_option: '500g', qty: { kind: 'count', count: 6 }, reason: 'We only have 3 kg of lean mince' });
     expect(p.status).toBe(200);
     expect(p.body.amendment).toMatchObject({ status: 'proposed', price_impact_cents: -12500, requires_approval: true });
-    expect(getItems(o.id)[0].qty.count).toBe(4); // unchanged
+    expect(getItems(o.id)[0].qty.count).toBe(8); // unchanged
     await flush();
     expect(mail(/Please check a change/)[0].text).toContain('We only have 3 kg');
     const t = orderToken(o.id);
@@ -333,7 +336,7 @@ describe('changes proposed to the customer', () => {
     expect(page.next.who).toBe('you');
     const res = await pub().post(`/api/public/o/${t}/amendments/${p.body.amendment.id}`, { accept: true });
     expect(res.body.status).toBe('applied');
-    expect(getItems(o.id)[0].qty.count).toBe(3);
+    expect(getItems(o.id)[0].qty.count).toBe(6);
     expect(requireOrder(o.id).estimated_total_cents).toBe(37500);
     expect((await pub().post(`/api/public/o/${t}/amendments/${p.body.amendment.id}`, { accept: false })).body.already).toBe(true);
   });
@@ -342,7 +345,7 @@ describe('changes proposed to the customer', () => {
     const o = confirmed();
     const item = getItems(o.id)[0];
     const staff = await signedIn('staff');
-    const p = await staff.post(`/api/orders/${o.id}/amendments`, { kind: 'replace_product', item_id: item.id, product_id: productId('beef_mince_8020'), sale_option: '1kg', qty: { kind: 'count', count: 4 }, reason: 'Out of lean mince' });
+    const p = await staff.post(`/api/orders/${o.id}/amendments`, { kind: 'replace_product', item_id: item.id, product_id: productId('beef_mince_8020'), sale_option: '500g', qty: { kind: 'count', count: 8 }, reason: 'Out of lean mince' });
     await pub().post(`/api/public/o/${orderToken(o.id)}/amendments/${p.body.amendment.id}`, { accept: false, note: 'I need lean only' });
     expect(getItems(o.id)[0].product_id).toBe(productId('beef_mince_lean'));
     expect((db().prepare("SELECT COUNT(*) n FROM exceptions WHERE type = 'amendment_declined' AND status = 'open'").get() as any).n).toBe(1);
@@ -357,7 +360,7 @@ function bankSettings() {
 }
 
 function readyOrder(email = 'pay@example.com') {
-  const o = createOrder({ customer: { new: { name: 'Payer', email } }, source: 'phone', status: 'confirmed', customer_email: email, fulfilment_type: 'collection', items: [{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 2, weight_g: null } }, { product_id: productId('beef_brisket'), qty: kg(2000) }] }, STAFF);
+  const o = createOrder({ customer: { new: { name: 'Payer', email } }, source: 'phone', status: 'confirmed', customer_email: email, fulfilment_type: 'collection', items: [{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 4, weight_g: null } }, { product_id: productId('beef_brisket'), qty: kg(2000) }] }, STAFF);
   setItemsCut(getItems(o.id).map((i) => i.id), true, STAFF);
   for (const i of getItems(o.id)) setItemPacked(i.id, true, STAFF);
   completePacking(o.id, STAFF); // → packed: the final-weighing stage
@@ -391,9 +394,13 @@ describe('payments', () => {
     const fin = await staff.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true });
     expect(fin.body.finalization.snapshot).toMatchObject({ version: 1, total_cents: 25000 + 27300 });
     expect(fin.body.finalization.snapshot.lines.find((l: any) => l.name === 'Brisket')).toMatchObject({ weight_g: 2100, unit_price_cents: 13000, price_unit: 'kg', line_cents: 27300 });
-    expect(fin.body.finalization.snapshot.lines.find((l: any) => l.name === 'Lean Mince')).toMatchObject({ weight_g: null, pack_count: 2, pack_price_cents: 12500, line_cents: 25000 });
-    // Locked: no edits, no weight changes, no going back to packing
-    expect((await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2500 })).status).toBe(409);
+    expect(fin.body.finalization.snapshot.lines.find((l: any) => l.name === 'Lean Mince')).toMatchObject({ weight_g: null, pack_count: 4, pack_price_cents: 6250, line_cents: 25000 });
+    // A corrected weight is still accepted after finalizing: it writes a new version with the new total (audited)
+    expect((await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2500 })).status).toBe(200);
+    expect((await staff.get(`/api/orders/${o.id}`)).body.finalization).toMatchObject({ version: 2, total_cents: 25000 + 32500 });
+    expect((await staff.post(`/api/items/${brisket.id}/weight`, { weight_g: 2100 })).status).toBe(200);
+    expect((await staff.get(`/api/orders/${o.id}`)).body.finalization).toMatchObject({ version: 3, total_cents: 52300 });
+    // Other edits stay locked, and the order can't go back to packing
     expect((await staff.patch(`/api/items/${brisket.id}`, { qty: kg(3000) })).body.error).toMatch(/finalized/);
     expect((await staff.post(`/api/orders/${o.id}/transition`, { to: 'packing' })).status).toBe(409);
     // Preview: nothing is sent until staff choose to
@@ -506,18 +513,26 @@ describe('payments', () => {
     expect(mail(/Payment received — order #\d+ is ready/)).toHaveLength(1);
   });
 
-  it('unpaid orders are not released unless the business allows a manager override', async () => {
+  it('an unpaid order can go out only when a manager confirms it with a reason; payment status is untouched', async () => {
     bankSettings();
     const staff = await signedIn('staff');
     const o = await finalOrder(staff);
-    expect((await staff.post(`/api/orders/${o.id}/transition`, { to: 'ready' })).body.error).toMatch(/Payment hasn’t been confirmed/);
+    const blocked = await staff.post(`/api/orders/${o.id}/transition`, { to: 'ready' });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.code).toBe('unpaid');
+    expect((await staff.post(`/api/orders/${o.id}/transition`, { to: 'ready', unpaid_reason: 'Regular customer, pays on Friday' })).status).toBe(403); // staff can't override
     const manager = await signedIn('manager');
-    expect((await manager.post(`/api/orders/${o.id}/transition`, { to: 'ready', unpaid_reason: 'Pays cash on collection' })).body.error).toMatch(/switched off/);
-    updateSettings('payments', { allowUnpaidRelease: true }, null);
-    expect((await staff.post(`/api/orders/${o.id}/transition`, { to: 'ready', unpaid_reason: 'x' })).status).toBe(403);
-    const r = await manager.post(`/api/orders/${o.id}/transition`, { to: 'ready', unpaid_reason: 'Pays cash on collection' });
+    const before = requireOrder(o.id).payment_state;
+    const r = await manager.post(`/api/orders/${o.id}/transition`, { to: 'ready', unpaid_reason: 'Regular customer, pays on Friday' });
     expect(r.body.order.status).toBe('ready');
-    expect((db().prepare("SELECT summary FROM order_events WHERE order_id = ? AND type = 'status_changed' ORDER BY created_at DESC LIMIT 1").get(o.id) as any).summary).toMatch(/released before payment: Pays cash/);
+    const after = requireOrder(o.id);
+    expect(after.payment_state).toBe(before); // still unpaid — production, delivery and payment are separate
+    expect(after).toMatchObject({ released_unpaid_reason: 'Regular customer, pays on Friday' });
+    expect(after.released_unpaid_at).toBeTruthy();
+    expect((db().prepare("SELECT summary FROM order_events WHERE order_id = ? AND type = 'status_changed' ORDER BY created_at DESC LIMIT 1").get(o.id) as any).summary).toMatch(/released before payment: Regular customer/);
+    // It stays visible as money owed
+    const dash = (await manager.get('/api/production/dashboard')).body;
+    expect(dash.attention.find((a: any) => a.key === 'unpaid_released')?.n).toBe(1);
   });
 
   it('EFT is not offered until the banking details are complete', async () => {
@@ -596,37 +611,56 @@ describe('EFT banking settings', () => {
     expect(JSON.stringify(info.body)).not.toContain('62000000001');
     expect(info.body.payments.eft).toBe(true);
     // Not on an order page until that order is asked to pay
-    const o = createOrder({ customer: { new: { name: 'Early' } }, source: 'phone', status: 'review', items: [{ product_id: productId('beef_rump'), qty: kg(1000) }] }, STAFF);
+    const o = createOrder({ customer: { new: { name: 'Early' } }, source: 'phone', status: 'review', items: [{ product_id: productId('beef_brisket'), qty: kg(1000) }] }, STAFF);
     expect(JSON.stringify((await pub().get(`/api/public/o/${orderToken(o.id)}`)).body)).not.toContain('62000000001');
   });
 });
 
 // ── Invoices ─────────────────────────────────────────────────
 describe('manual invoice requests', () => {
-  it('requested at checkout, worked through by staff, and issued only with a real reference', async () => {
-    const skip = await send(form([{ product_id: productId('beef_rump'), qty: kg(1000) }]));
+  it('requested at checkout; staff upload, replace or remove the PDF, and the customer is emailed only when staff choose', async () => {
+    const skip = await send(form([{ product_id: productId('beef_brisket'), qty: kg(1000) }]));
     expect(requireOrder(orderFromToken(tokenPath(skip.body.order_url))!).invoice_status).toBe('not_requested');
-    const r = await send(form([{ product_id: productId('beef_rump'), qty: kg(1000) }], { invoice: { billing_name: 'Zulu Catering', company: 'Zulu Catering CC', billing_email: 'accounts@zulu.example' } }));
+    const r = await send(form([{ product_id: productId('beef_brisket'), qty: kg(1000) }], { invoice: { billing_name: 'Zulu Catering', company: 'Zulu Catering CC', billing_email: 'accounts@zulu.example' } }));
     const id = orderFromToken(tokenPath(r.body.order_url))!;
     expect(requireOrder(id).invoice_status).toBe('requested');
     const manager = await signedIn('manager');
+    const staff = await signedIn('staff');
     const list = await manager.get('/api/invoices');
     expect(list.body.requests.map((x: any) => x.id)).toContain(id);
     expect(list.body.requests[0]).toMatchObject({ billing_complete: true });
-    expect((await manager.req('PATCH', `/api/orders/${id}/invoice`, { status: 'in_progress' })).status).toBe(200);
-    expect((await manager.req('PATCH', `/api/orders/${id}/invoice`, { status: 'issued' })).status).toBe(400); // needs number and date
     const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(200, 32)]);
-    expect((await manager.upload(`/api/orders/${id}/invoice/file`, { name: 'INV-1042.pdf', bytes: pdf, type: 'application/pdf' })).status).toBe(200);
-    expect((await manager.req('PATCH', `/api/orders/${id}/invoice`, { status: 'issued', reference: 'INV-1042', issued_on: today() })).status).toBe(200);
-    expect((await manager.req('PATCH', `/api/orders/${id}/invoice`, { status: 'sent' })).body.order.invoice_status).toBe('sent');
+    // Staff without payment rights can't upload
+    expect((await staff.upload(`/api/orders/${id}/invoice/file`, { name: 'INV-1042.pdf', bytes: pdf, type: 'application/pdf' })).status).toBe(403);
+    // Save only: on the order, no email
+    const up = await manager.upload(`/api/orders/${id}/invoice/file`, { name: 'INV-1042.pdf', bytes: pdf, type: 'application/pdf' }, { reference: 'INV-1042' });
+    expect(up.status).toBe(200);
+    expect(up.body.file).toMatchObject({ filename: 'INV-1042.pdf', uploaded_by_name: expect.any(String) });
     await flush();
-    expect(mail(/Your invoice for order/)).toHaveLength(2); // issued, then sent — each once
-    expect(mail(/Your invoice for order/)[0].to).toEqual(['accounts@zulu.example', 'naledi@example.com']);
-    // The customer downloads their own invoice; another order's link gets nothing
+    expect(mail(/Your invoice for order/)).toHaveLength(0);
+    // The customer can download it from their order page and payment page
     expect((await pub().raw(`/api/public/o/${tokenPath(r.body.order_url)}/invoice`)).status).toBe(200);
     expect((await pub().raw(`/api/public/o/${tokenPath(skip.body.order_url)}/invoice`)).status).toBe(404);
+    // Replace it, and this time notify
+    const pdf2 = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(300, 32)]);
+    expect((await manager.upload(`/api/orders/${id}/invoice/file`, { name: 'INV-1042-v2.pdf', bytes: pdf2, type: 'application/pdf' }, { notify: 'true' })).status).toBe(200);
+    await flush();
+    expect(mail(/Your invoice for order/)).toHaveLength(1);
+    expect(mail(/Your invoice for order/)[0].to).toEqual(['accounts@zulu.example', 'naledi@example.com']);
+    expect(mail(/Your invoice for order/)[0].html).not.toContain('INV-1042-v2.pdf'); // a link, not the file
+    // Send the notification again later
+    expect((await manager.get(`/api/orders/${id}/invoice/notify/preview`)).body).toMatchObject({ to: ['accounts@zulu.example', 'naledi@example.com'], subject: expect.stringMatching(/Your invoice/) });
+    expect((await manager.post(`/api/orders/${id}/invoice/notify`, {})).status).toBe(200);
+    await flush();
+    expect(mail(/Your invoice for order/)).toHaveLength(2);
     const page = (await pub().get(`/api/public/o/${tokenPath(r.body.order_url)}`)).body.order;
     expect(page.invoice).toMatchObject({ status: 'sent', reference: 'INV-1042', has_file: true });
+    const events = (db().prepare("SELECT type, summary FROM order_events WHERE order_id = ? AND type LIKE 'invoice_%' ORDER BY created_at").all(id) as any[]).map((e) => e.type);
+    expect(events).toEqual(expect.arrayContaining(['invoice_uploaded', 'invoice_sent']));
+    // Remove: the file is no longer offered to the customer
+    expect((await manager.req('DELETE', `/api/orders/${id}/invoice/file`, { reason: 'Wrong customer' })).status).toBe(200);
+    expect((await pub().raw(`/api/public/o/${tokenPath(r.body.order_url)}/invoice`)).status).toBe(404);
+    expect((await manager.post(`/api/orders/${id}/invoice/notify`, {})).status).toBe(400);
   });
 });
 
@@ -634,7 +668,7 @@ describe('manual invoice requests', () => {
 describe('notification outbox', () => {
   it('records failures, retries with back-off, and never sends a message twice', async () => {
     memoryFail.next = 1;
-    await send(form([{ product_id: productId('beef_rump'), qty: kg(1000) }]));
+    await send(form([{ product_id: productId('beef_brisket'), qty: kg(1000) }]));
     await new Promise((r) => setTimeout(r, 30));
     await processOutbox();
     const failed = db().prepare("SELECT * FROM notifications WHERE kind = 'order_received'").get() as any;
@@ -653,7 +687,7 @@ describe('notification outbox', () => {
 
   it('with email not set up, messages are recorded as not sent — never as sent', async () => {
     delete process.env.EMAIL_TRANSPORT;
-    await send(form([{ product_id: productId('beef_rump'), qty: kg(1000) }]));
+    await send(form([{ product_id: productId('beef_brisket'), qty: kg(1000) }]));
     await new Promise((r) => setTimeout(r, 30));
     await processOutbox();
     const rows = db().prepare("SELECT status, error FROM notifications WHERE channel = 'email'").all() as any[];
@@ -665,7 +699,7 @@ describe('notification outbox', () => {
 
   it('reorder reminders: only with consent, once, not after a newer order, with an unsubscribe link', async () => {
     const make = (name: string, email: string, consent: boolean) => {
-      const o = createOrder({ customer: { new: { name, email } }, source: 'phone', status: 'confirmed', customer_email: email, fulfilment_type: 'collection', items: [{ product_id: productId('beef_rump'), qty: kg(1000) }] }, STAFF);
+      const o = createOrder({ customer: { new: { name, email } }, source: 'phone', status: 'confirmed', customer_email: email, fulfilment_type: 'collection', items: [{ product_id: productId('beef_brisket'), qty: kg(1000) }] }, STAFF);
       db().prepare("UPDATE orders SET status = 'completed', completed_at = ? WHERE id = ?").run(new Date(Date.now() - 15 * 86400_000).toISOString(), o.id);
       db().prepare('UPDATE customers SET marketing_consent = ? WHERE id = ?').run(consent ? 1 : 0, o.customer_id);
       return o;
@@ -673,7 +707,7 @@ describe('notification outbox', () => {
     make('Yes Please', 'yes@example.com', true);
     make('No Thanks', 'no@example.com', false);
     const again = make('Back Already', 'back@example.com', true);
-    createOrder({ customer: { id: again.customer_id }, source: 'phone', status: 'review', items: [{ product_id: productId('beef_rump'), qty: kg(1000) }] }, STAFF);
+    createOrder({ customer: { id: again.customer_id }, source: 'phone', status: 'review', items: [{ product_id: productId('beef_brisket'), qty: kg(1000) }] }, STAFF);
     expect(runReorderReminders().sent).toBe(1);
     expect(runReorderReminders().sent).toBe(0); // never twice
     await flush();
@@ -693,7 +727,7 @@ void updateItem;
 
 describe('customer page privacy', () => {
   it('order pages and their data are not cached or indexed', async () => {
-    const r = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 1 } }]));
+    const r = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2 } }]));
     const res = await pub().get(`/api/public/o/${tokenPath(r.body.order_url)}`);
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
@@ -716,7 +750,7 @@ describe('reviews, Instagram and finding past orders', () => {
 
   it('the Google review invitation goes only to customers who have had an order completed', async () => {
     setLinks();
-    const first = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 1 } }]));
+    const first = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2 } }]));
     expect(first.body.returning_customer).toBe(false);
     const view = (await pub().get(`/api/public/o/${tokenPath(first.body.order_url)}`)).body.order;
     expect(view.social).toEqual({ instagram: IG, review: null });
@@ -729,12 +763,12 @@ describe('reviews, Instagram and finding past orders', () => {
     const doneMail = mail(/is complete/)[0];
     expect(doneMail.html).toContain(REVIEW);
     expect(doneMail.html).toContain(IG);
-    const again = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 2 } }]));
+    const again = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 4 } }]));
     expect(again.body.returning_customer).toBe(true);
   });
 
   it('the “see all your orders” email link signs the customer in; tampered or expired links don’t', async () => {
-    createOrder({ customer: { new: { name: 'Alice', email: 'alice@example.com' } }, source: 'phone', status: 'review', customer_email: 'alice@example.com', items: [{ product_id: productId('beef_rump'), qty: kg(1000) }] }, STAFF);
+    createOrder({ customer: { new: { name: 'Alice', email: 'alice@example.com' } }, source: 'phone', status: 'review', customer_email: 'alice@example.com', items: [{ product_id: productId('beef_brisket'), qty: kg(1000) }] }, STAFF);
     const token = accountLinkToken('Alice@Example.com');
     expect(emailFromAccountLink(token)).toBe('alice@example.com');
     expect(emailFromAccountLink(token, Date.now() + 31 * 86400_000)).toBeNull();
@@ -749,26 +783,27 @@ describe('reviews, Instagram and finding past orders', () => {
     expect(acct.status).toBe(200);
     expect(acct.body.orders).toHaveLength(1);
     // The received email carries the link
-    await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '1kg', qty: { kind: 'count', count: 1 } }]));
+    await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2 } }]));
     await flush();
     expect(mail(/received your/)[0].html).toContain('/account?k=');
   });
 });
 
 describe('fresh or frozen, vacuum packing, mince packs, help and status', () => {
-  it('fresh or frozen must be chosen, is kept on the order, and fresh deliveries are flagged for a journey check', async () => {
+  it('everything is frozen now: the customer no longer chooses, new orders are stored frozen, and old fresh orders keep their value', async () => {
     const { storage: _s, ...noStorage } = form([{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2 } }]);
-    expect((await send(noStorage)).body.error).toMatch(/fresh or frozen/i);
-    const r = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2 } }], { storage: 'fresh' }));
+    const r = await send(noStorage);
+    expect(r.status).toBe(200);
     const id = orderFromToken(tokenPath(r.body.order_url))!;
-    expect(requireOrder(id).storage).toBe('fresh');
-    const ex = db().prepare("SELECT title, detail FROM exceptions WHERE order_id = ? AND type = 'delivery_check'").get(id) as any;
-    expect(ex.detail).toMatch(/longer than about 2 hours/);
-    const frozen = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2 } }], { storage: 'frozen' }));
-    const fid = orderFromToken(tokenPath(frozen.body.order_url))!;
-    expect(db().prepare("SELECT 1 FROM exceptions WHERE order_id = ? AND type = 'delivery_check'").get(fid)).toBeUndefined();
+    expect(requireOrder(id).storage).toBe('frozen');
+    // Even if an old browser still sends "fresh", the order is stored frozen and no journey check is raised
+    const old = await send(form([{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 2 } }], { storage: 'fresh' }));
+    const oid = orderFromToken(tokenPath(old.body.order_url))!;
+    expect(requireOrder(oid).storage).toBe('frozen');
+    expect(db().prepare("SELECT 1 FROM exceptions WHERE order_id = ? AND type = 'delivery_check'").get(oid)).toBeUndefined();
+    // Historical values are kept as they were
+    db().prepare("UPDATE orders SET storage = 'fresh' WHERE id = ?").run(id);
     expect((await pub().get(`/api/public/o/${tokenPath(r.body.order_url)}`)).body.order.storage).toBe('fresh');
-    expect((await pub().get('/api/public/info')).body.form.freshMaxHours).toBe(2);
   });
 
   it('everything is vacuum packed: no packing choice for customers or staff; mince only in the approved packs', async () => {
@@ -777,7 +812,7 @@ describe('fresh or frozen, vacuum packing, mince packs, help and status', () => 
     expect(rump.packaging).toBe('Vacuum-packed');
     const cat = (await pub().get('/api/public/catalogue')).body.products;
     const mince = cat.find((p: any) => p.name === 'Lean Mince');
-    expect(mince.sale_options.map((o: any) => [o.id, o.grams])).toEqual([['500g', 500], ['1kg', 1000]]); // 500 g first = the default
+    expect(mince.sale_options.map((o: any) => [o.id, o.grams])).toEqual([['500g', 500]]); // mince comes in 500 g packets only
     // 2 kg as 4 × 500 g packs is exact; a made-up pack size is refused
     const q = await pub().post('/api/public/quote', { items: [{ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count: 4 } }] });
     expect(q.body.lines[0]).toMatchObject({ ok: true, pricing: 'exact', cents: 25000 });
@@ -794,7 +829,13 @@ describe('fresh or frozen, vacuum packing, mince packs, help and status', () => 
     expect(help.whatsapp).toMatch(/^https:\/\/wa\.me\/27/);
     const admin = await signedIn('admin');
     expect((await admin.req('PUT', '/api/admin/settings/help', { faq: [{ q: 'Do you deliver to Cape Town?', a: 'Ask us on WhatsApp.' }] })).status).toBe(200);
-    expect((await pub().get('/api/public/info')).body.help.faq).toEqual([{ q: 'Do you deliver to Cape Town?', a: 'Ask us on WhatsApp.' }]);
+    expect((await pub().get('/api/public/info')).body.help.faq).toEqual([{ q: 'Do you deliver to Cape Town?', a: 'Ask us on WhatsApp.', category: 'Ordering' }]);
+    // Categories, and the delivery placeholders, come through
+    expect((await admin.req('PUT', '/api/admin/settings/help', { faq: [{ q: 'Where do you deliver?', a: '{{deliveryArea}} · {{deliveryFee}}', category: 'Delivery' }] })).status).toBe(200);
+    const [d] = (await pub().get('/api/public/info')).body.help.faq;
+    expect(d).toMatchObject({ category: 'Delivery' });
+    expect(d.a).toMatch(/Hoedspruit|local/i);
+    expect(d.a).toMatch(/R150[.,]00/);
   });
 
   it('the customer sees final weighing, then payment, then ready; staff queues follow the order', async () => {
@@ -847,7 +888,15 @@ describe('“I’ve paid” without proof', () => {
     expect(requireOrder(o.id).payment_state).toBe('proof_submitted'); // awaiting verification, not paid
     expect(db().prepare('SELECT 1 FROM payment_proofs WHERE order_id = ?').get(o.id)).toBeUndefined();
     await flush();
-    expect(mail(/says they’ve paid/)[0].html).toContain('N Zulu');
+    // The bank-check alert goes to the configured payment reviewer (Sharon by default), once
+    const alert = mail(/^Payment Verification Required — .* — #\d+$/);
+    expect(alert).toHaveLength(1);
+    expect(alert[0].to.map((x: string) => x.toLowerCase())).toEqual(['sharonm@imagine.co.za']);
+    expect(alert[0].html).toContain('N Zulu');
+    expect(alert[0].text).toMatch(/check the bank/i);
+    await pub().post(`/api/public/pay/${tok}/declare`, { confirm: true, payer_reference: 'N Zulu' }); // a second tap
+    await flush();
+    expect(mail(/^Payment Verification Required/)).toHaveLength(1);
     const decl = (await staff.get(`/api/orders/${o.id}`)).body.declarations[0];
     const manager = await signedIn('manager');
     expect((await manager.post(`/api/declarations/${decl.id}/review`, { accept: true, amount_cents: 51000 })).status).toBe(200);

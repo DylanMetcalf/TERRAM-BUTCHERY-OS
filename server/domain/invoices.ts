@@ -88,11 +88,7 @@ export function updateInvoiceRequest(orderId: string, u: InvoiceUpdate, actor: A
     to = u.status;
     f.invoice_status = to;
     if (to === 'requested' && !o.invoice_requested_at) f.invoice_requested_at = now();
-    if (to === 'issued') {
-      const ref = (f.invoice_ref as string | null | undefined) ?? o.invoice_ref;
-      const date = (f.invoice_issued_on as string | null | undefined) ?? o.invoice_issued_on;
-      if (!ref || !date) throw badRequest('To mark it issued, enter the invoice number and the date it was issued in your accounting system.');
-    }
+    if (to === 'issued' && !((f.invoice_issued_on as string | null | undefined) ?? o.invoice_issued_on)) f.invoice_issued_on = new Date().toISOString().slice(0, 10);
     if (to === 'sent') f.invoice_sent_at = now();
     changes.unshift(`${INVOICE_LABEL[current]} → ${INVOICE_LABEL[to]}`);
   }
@@ -103,8 +99,8 @@ export function updateInvoiceRequest(orderId: string, u: InvoiceUpdate, actor: A
     addEvent(orderId, type, `Invoice: ${changes.join(' · ') || 'details updated'}${f.invoice_ref ? ` · ref ${f.invoice_ref}` : ''}`, actor, { from: current, to, reference: f.invoice_ref ?? null });
     audit(actor, 'invoice.updated', 'order', orderId, `#${o.order_number} invoice: ${changes.join(', ') || 'updated'}`);
   });
-  // The customer hears once the invoice is actually ready (issued or sent)
-  if (to && ['issued', 'sent'].includes(to) && (u.notify_customer ?? getSettings().notifications.invoiceReadyEmail)) {
+  // The customer is only emailed when staff choose to notify them (never just because a file was saved)
+  if (to && ['issued', 'sent'].includes(to) && u.notify_customer === true) {
     const after = requireOrder(orderId);
     const d = json<InvoiceRequestDetails | null>((db().prepare('SELECT invoice_details, invoice_file_id FROM orders WHERE id = ?').get(orderId) as any).invoice_details, null);
     const hasFile = !!(db().prepare('SELECT invoice_file_id FROM orders WHERE id = ?').get(orderId) as any).invoice_file_id;
@@ -135,4 +131,85 @@ export function requestInvoice(orderId: string, details: InvoiceRequestDetails, 
   addEvent(orderId, 'invoice_requested', `Invoice requested for ${details.billing_name}`, actor);
   publish(['orders'], { orderId });
   return requireOrder(orderId);
+}
+
+// ── Invoice file: upload / replace / remove / notify ─────────
+
+export function invoiceFileInfo(orderId: string) {
+  return (db()
+    .prepare('SELECT f.id, f.filename, f.mime, f.size, f.created_at, f.uploaded_by_kind, u.name AS uploaded_by_name FROM orders o JOIN files f ON f.id = o.invoice_file_id LEFT JOIN users u ON u.id = f.uploaded_by WHERE o.id = ?')
+    .get(orderId) as any) ?? null;
+}
+
+/**
+ * Saves an uploaded invoice on the order (replacing any earlier one, which stays in the file store
+ * for the record). The invoice becomes available on the customer's order and payment pages.
+ * `notify` emails the customer; otherwise nothing is sent.
+ */
+export function attachInvoiceFile(orderId: string, file: { id: string; filename: string }, actor: Actor, opts: { reference?: string | null; issued_on?: string | null; notify: boolean }) {
+  const o = requireOrder(orderId);
+  if (opts.issued_on && !/^\d{4}-\d{2}-\d{2}$/.test(opts.issued_on)) throw badRequest('Enter the invoice date.');
+  const previous = invoiceFileInfo(orderId);
+  tx(() => {
+    const status: InvoiceStatus = o.invoice_status === 'sent' ? 'sent' : 'issued';
+    db()
+      .prepare('UPDATE orders SET invoice_file_id = ?, invoice_status = ?, invoice_ref = COALESCE(?, invoice_ref), invoice_issued_on = COALESCE(?, invoice_issued_on, ?), invoice_requested_at = COALESCE(invoice_requested_at, ?), updated_at = ? WHERE id = ?')
+      .run(file.id, status, opts.reference?.trim().slice(0, 80) || null, opts.issued_on || null, new Date().toISOString().slice(0, 10), now(), now(), orderId);
+    addEvent(orderId, 'invoice_uploaded', `${previous ? `Invoice replaced (was ${previous.filename})` : 'Invoice uploaded'}: ${file.filename}${opts.reference ? ` · ref ${opts.reference}` : ''}`, actor, { file_id: file.id, replaced: previous?.id ?? null });
+    audit(actor, 'invoice.uploaded', 'order', orderId, `#${o.order_number}: invoice ${previous ? 'replaced' : 'uploaded'} (${file.filename})`);
+  });
+  if (opts.notify) sendInvoiceNotification(orderId, actor);
+  publish(['orders'], { orderId });
+  return requireOrder(orderId);
+}
+
+export function removeInvoiceFile(orderId: string, reason: string, actor: Actor) {
+  const o = requireOrder(orderId);
+  const f = invoiceFileInfo(orderId);
+  if (!f) throw badRequest('There is no invoice file on this order.');
+  tx(() => {
+    db().prepare("UPDATE orders SET invoice_file_id = NULL, invoice_status = CASE WHEN invoice_details IS NOT NULL THEN 'in_progress' ELSE 'not_requested' END, updated_at = ? WHERE id = ?").run(now(), orderId);
+    addEvent(orderId, 'invoice_removed', `Invoice file removed: ${f.filename}${reason.trim() ? ` · ${reason.trim().slice(0, 200)}` : ''}`, actor, { file_id: f.id });
+    audit(actor, 'invoice.removed', 'order', orderId, `#${o.order_number}: invoice file ${f.filename} removed`);
+  });
+  publish(['orders'], { orderId });
+  return requireOrder(orderId);
+}
+
+/** "Your invoice is ready" — sent only when staff choose to; can be sent again any time. */
+export function sendInvoiceNotification(orderId: string, actor: Actor) {
+  const o = requireOrder(orderId);
+  const f = invoiceFileInfo(orderId);
+  if (!f) throw badRequest('Upload the invoice first.');
+  const d = json<InvoiceRequestDetails | null>((db().prepare('SELECT invoice_details FROM orders WHERE id = ?').get(orderId) as any)?.invoice_details, null);
+  const c = customerContact(orderId);
+  const to = [...new Set([d?.billing_email, c.email].filter(Boolean).map((x) => x!.toLowerCase()))];
+  if (!to.length) throw badRequest('This order has no email address to send the invoice to.');
+  const n = (db().prepare("SELECT COUNT(*) n FROM notifications WHERE order_id = ? AND kind = 'invoice_ready'").get(orderId) as { n: number }).n;
+  const e = invoiceEmail(orderId);
+  notify({ key: `invoice_ready:${orderId}:${f.id}:${n}`, kind: 'invoice_ready', audience: 'customer', to, ...e, orderId, customerId: c.customerId });
+  db().prepare("UPDATE orders SET invoice_status = 'sent', invoice_sent_at = ? WHERE id = ?").run(now(), orderId);
+  addEvent(orderId, 'invoice_sent', `Invoice notification ${n ? 'sent again' : 'sent'} to ${to.join(', ')}`, actor, { file_id: f.id, resend: n });
+  publish(['orders'], { orderId });
+  return requireOrder(orderId);
+}
+
+export function invoiceEmailRecipients(orderId: string): string[] {
+  const d = json<InvoiceRequestDetails | null>((db().prepare('SELECT invoice_details FROM orders WHERE id = ?').get(orderId) as any)?.invoice_details, null);
+  const c = customerContact(orderId);
+  return [...new Set([d?.billing_email, c.email].filter(Boolean).map((x) => x!.toLowerCase()))];
+}
+
+export function invoiceEmail(orderId: string) {
+  const o = requireOrder(orderId);
+  const d = json<InvoiceRequestDetails | null>((db().prepare('SELECT invoice_details FROM orders WHERE id = ?').get(orderId) as any)?.invoice_details, null);
+  const c = customerContact(orderId);
+  return layout({
+    subject: `Your invoice for order #${o.order_number}`,
+    preheader: o.invoice_ref ? `Invoice ${o.invoice_ref}` : 'Your invoice is ready to download.',
+    greeting: `Hi ${(d?.billing_name ?? c.firstName).split(' ')[0]},`,
+    intro: [`Your invoice for order #${o.order_number} is ready${o.invoice_ref ? ` (invoice ${o.invoice_ref})` : ''}. You can view and download it securely from your order page.`],
+    cta: { label: 'View my invoice', url: orderUrl(orderId, '#invoice') },
+    closing: signOff(),
+  });
 }

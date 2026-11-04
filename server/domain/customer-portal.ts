@@ -1,3 +1,4 @@
+import { normalisePhone } from '../../shared/text.js';
 import crypto from 'node:crypto';
 import { db, id, json, now, tx } from '../db/db.js';
 import { badRequest, conflict } from '../lib/errors.js';
@@ -9,7 +10,7 @@ import { formatTimeframe, layout } from '../services/templates.js';
 import { STATUS_LABEL, type OrderStatus } from '../../shared/workflow.js';
 import { addEvent, getItems, orderMoney, requireOrder, transition, type OrderSummary } from './orders.js';
 import { listAmendments } from './amendments.js';
-import { paymentSummary } from './payments.js';
+import { PAYMENT_STATE_LABEL, paymentSummary } from './payments.js';
 import { staffEmails } from './lifecycle.js';
 import { requireProduct } from './products.js';
 import { payPathFor } from './pay-page.js';
@@ -78,13 +79,14 @@ function customerUpdates(orderId: string) {
   const rows = db()
     .prepare(
       `SELECT type, data, created_at FROM order_events WHERE order_id = ? AND type IN
-        ('created','confirmed','timeframe_changed','status_changed','payment_requested','payment_verified','payment_failed','amendment_proposed','amendment_accepted','amendment_declined','invoice_issued','invoice_sent','proof_received','proof_rejected')
+        ('created','confirmed','timeframe_changed','status_changed','payment_requested','payment_verified','payment_failed','amendment_proposed','amendment_accepted','amendment_declined','invoice_issued','invoice_sent','invoice_uploaded','proof_received','proof_rejected','payment_declared','declaration_rejected','customer_update','delivery_changed')
        ORDER BY created_at DESC LIMIT 40`,
     )
     .all(orderId) as { type: string; data: string; created_at: string }[];
   const out: { at: string; text: string }[] = [];
   for (const r of rows) {
     const d = json<any>(r.data, {});
+    if (r.type === 'customer_update') { if (d.text) out.push({ at: r.created_at, text: d.text }); continue; }
     const money = (c: number) => `R${(c / 100).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`;
     let text: string | null = null;
     switch (r.type) {
@@ -110,6 +112,10 @@ function customerUpdates(orderId: string) {
       case 'amendment_declined': text = 'You declined a change'; break;
       case 'invoice_issued': text = 'Invoice issued'; break;
       case 'invoice_sent': text = 'Invoice sent'; break;
+      case 'invoice_uploaded': text = 'Invoice available to download'; break;
+      case 'payment_declared': text = 'You told us you’ve paid — we’re checking the bank'; break;
+      case 'declaration_rejected': text = 'We couldn’t find your payment yet'; break;
+      case 'delivery_changed': text = d.arrangement === 'separate' ? 'Delivery to be arranged separately' : d.arrangement === 'collection' ? 'Changed to collection' : `Delivery fee updated${d.after_cents != null ? `: ${money(d.after_cents)}` : ''}`; break;
     }
     if (text) out.push({ at: r.created_at, text });
   }
@@ -153,6 +159,8 @@ export function customerOrderView(orderId: string) {
       address: o.fulfilment_type !== 'collection' ? o.delivery_address : null,
       collection: o.fulfilment_type === 'collection' ? { place: f.collectionPlace, address: f.collectionAddress, hours: f.collectionHours } : null,
       delivery_fee_cents: o.delivery_fee_cents,
+      arrangement: o.delivery_arrangement,
+      instructions: o.delivery_notes,
     },
     items: items.map((i) => ({
       id: i.id,
@@ -184,7 +192,7 @@ export function customerOrderView(orderId: string) {
       billing_name: invoice?.billing_name ?? null,
       issued_on: o.invoice_issued_on,
       reference: ['issued', 'sent'].includes(o.invoice_status) ? o.invoice_ref : null,
-      has_file: ['issued', 'sent'].includes(o.invoice_status) && !!invoiceFile,
+      has_file: !!invoiceFile,
     },
     updates: customerUpdates(orderId),
     can_cancel: ['review', 'needs_clarification'].includes(o.status),
@@ -301,6 +309,36 @@ export function requestSignInCode(emailRaw: string) {
   notify({ key: `signin_code:${cid}`, kind: 'signin_code', audience: 'customer', to: [email], ...e });
 }
 
+/** Email addresses on file for a mobile number (customer records and the orders placed with it). */
+function emailsForPhone(raw: string): string[] {
+  const phone = normalisePhone(raw);
+  if (!phone) return [];
+  const rows = db()
+    .prepare(`SELECT c.phone AS phone, c.email AS email FROM customers c WHERE c.phone IS NOT NULL
+              UNION ALL SELECT o.contact_phone AS phone, COALESCE(o.customer_email, c.email) AS email FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.contact_phone IS NOT NULL`)
+    .all() as { phone: string; email: string | null }[];
+  const out = new Set<string>();
+  for (const r of rows) if (r.email && normalisePhone(r.phone) === phone) out.add(r.email.trim().toLowerCase());
+  return [...out].slice(0, 3);
+}
+
+/**
+ * "View my orders" by mobile number. There's no SMS service, so the one-time code goes to the
+ * email address(es) on that number's orders. The answer is the same whether or not we know the number.
+ */
+export function requestSignInCodeByPhone(phoneRaw: string) {
+  if (!normalisePhone(phoneRaw)) throw badRequest('Please enter a valid mobile number.');
+  for (const email of emailsForPhone(phoneRaw)) requestSignInCode(email);
+}
+
+export function verifySignInByPhone(phoneRaw: string, codeRaw: string): { token: string; expires: Date } | null {
+  for (const email of emailsForPhone(phoneRaw)) {
+    const s = verifySignInCode(email, codeRaw);
+    if (s) return s;
+  }
+  return null;
+}
+
 export function verifySignInCode(emailRaw: string, codeRaw: string): { token: string; expires: Date } | null {
   const email = emailRaw.trim().toLowerCase();
   const code = codeRaw.replace(/\D/g, '');
@@ -343,7 +381,22 @@ export function endCustomerSession(token: string | undefined) {
 }
 
 export function accountView(email: string) {
-  const orders = ordersForEmail(email).map((o) => ({ ...o, stage: stageOf(o.status, o), status_label: STATUS_LABEL[o.status as OrderStatus], link: `/o/${orderToken(o.id)}`, money: orderMoney(o.id) }));
+  const orders = ordersForEmail(email).map((o) => {
+    const extra = db().prepare('SELECT payment_state, delivery_fee_cents, invoice_file_id, fulfilment_type FROM orders WHERE id = ?').get(o.id) as any;
+    const items = getItems(o.id).map((i) => ({ name: i.name_snapshot, qty_label: i.qty_label }));
+    return {
+      ...o,
+      stage: stageOf(o.status, o),
+      status_label: STATUS_LABEL[o.status as OrderStatus],
+      link: `/o/${orderToken(o.id)}`,
+      money: orderMoney(o.id),
+      items,
+      payment_label: PAYMENT_STATE_LABEL[extra?.payment_state as keyof typeof PAYMENT_STATE_LABEL] ?? null,
+      delivery_fee_cents: extra?.delivery_fee_cents ?? null,
+      fulfilment_type: extra?.fulfilment_type ?? null,
+      invoice_available: !!extra?.invoice_file_id,
+    };
+  });
   const consent = db().prepare('SELECT MAX(marketing_consent) c FROM customers WHERE email = ? COLLATE NOCASE').get(email) as { c: number | null };
   return { email, orders, preferences: { reminders: !!consent?.c } };
 }

@@ -1,3 +1,6 @@
+import { deliveryInfo, standardDeliveryFeeCents } from '../domain/delivery.js';
+import { deleteDraft } from './drafts.js';
+import { validMobile } from '../../shared/text.js';
 import { isReturningCustomer } from '../domain/customer-portal.js';
 import { Hono } from 'hono';
 import { db, id, now } from '../db/db.js';
@@ -13,7 +16,7 @@ import { paymentMethods } from '../services/payment-config.js';
 import { matchCustomer } from '../domain/customers.js';
 import { findPossibleDuplicates } from '../domain/duplicates.js';
 import { raiseException } from '../domain/exceptions.js';
-import { createOrder, getItems, quoteItem, requireOrder, validateItem, type ItemInput } from '../domain/orders.js';
+import { createOrder, getItems, pieceGramsFor, quoteItem, recomputeTotals, requireOrder, validateItem, type ItemInput } from '../domain/orders.js';
 import { onOrderReceived } from '../domain/lifecycle.js';
 import { listProducts, prepGroups, requireProduct, type Product } from '../domain/products.js';
 import { body, PublicOrderSchema } from '../http/schemas.js';
@@ -30,14 +33,20 @@ r.get('/info', (c) => {
   const today = localDate(new Date(), businessTz());
   const pm = paymentMethods();
   return c.json({
-    business: { name: s.business.name, tagline: s.business.tagline, phone: s.business.phone, email: s.business.email, address: s.business.address, instagramUrl: s.business.instagramUrl || null, googleReviewUrl: s.business.googleReviewUrl || null },
+    business: { name: s.business.name, tagline: s.business.tagline, phone: s.business.phone, email: s.business.email, address: s.business.address, instagramUrl: s.business.instagramUrl || null, googleReviewUrl: s.business.googleReviewUrl || null, facebookUrl: s.business.facebookUrl || null },
+    delivery: deliveryInfo(),
+    content: { aboutIntro: s.content.aboutIntro, aboutSections: s.content.aboutSections },
     // Only what the order form needs — never the internal email recipients or banking details
     form: { enabled: s.customerForm.enabled, intro: s.customerForm.intro, confirmationMessage: s.customerForm.confirmationMessage, showPrices: s.customerForm.showPrices, terms: s.customerForm.terms, noticeNote: s.customerForm.noticeNote, leadTime: s.orders.leadTimeText, packagingNote: PACKAGING_NOTE, freshMaxHours: s.fulfilment.freshMaxHours },
     fulfilment: { collectionDays: s.fulfilment.collectionDays, deliveryDays: s.fulfilment.deliveryDays, deliveryEnabled: s.fulfilment.deliveryEnabled, collectionHours: s.fulfilment.collectionHours, collectionPlace: s.fulfilment.collectionPlace, collectionAddress: s.fulfilment.collectionAddress, deliveryNotes: s.fulfilment.deliveryNotes, freeDeliveryKm: s.fulfilment.freeDeliveryKm, deliveryRatePerKmCents: s.fulfilment.deliveryRatePerKmCents, customerChooses: s.fulfilment.customerChooses, showDeliveryFees: s.fulfilment.showDeliveryFees },
     payments: { online: pm.online, eft: pm.eft, guidance: s.payments.guidance },
     // Help page: the farm's own answers, with live values (lead time, fresh/frozen threshold) filled in
     help: {
-      faq: s.help.faq.map((f) => ({ q: f.q, a: f.a.replace(/\{\{leadTime\}\}/g, s.orders.leadTimeText).replace(/\{\{freshMaxHours\}\}/g, String(s.fulfilment.freshMaxHours)) })),
+      faq: s.help.faq.map((f) => {
+        const fee = standardDeliveryFeeCents();
+        const fill = (t: string) => t.replace(/\{\{leadTime\}\}/g, s.orders.leadTimeText).replace(/\{\{freshMaxHours\}\}/g, String(s.fulfilment.freshMaxHours)).replace(/\{\{deliveryArea\}\}/g, s.fulfilment.deliveryAreaText).replace(/\{\{deliveryFee\}\}/g, fee != null ? `R${(fee / 100).toFixed(2).replace('.', ',')}` : 'confirmed with you');
+        return { q: fill(f.q), a: fill(f.a), category: (f as any).category ?? 'Ordering' };
+      }),
       whatsapp: s.business.phone ? `https://wa.me/${s.business.phone.replace(/\D/g, '').replace(/^0/, '27')}` : null,
     },
     earliest_date: addDays(today, s.orders.leadTimeDays),
@@ -72,6 +81,9 @@ export function publicProduct(p: Product, showPrices: boolean) {
     max_qty: p.max_qty,
     variant_of: p.variant_of,
     variant_label: p.variant_label,
+    order_method: p.order_method,
+    weight_ranges: p.weight_ranges,
+    group_only: p.group_only,
     price_cents: showPrices ? unit : null,
     price_unit: showPrices ? p.price_unit : null,
     sale_options: p.sale_options.map((o) => {
@@ -112,7 +124,9 @@ export function quoteBasket(items: ItemInput[]) {
         ok: true,
         problem: null,
         product_id: p.id,
-        label: v.sale_option && v.sale_option.kind === 'piece' ? `${v.qty.count} × ${v.sale_option.label}` : formatQty(v.qty, p.piece_noun),
+        label: v.sale_option && v.sale_option.kind === 'piece' ? `${v.qty.count} × ${v.sale_option.label}` : `${formatQty(v.qty, p.piece_noun)}${v.weight_pref ? ` (${v.weight_pref.label}${v.weight_pref.min_g ? ' each' : ''})` : ''}`,
+        weight_pref: v.weight_pref,
+        est_weight_g: v.qty.kind === 'weight' ? v.qty.weight_g : v.qty.kind === 'portions' ? (v.qty.count ?? 0) * (v.qty.weight_g ?? 0) : pieceGramsFor(v) ? (v.qty.count ?? 0) * pieceGramsFor(v)! : null,
         preparation_label: v.preparation_label,
         pricing: show ? q.pricing : 'unpriced',
         cents: show ? q.est_cents : null,
@@ -126,7 +140,8 @@ export function quoteBasket(items: ItemInput[]) {
   });
   const okLines = lines.filter((l) => l.ok);
   const total = totalOf(okLines.map((l) => ({ pricing: l.pricing as any, cents: l.cents })));
-  return { lines, total: { estimate_cents: okLines.length ? total.estimateCents : null, exact: total.exact && okLines.length > 0, pending_lines: total.pendingLines } };
+  // Delivery is quoted by the server too (the standard flat fee; other areas are arranged with the customer)
+  return { lines, total: { estimate_cents: okLines.length ? total.estimateCents : null, exact: total.exact && okLines.length > 0, pending_lines: total.pendingLines }, delivery: deliveryInfo() };
 }
 
 const QuoteSchema = z.object({ items: PublicOrderSchema.shape.items });
@@ -174,8 +189,9 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   if (input.seen_total_cents != null && quote.total.estimate_cents != null && quote.total.estimate_cents !== input.seen_total_cents) {
     throw new AppError(409, 'Some prices have changed since you started your order. Please check the new total and send again.', 'prices_changed', { quote });
   }
-  const phone = normalisePhone(input.customer.phone);
-  if (!phone) throw badRequest('Please enter a valid phone number.');
+  const phone = validMobile(input.customer.phone);
+  if (!phone) throw badRequest('Please enter a valid mobile number, e.g. 082 123 4567.');
+  if (fulfilmentType !== 'collection' && (input.delivery_address?.trim().length ?? 0) < 8) throw badRequest('Please enter your full delivery address, including the area or town.');
   const match = matchCustomer({ phone, email: input.customer.email || null });
   const customer = match.status === 'matched' ? { id: match.customer.id } : { new: { name: input.customer.name, phone: input.customer.phone, email: input.customer.email || null, address: input.delivery_address ?? null } };
   const products = new Map(input.items.map((i) => [i.product_id, requireProduct(i.product_id)]));
@@ -189,7 +205,7 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
     {
       customer,
       source: 'form',
-      items: input.items.map((i) => ({ product_id: i.product_id, sale_option: i.sale_option ?? null, qty: i.qty as any, preparation: i.preparation ?? {}, special_instructions: i.special_instructions ?? null, source_text: 'Order form' })),
+      items: input.items.map((i) => ({ product_id: i.product_id, sale_option: i.sale_option ?? null, weight_pref: i.weight_pref ?? null, qty: i.qty as any, preparation: i.preparation ?? {}, special_instructions: i.special_instructions ?? null, source_text: 'Order form' })),
       // Online orders always wait for a person at Terram to confirm them. A special request alone has nothing to cut yet.
       status: !input.items.length ? 'needs_clarification' : 'review',
       fulfilment_type: fulfilmentType,
@@ -197,7 +213,8 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
       customer_email: input.customer.email || null,
       invoice: input.invoice ? { billing_name: input.invoice.billing_name, company: input.invoice.company || null, billing_email: input.invoice.billing_email, billing_address: input.invoice.billing_address || null, vat_number: input.invoice.vat_number || null, instructions: input.invoice.instructions || null } : null,
       delivery_address: fulfilmentType === 'collection' ? null : input.delivery_address ?? null,
-      contact_phone: input.customer.phone,
+      contact_phone: phone,
+      delivery_notes: input.delivery_instructions,
       notes: input.notes ?? null,
       idempotency_key: idemKey,
       message_ids: [messageId],
@@ -209,18 +226,12 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   // Reminders only with a clear yes; never taken away by ordering without ticking it
   if (input.marketing_consent) db().prepare('UPDATE customers SET marketing_consent = 1, marketing_consent_at = ? WHERE id = ?').run(now(), order.customer_id);
   if (input.customer.email) db().prepare('UPDATE customers SET email = COALESCE(email, ?) WHERE id = ?').run(input.customer.email.toLowerCase(), order.customer_id);
-  db().prepare('UPDATE orders SET storage = ? WHERE id = ?').run(input.storage, order.id);
-  // Fresh on a delivery: staff check the journey time (no route service, so nothing is guessed)
-  if (input.storage === 'fresh' && fulfilmentType !== 'collection' && input.delivery_address) {
-    raiseException({
-      type: 'delivery_check',
-      severity: 'info',
-      title: `Fresh order #${order.order_number} for delivery — check the journey time`,
-      detail: `${input.customer.name} chose fresh. If the delivery journey to “${input.delivery_address}” is longer than about ${s.fulfilment.freshMaxHours} hours, we can’t guarantee fresh products stay in the required condition: suggest frozen before confirming.`,
-      order_id: order.id,
-      dedupe_key: `fresh-delivery:${order.id}`,
-    });
-  }
+  // Products are frozen. Delivery: the standard flat fee, stored on the order now (later fee changes never touch it)
+  const std = standardDeliveryFeeCents();
+  const arrangement = fulfilmentType === 'collection' ? 'collection' : 'standard';
+  db().prepare("UPDATE orders SET storage = 'frozen', delivery_arrangement = ?, delivery_fee_cents = ? WHERE id = ?").run(arrangement, arrangement === 'collection' ? 0 : std, order.id);
+  recomputeTotals(order.id);
+  deleteDraft(c);
   if (special) {
     db().prepare('UPDATE orders SET special_request = ? WHERE id = ?').run(special, order.id);
     raiseException({

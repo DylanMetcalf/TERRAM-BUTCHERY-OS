@@ -184,9 +184,10 @@ describe('out of stock on the order form', () => {
     expect(cat.find((p: any) => p.name === 'Rump')).toMatchObject({ out_of_stock: false });
     expect(cat.find((p: any) => p.name === 'Tomahawk')).toBeUndefined();
     const r = await c.post('/api/public/orders', {
-      customer: { name: 'Naledi Zulu', phone: '071 555 3380' },
+      customer: { name: 'Naledi Zulu', phone: '071 555 3380', email: 'naledi@example.com' },
       items: [{ product_id: productId('beef_fillet'), qty: kg(1000) }],
       delivery_address: '12 Kerk Street, Pretoria',
+    delivery_instructions: 'Ring the bell at the gate',
       requested_date: weekday(),
       client_ref: 'ref-oos-000001',
       storage: 'fresh',

@@ -6,6 +6,7 @@ import { getSettings } from '../services/settings.js';
 import { notify } from '../services/notify.js';
 import { orderUrl, siteUrl, accountUrl } from '../services/links.js';
 import { formatTimeframe, layout, money, signOff, type EmailLine } from '../services/templates.js';
+import { closeExceptionsForFinishedOrder } from './exceptions.js';
 import { addEvent, getItems, orderMoney, requireOrder, type OrderItem, type OrderSummary } from './orders.js';
 
 /**
@@ -54,24 +55,32 @@ function fulfilmentFacts(o: OrderSummary): [string, string][] {
 
 function totalLine(orderId: string, final = false): string | null {
   const m = orderMoney(orderId);
-  if (final && m.final_cents != null) return `Total: ${money(m.final_cents)}`;
+  const fee = m.delivery_fee_cents ? ` (includes delivery ${money(m.delivery_fee_cents)})` : '';
+  if (final && m.final_cents != null) return `Total: ${money(m.final_cents)}${fee}`;
   if (m.estimated_cents == null) return null;
-  return m.estimate_is_exact ? `Total: ${money(m.estimated_cents)}` : `Estimated total: ${money(m.estimated_cents)} (weighed items are priced on their final weight)`;
+  return m.estimate_is_exact ? `Total: ${money(m.estimated_cents)}${fee}` : `Estimated total: ${money(m.estimated_cents)}${fee} (weighed items are priced on their final weight)`;
 }
+
 
 function confirmCount(orderId: string): number {
   return (db().prepare("SELECT COUNT(*) n FROM order_events WHERE order_id = ? AND type = 'confirmed'").get(orderId) as { n: number }).n;
 }
 
+function deliveryFacts(o: { fulfilment_type: string | null; delivery_fee_cents: number | null; delivery_arrangement?: string | null }): [string, string][] {
+  if (o.fulfilment_type === 'collection') return [['Collection', 'You collect from us']];
+  if ((o as any).delivery_arrangement === 'separate') return [['Delivery', 'We will contact you to arrange delivery']];
+  return o.delivery_fee_cents != null ? [['Delivery fee', money(o.delivery_fee_cents)]] : [];
+}
+
 // ── Received ─────────────────────────────────────────────────
-export function onOrderReceived(orderId: string, opts: { special: string | null; notes: string | null } = { special: null, notes: null }) {
+export function onOrderReceived(orderId: string, opts: { special: string | null; notes: string | null; resend?: number; preview?: boolean } = { special: null, notes: null }): { subject: string; text: string } | void {
   const o = requireOrder(orderId);
   const items = getItems(orderId);
   const s = getSettings();
   const c = customerContact(orderId);
   const lead = s.orders.leadTimeText;
   const wa = (s.business.phone ?? '').replace(/\D/g, '').replace(/^0/, '27');
-  if (c.email && s.customerForm.emailCustomer) {
+  if (c.email && (s.customerForm.emailCustomer || opts.preview || opts.resend)) {
     const e = layout({
       subject: `We've received your ${s.business.name} order`,
       preheader: `Order reference #${o.order_number}. We'll review it and confirm.`,
@@ -81,10 +90,11 @@ export function onOrderReceived(orderId: string, opts: { special: string | null;
         `We've received your order and will review the products, quantities and availability before confirming it.`,
       ],
       blocks: [
-        { facts: [['Order reference', `#${o.order_number}`], ['Status', 'Received, waiting for our confirmation']] },
+        { facts: [['Order reference', `#${o.order_number}`], ['Status', 'Received, waiting for our confirmation'], ...deliveryFacts(o)] },
         ...(items.length ? [{ heading: 'What you ordered', lines: items.map((i) => lineFor(i)), paragraphs: [totalLine(orderId)].filter(Boolean) as string[] }] : []),
         ...(opts.special ? [{ note: `Special request: ${opts.special}\nWe'll confirm availability and price with you before anything is prepared.` }] : []),
         { heading: 'When', paragraphs: [`${lead} We'll confirm your expected timeframe once your order has been reviewed.`] },
+        { heading: 'What happens next', paragraphs: ['1. We check your order and confirm it with you.', '2. We cut, weigh and pack it. Weighed items are priced on their final weight.', '3. We send you the final amount with our banking details. Pay by EFT and tap "Already paid?" on your payment page.', '4. We deliver on your delivery day (or you collect).'] },
       ],
       cta: { label: 'View my order', url: orderUrl(orderId) },
       links: [
@@ -99,10 +109,11 @@ export function onOrderReceived(orderId: string, opts: { special: string | null;
         ...signOff(),
       ],
     });
-    notify({ key: `order_received:${orderId}`, kind: 'order_received', audience: 'customer', to: [c.email], ...e, replyTo: s.business.email || null, orderId, customerId: c.customerId });
+    if (opts.preview) return { subject: e.subject, text: e.text };
+    notify({ key: opts.resend ? `order_received:${orderId}:again:${opts.resend}` : `order_received:${orderId}`, kind: 'order_received', audience: 'customer', to: [c.email], ...e, replyTo: s.business.email || null, orderId, customerId: c.customerId });
   }
-  // The family's alert
-  const staff = staffEmails();
+  // The family's alert (only for a new order, not when staff resend the confirmation)
+  const staff = opts.resend ? [] : staffEmails();
   if (staff.length) {
     const invoice = o.invoice_status === 'requested';
     const e = layout({
@@ -182,6 +193,7 @@ export function onTimeframeChanged(orderId: string, before: { from: string | nul
 
 // ── Status changes ───────────────────────────────────────────
 export function onOrderStatusChanged(orderId: string, from: OrderStatus, to: OrderStatus, actor: Actor) {
+  if (to === 'completed' || to === 'cancelled') closeExceptionsForFinishedOrder(orderId, to);
   const s = getSettings();
   const o = requireOrder(orderId);
   const c = customerContact(orderId);

@@ -6,7 +6,7 @@ import { db } from '../db/db.js';
 import { ORDER_STATUSES, OPEN_STATUSES, allowedTransitions, type OrderStatus } from '../../shared/workflow.js';
 import { can } from '../../shared/permissions.js';
 import { badRequest } from '../lib/errors.js';
-import { localDate } from '../lib/time.js';
+import { addDays as addDaysYmd, localDate } from '../lib/time.js';
 import { businessTz } from '../services/settings.js';
 import { listExceptions } from '../domain/exceptions.js';
 import { actionsFor } from '../domain/exception-actions.js';
@@ -38,7 +38,11 @@ import { listAmendments, proposeAmendment, withdrawAmendment } from '../domain/a
 import { finalizationHistory, finalizationProblems, finalizeOrder, latestFinalization, reopenFinalized } from '../domain/finalize.js';
 import { paymentRequestPreview, recordWhatsAppHandoff, reviewDeclaration, sendPaymentRequest } from '../domain/pay-page.js';
 import { createPaymentRequest, openRequest, paymentSummary, reversePayment, reviewProof, recordVerifiedPayment, sendPaymentRequestEmail } from '../domain/payments.js';
-import { INVOICE_LABEL, listInvoiceRequests, requestInvoice, updateInvoiceRequest } from '../domain/invoices.js';
+import { INVOICE_LABEL, attachInvoiceFile, invoiceEmail, invoiceEmailRecipients, invoiceFileInfo, listInvoiceRequests, removeInvoiceFile, requestInvoice, sendInvoiceNotification, updateInvoiceRequest } from '../domain/invoices.js';
+import { communications, recordLinkCopied, recordWhatsApp, resendOrderConfirmation, whatsappDraft } from '../domain/communications.js';
+import { onOrderReceived, customerContact } from '../domain/lifecycle.js';
+import { deliveryInfo, setDeliveryArrangement } from '../domain/delivery.js';
+import { waivePayment } from '../domain/payments.js';
 import { listNotifications, notificationProblemCount, retryNotification } from '../services/notify.js';
 import { orderUrl, revokeOrderLinks } from '../services/links.js';
 import { fileHeaders, readFile, storeFile } from '../services/files.js';
@@ -70,9 +74,19 @@ r.get('/', requirePerm('orders.read'), (c) => {
   else if (view === 'weighing') where.push("o.status = 'packed' AND o.finalized_at IS NULL");
   else if (view === 'to_request') where.push("o.status = 'packed' AND o.finalized_at IS NOT NULL AND o.payment_state IN ('not_requested','failed')");
   else if (view === 'requested') where.push("o.status = 'packed' AND o.payment_state IN ('requested','pending','partially_paid')");
-  else if (view === 'verify') where.push("o.payment_state = 'proof_submitted' AND o.status != 'cancelled'");
+  else if (view === 'verify') where.push("o.status != 'cancelled' AND o.payment_state NOT IN ('paid','waived') AND (EXISTS (SELECT 1 FROM payment_proofs p WHERE p.order_id = o.id AND p.status = 'submitted') OR EXISTS (SELECT 1 FROM payment_declarations d WHERE d.order_id = o.id AND d.status = 'submitted'))");
   else if (view === 'awaiting_payment') where.push("o.payment_state IN ('requested','pending','partially_paid','failed') AND o.status != 'cancelled'");
   else if (view === 'proofs') where.push("EXISTS (SELECT 1 FROM payment_proofs p WHERE p.order_id = o.id AND p.status = 'submitted')");
+  else if (view === 'arrange') where.push("o.delivery_arrangement = 'separate' AND o.status NOT IN ('completed','cancelled')");
+  else if (view === 'no_address') where.push("o.fulfilment_type = 'delivery' AND (o.delivery_address IS NULL OR TRIM(o.delivery_address) = '') AND o.status NOT IN ('completed','cancelled')");
+  else if (view === 'unpaid_released') where.push("o.released_unpaid_at IS NOT NULL AND o.payment_state NOT IN ('paid','waived') AND o.status != 'cancelled'");
+  else if (view === 'delivered_unpaid') where.push("o.status = 'completed' AND o.payment_state NOT IN ('paid','waived') AND COALESCE(o.final_total_cents, o.estimated_total_cents, 0) > o.amount_paid_cents");
+  else if (view === 'stage_new') where.push("o.status IN ('review','needs_clarification','confirmed','on_hold')");
+  else if (view === 'stage_cutting') where.push("o.status IN ('cutting','cut')");
+  else if (view === 'stage_packing') where.push("o.status = 'packing'");
+  else if (view === 'stage_packed') where.push("o.status IN ('packed','ready')");
+  else if (view === 'stage_out') where.push("o.status = 'out_for_delivery'");
+  else if (view === 'stage_delivered') where.push("o.status = 'completed' AND o.completed_at >= ?"), vals.push(`${addDaysYmd(today, -6)}T00:00:00`);
   else if (view === 'awaiting_customer') where.push("EXISTS (SELECT 1 FROM order_amendments a WHERE a.order_id = o.id AND a.status = 'proposed' AND a.requires_approval = 1)");
   if (q.status && (ORDER_STATUSES as readonly string[]).includes(q.status)) where.push('o.status = ?'), vals.push(q.status);
   const from = ymdParam(q.from);
@@ -90,7 +104,7 @@ r.get('/', requirePerm('orders.read'), (c) => {
   const limit = Math.min(Number(q.limit) || 50, 200);
   const offset = Math.max(Number(q.offset) || 0, 0);
   const sort =
-    view === 'completed' || view === 'cancelled'
+    view === 'completed' || view === 'cancelled' || view === 'stage_delivered' || view === 'delivered_unpaid'
       ? 'o.updated_at DESC'
       : "CASE WHEN o.requested_date IS NULL THEN 1 ELSE 0 END, o.requested_date, o.order_number";
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -183,7 +197,7 @@ r.get('/:id', requirePerm('orders.read'), (c) => {
   const customer = db().prepare('SELECT id, name, phone, email, address, notes FROM customers WHERE id = ?').get(order.customer_id);
   const replies = db().prepare("SELECT id, body, created_at FROM notifications WHERE order_id = ? AND kind = 'reply_suggestion' ORDER BY created_at DESC LIMIT 3").all(order.id);
   const inv = db().prepare('SELECT invoice_details, invoice_file_id FROM orders WHERE id = ?').get(order.id) as any;
-  const invoiceFile = inv?.invoice_file_id ? db().prepare('SELECT id, filename, size, created_at FROM files WHERE id = ?').get(inv.invoice_file_id) : null;
+  const invoiceFile = invoiceFileInfo(order.id);
   const feedback = db().prepare('SELECT rating, comment, created_at FROM order_feedback WHERE order_id = ?').get(order.id) ?? null;
   return c.json({
     order, items, events, messages, interpretations, exceptions, transitions, customer, replies,
@@ -197,7 +211,9 @@ r.get('/:id', requirePerm('orders.read'), (c) => {
     finalization_history: finalizationHistory(order.id),
     finalization_problems: order.status === 'packed' && !order.finalized_at ? finalizationProblems(order.id) : [],
     declarations: db().prepare('SELECT d.*, u.name AS reviewed_by_name FROM payment_declarations d LEFT JOIN users u ON u.id = d.reviewed_by WHERE d.order_id = ? ORDER BY d.created_at DESC').all(order.id),
-    release: { require_payment: getSettings().payments.requirePaymentBeforeRelease, allow_unpaid: getSettings().payments.allowUnpaidRelease },
+    release: { require_payment: getSettings().payments.requirePaymentBeforeRelease, allow_unpaid: can(role, 'payments.write'), released_unpaid_at: order.released_unpaid_at, released_unpaid_reason: order.released_unpaid_reason },
+    delivery: deliveryInfo(),
+    communications: communications(order.id),
     feedback,
   });
 });
@@ -275,8 +291,8 @@ r.post('/:id/payment-request/send', requirePerm('orders.write'), rateLimit('pay-
 r.post('/:id/payment-request/whatsapp', requirePerm('orders.write'), (c) => c.json({ history: recordWhatsAppHandoff(c.req.param('id'), actorOf(c)) }));
 
 r.post('/:id/payments', requirePerm('payments.write'), async (c) => {
-  const input = await body(c, z.object({ method: z.enum(['eft', 'cash', 'card', 'other']), amount_cents: z.number().int().positive().max(100_000_000), note: z.string().max(500).nullable().optional() }));
-  const res = recordVerifiedPayment(c.req.param('id'), { method: input.method, amount_cents: input.amount_cents, request_id: openRequest(c.req.param('id'))?.id ?? null, note: input.note ?? null }, actorOf(c), 'staff');
+  const input = await body(c, z.object({ method: z.enum(['eft', 'cash', 'card', 'other']), amount_cents: z.number().int().positive().max(100_000_000), note: z.string().max(500).nullable().optional(), paid_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), reference: z.string().trim().max(80).nullable().optional() }));
+  const res = recordVerifiedPayment(c.req.param('id'), { method: input.method, amount_cents: input.amount_cents, request_id: openRequest(c.req.param('id'))?.id ?? null, note: input.note ?? null, paid_on: input.paid_on ?? null, reference: input.reference || null }, actorOf(c), 'staff');
   return c.json({ payment: res.payment, summary: paymentSummary(c.req.param('id')) });
 });
 
@@ -316,7 +332,54 @@ r.post('/:id/invoice/file', requirePerm('payments.write'), async (c) => {
   const file = form.file;
   if (!file || typeof file === 'string') throw badRequest('Choose the invoice file.');
   const stored = storeFile('invoice', c.req.param('id'), file.name, Buffer.from(await file.arrayBuffer()), actorOf(c));
-  return c.json({ order: updateInvoiceRequest(c.req.param('id'), { file_id: stored.id }, actorOf(c)), file: stored });
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const order = attachInvoiceFile(c.req.param('id'), stored, actorOf(c), { reference: str(form.reference), issued_on: str(form.issued_on), notify: form.notify === 'true' || form.notify === '1' });
+  return c.json({ order, file: invoiceFileInfo(order.id) });
+});
+
+r.delete('/:id/invoice/file', requirePerm('payments.write'), async (c) => {
+  const { reason } = await body(c, z.object({ reason: z.string().max(300).default('') }));
+  return c.json({ order: removeInvoiceFile(c.req.param('id'), reason, actorOf(c)) });
+});
+
+r.get('/:id/invoice/notify/preview', requirePerm('orders.write'), (c) => {
+  const e = invoiceEmail(c.req.param('id'));
+  return c.json({ to: invoiceEmailRecipients(c.req.param('id')), subject: e.subject, text: e.text });
+});
+
+r.post('/:id/invoice/notify', requirePerm('payments.write'), rateLimit('invoice-notify', 20, 10 * 60_000), (c) => c.json({ order: sendInvoiceNotification(c.req.param('id'), actorOf(c)) }));
+
+// ── Communications ───────────────────────────────────────────
+r.get('/:id/communications', requirePerm('orders.read'), (c) => {
+  const id = c.req.param('id');
+  const preview = onOrderReceived(id, { special: null, notes: null, preview: true });
+  return c.json({ history: communications(id), whatsapp: whatsappDraft(id), confirmation: { to: customerContact(id).email, ...(preview || { subject: null, text: null }) } });
+});
+r.post('/:id/communications/confirmation', requirePerm('orders.write'), rateLimit('confirm-resend', 20, 10 * 60_000), (c) => c.json({ history: resendOrderConfirmation(c.req.param('id'), actorOf(c)) }));
+r.post('/:id/communications/whatsapp', requirePerm('orders.write'), async (c) => {
+  const { text } = await body(c, z.object({ text: z.string().trim().min(1).max(2000) }));
+  return c.json({ history: recordWhatsApp(c.req.param('id'), text, actorOf(c)) });
+});
+r.post('/:id/communications/link-copied', requirePerm('orders.write'), (c) => c.json({ history: recordLinkCopied(c.req.param('id'), actorOf(c)) }));
+
+/** A short update the customer sees on their order page (not emailed). */
+r.post('/:id/customer-update', requirePerm('orders.write'), async (c) => {
+  const { text } = await body(c, z.object({ text: z.string().trim().min(2).max(500) }));
+  addEvent(c.req.param('id'), 'customer_update', `Update for the customer: ${text}`, actorOf(c), { text });
+  return c.json({ ok: true });
+});
+
+// ── Delivery arrangement and payment waiver ──────────────────
+r.patch('/:id/delivery', requirePerm('orders.write'), async (c) => {
+  const input = await body(c, z.object({ arrangement: z.enum(['standard', 'custom', 'separate', 'collection']), fee_cents: z.number().int().min(0).max(10_000_000).nullable().optional(), note: z.string().max(500).nullable().optional() }));
+  return c.json({ order: setDeliveryArrangement(c.req.param('id'), input, actorOf(c)) });
+});
+
+r.post('/:id/payment-waive', requirePerm('payments.write'), async (c) => {
+  const input = await body(c, z.object({ reason: z.string().trim().max(500).default(''), undo: z.boolean().default(false) }));
+  if (!input.undo && input.reason.length < 3) throw badRequest('Say why the payment is waived.');
+  waivePayment(c.req.param('id'), input.reason, actorOf(c), input.undo);
+  return c.json({ summary: paymentSummary(c.req.param('id')) });
 });
 
 // ── Customer link ────────────────────────────────────────────

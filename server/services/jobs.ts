@@ -1,3 +1,4 @@
+import { purgeExpiredDrafts } from '../routes/drafts.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { db } from '../db/db.js';
@@ -66,6 +67,7 @@ export function startJobs() {
   const reminders = () => {
     try {
       runReorderReminders();
+      purgeExpiredDrafts();
     } catch (e) {
       recordSystemEvent('error', 'notifications', 'Reorder reminders failed', String((e as Error)?.stack ?? e));
     }

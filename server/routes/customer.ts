@@ -26,6 +26,8 @@ import {
   setReminderPreference,
   submitFeedback,
   verifySignInCode,
+  requestSignInCodeByPhone,
+  verifySignInByPhone,
 } from '../domain/customer-portal.js';
 
 /**
@@ -113,7 +115,7 @@ r.post('/pay/:token/proof', rateLimit('proof-upload', 10, 60 * 60_000), async (c
 r.get('/o/:token/invoice', linkLimit, (c) => {
   const orderId = orderFor(c);
   const row = db().prepare('SELECT invoice_file_id, invoice_status FROM orders WHERE id = ?').get(orderId) as { invoice_file_id: string | null; invoice_status: string };
-  if (!row.invoice_file_id || !['issued', 'sent'].includes(row.invoice_status)) throw notFound('That invoice');
+  if (!row.invoice_file_id) throw notFound('That invoice');
   const f = readFile(row.invoice_file_id, orderId);
   return c.body(new Uint8Array(f.data), 200, fileHeaders(f));
 });
@@ -157,15 +159,17 @@ r.get('/o/:token/reorder', linkLimit, (c) => c.json(reorderDraft(orderFor(c))));
 // ── Order history (passwordless) ─────────────────────────────
 
 r.post('/account/code', rateLimit('account-code', 6, 15 * 60_000), async (c) => {
-  const input = await body(c, z.object({ email: z.string().trim().max(200) }));
-  requestSignInCode(input.email);
-  // Same answer whether or not we know the address
-  return c.json({ ok: true, message: 'If we have orders for that email address, we’ve sent it a 6-digit code. It can take a minute to arrive.' });
+  const input = await body(c, z.object({ email: z.string().trim().max(200).optional(), phone: z.string().trim().max(40).optional() }));
+  if (input.phone) requestSignInCodeByPhone(input.phone);
+  else if (input.email) requestSignInCode(input.email);
+  else throw badRequest('Enter your mobile number or email address.');
+  // Same answer whether or not we know the number or address
+  return c.json({ ok: true, message: input.phone ? 'If we have orders for that number, we’ve emailed a 6-digit code to the email address on those orders. It can take a minute to arrive.' : 'If we have orders for that email address, we’ve sent it a 6-digit code. It can take a minute to arrive.' });
 });
 
 r.post('/account/verify', rateLimit('account-verify', 15, 15 * 60_000), async (c) => {
-  const input = await body(c, z.object({ email: z.string().trim().max(200), code: z.string().trim().max(12) }));
-  const session = verifySignInCode(input.email, input.code);
+  const input = await body(c, z.object({ email: z.string().trim().max(200).optional(), phone: z.string().trim().max(40).optional(), code: z.string().trim().max(12) }));
+  const session = input.phone ? verifySignInByPhone(input.phone, input.code) : input.email ? verifySignInCode(input.email, input.code) : null;
   if (!session) throw new AppError(400, 'That code isn’t right or has expired. Check the latest email, or ask for a new code.', 'bad_code');
   setCookie(c, CUSTOMER_COOKIE, session.token, { httpOnly: true, sameSite: 'Lax', secure: secure(), path: '/', expires: session.expires });
   return c.json({ ok: true });

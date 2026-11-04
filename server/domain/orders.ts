@@ -1,3 +1,5 @@
+import { standardDeliveryFeeCents } from './delivery.js';
+import { refreshFinalization } from './finalize.js';
 import { db, id, json, nextCounter, now, tx } from '../db/db.js';
 import {
   canTransition,
@@ -11,7 +13,8 @@ import {
 } from '../../shared/workflow.js';
 import { formatQty, qtyEquals, validateQty, type Qty } from '../../shared/quantity.js';
 import { deliveryFeeCents } from '../../shared/delivery.js';
-import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
+import { AppError, badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
+import { raiseException } from './exceptions.js';
 import { isValidYmd } from '../lib/time.js';
 import { audit, type Actor } from '../services/audit.js';
 import { publish } from '../services/realtime.js';
@@ -39,6 +42,8 @@ export interface ItemInput {
   preparation?: Record<string, string>;
   special_instructions?: string | null;
   source_text?: string | null;
+  /** Preferred weight per item: one of the product's weight ranges, or 'other' (described in the instructions). */
+  weight_pref?: string | null;
 }
 
 export interface CreateOrderInput {
@@ -78,6 +83,8 @@ export interface InvoiceRequestDetails {
 
 export interface OrderItem {
   id: string;
+  /** What the customer asked for per item (e.g. 300–400 g a steak). */
+  weight_pref?: WeightPref | null;
   order_id: string;
   product_id: string;
   product_name: string;
@@ -155,6 +162,10 @@ export interface OrderSummary {
   finalized_at: string | null;
   finalized_by: string | null;
   finalized_version: number;
+  delivery_arrangement: 'standard' | 'custom' | 'separate' | 'collection' | null;
+  released_unpaid_at: string | null;
+  released_unpaid_reason: string | null;
+  payment_waived_at: string | null;
   status_changed_at: string;
   created_at: string;
   updated_at: string;
@@ -165,7 +176,7 @@ export interface OrderSummary {
   items_preview: string;
 }
 
-export type PaymentState = 'not_requested' | 'requested' | 'pending' | 'proof_submitted' | 'partially_paid' | 'paid' | 'failed' | 'refunded';
+export type PaymentState = 'not_requested' | 'requested' | 'pending' | 'proof_submitted' | 'partially_paid' | 'paid' | 'failed' | 'refunded' | 'rejected' | 'waived';
 export type InvoiceStatus = 'not_requested' | 'requested' | 'in_progress' | 'issued' | 'sent' | 'cancelled';
 
 const ORDER_SELECT = `
@@ -227,6 +238,7 @@ export function mapItem(r: any): OrderItem {
     piece_noun: r.piece_noun,
     qty,
     qty_label: r.sale_option && r.sale_option_kind === 'piece' ? `${r.count} × ${r.sale_option}` : formatQty(qty, r.piece_noun),
+    weight_pref: json<WeightPref | null>(r.weight_pref, null),
     preparation: json(r.preparation, {}),
     preparation_label: r.preparation_label,
     special_instructions: r.special_instructions,
@@ -263,6 +275,7 @@ export function getItem(itemId: string): OrderItem {
 export interface ValidatedItem {
   product: Product;
   sale_option: SaleOption | null;
+  weight_pref: WeightPref | null;
   qty: Qty;
   preparation: Record<string, string>;
   preparation_label: string;
@@ -303,9 +316,39 @@ export function validateItem(input: ItemInput, opts: { allowInactive?: boolean; 
   if (opts.customer && qty.kind !== 'weight' && (qty.count ?? 0) > 500) throw badRequest(`${product.customer_name}: that’s more than we can take online. Please contact us.`);
   if (opts.customer && product.pack_size && (qty.kind !== 'count' || (qty.count ?? 0) % product.pack_size !== 0))
     throw badRequest(`${product.customer_name} are sold in lots of ${product.pack_size}. Please choose ${product.pack_size}, ${product.pack_size * 2}, ${product.pack_size * 3}…`);
-  const { preparation, label } = resolvePreparation(product, input.preparation);
+  // The way this product is ordered decides which quantity makes sense (customers only see those fields)
+  if (opts.customer) {
+    const m = product.order_method;
+    if (m === 'custom') throw badRequest(`${product.customer_name} is made to order: describe what you’d like under Special requests.`);
+    if (product.group_only) throw badRequest(`Choose one of the ${product.customer_name} options.`);
+    if (m === 'by_weight' && qty.kind !== 'weight' && !saleOption) throw badRequest(`${product.customer_name} is sold by weight. Choose how many kilograms.`);
+    if ((m === 'items' || m === 'items_weighed') && !saleOption && qty.kind !== 'count') throw badRequest(`Choose how many ${product.piece_noun}s of ${product.customer_name}.`);
+  }
   const instr = input.special_instructions?.toString().trim().slice(0, 500) || null;
-  return { product, sale_option: saleOption, qty, preparation, preparation_label: label, special_instructions: instr, source_text: input.source_text?.slice(0, 500) ?? null };
+  let weightPref: WeightPref | null = null;
+  if (input.weight_pref) {
+    if (input.weight_pref === 'other') {
+      if (opts.customer && !instr) throw badRequest(`${product.customer_name}: tell us the size you’d like in the notes for this item.`);
+      weightPref = { id: 'other', label: 'Other size (see notes)', min_g: null, max_g: null };
+    } else {
+      const r = product.weight_ranges.find((x) => x.id === input.weight_pref);
+      if (!r) throw badRequest(`That weight option isn’t available for ${product.customer_name}.`);
+      if (qty.kind !== 'count') throw badRequest(`A preferred weight is chosen per ${product.piece_noun}.`);
+      weightPref = { id: r.id, label: r.label, min_g: r.min_g, max_g: r.max_g };
+    }
+  }
+  const { preparation, label } = resolvePreparation(product, input.preparation);
+  return { product, sale_option: saleOption, weight_pref: weightPref, qty, preparation, preparation_label: label, special_instructions: instr, source_text: input.source_text?.slice(0, 500) ?? null };
+}
+
+/** A customer's preferred weight per item, kept on the line. min/max are null for "other". */
+export interface WeightPref { id: string; label: string; min_g: number | null; max_g: number | null }
+
+/** Grams per piece used for the estimate: the size chosen, the middle of the preferred range, or the typical piece. */
+export function pieceGramsFor(v: { sale_option: SaleOption | null; weight_pref: WeightPref | null; product: Product }): number | null {
+  if (v.sale_option) return v.sale_option.grams;
+  if (v.weight_pref?.min_g && v.weight_pref.max_g) return Math.round((v.weight_pref.min_g + v.weight_pref.max_g) / 2);
+  return v.product.typical_piece_g;
 }
 
 /** The price snapshot for a validated line, from the catalogue as it is right now. */
@@ -314,8 +357,7 @@ export function quoteItem(v: ValidatedItem): { unit_price_cents: number | null; 
     .filter((o) => v.preparation[o.group_name] === o.name)
     .reduce((t, o) => t + (o.surcharge_pct || 0), 0);
   const unit = v.product.price_cents == null ? null : withSurcharge(v.product.price_cents, surcharge);
-  const piece = v.sale_option ? v.sale_option.grams : v.product.typical_piece_g;
-  const q = priceLine({ qty: v.qty, unitPriceCents: unit, priceUnit: v.product.price_unit, saleKind: v.sale_option?.kind ?? null, pieceGrams: piece });
+  const q = priceLine({ qty: v.qty, unitPriceCents: unit, priceUnit: v.product.price_unit, saleKind: v.sale_option?.kind ?? null, pieceGrams: pieceGramsFor(v) });
   return { unit_price_cents: unit, price_unit: v.product.price_unit, surcharge_pct: surcharge, pricing: q.pricing, est_cents: q.cents };
 }
 
@@ -326,12 +368,13 @@ function insertItem(orderId: string, v: ValidatedItem, sort: number): string {
   db()
     .prepare(
       `INSERT INTO order_items (id, order_id, product_id, qty_kind, count, weight_g, preparation, preparation_label, special_instructions, source_text, sort_order, created_at, updated_at,
-         sale_option, sale_option_kind, product_name_snap, unit_price_cents, price_unit_snap, surcharge_pct, pricing, est_cents)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         sale_option, sale_option_kind, product_name_snap, unit_price_cents, price_unit_snap, surcharge_pct, pricing, est_cents, weight_pref)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     .run(
       itemId, orderId, v.product.id, v.qty.kind, v.qty.count, v.qty.weight_g, JSON.stringify(v.preparation), v.preparation_label, v.special_instructions, v.source_text, sort, ts, ts,
       v.sale_option?.label ?? null, v.sale_option?.kind ?? null, v.product.customer_name, qt.unit_price_cents, qt.price_unit, qt.surcharge_pct, qt.pricing, qt.est_cents,
+      v.weight_pref ? JSON.stringify(v.weight_pref) : null,
     );
   return itemId;
 }
@@ -392,7 +435,7 @@ export function backfillItemSnapshots() {
     for (const r of rows) {
       const it = db().prepare('SELECT * FROM order_items WHERE id = ?').get(r.id) as any;
       const product = requireProduct(it.product_id);
-      const v: ValidatedItem = { product, sale_option: null, qty: { kind: it.qty_kind, count: it.count, weight_g: it.weight_g }, preparation: json(it.preparation, {}), preparation_label: it.preparation_label, special_instructions: it.special_instructions, source_text: it.source_text };
+      const v: ValidatedItem = { product, sale_option: null, weight_pref: null, qty: { kind: it.qty_kind, count: it.count, weight_g: it.weight_g }, preparation: json(it.preparation, {}), preparation_label: it.preparation_label, special_instructions: it.special_instructions, source_text: it.source_text };
       const qt = quoteItem(v);
       db()
         .prepare('UPDATE order_items SET product_name_snap = COALESCE(product_name_snap, ?), unit_price_cents = ?, price_unit_snap = ?, surcharge_pct = ?, pricing = ?, est_cents = ? WHERE id = ?')
@@ -510,18 +553,20 @@ export function transition(orderId: string, to: OrderStatus, actor: Actor, role:
     const blocking = db().prepare("SELECT COUNT(*) c FROM exceptions WHERE order_id = ? AND status = 'open' AND severity = 'blocking'").get(orderId) as any;
     if (blocking.c > 0) throw conflict('Resolve the open questions on this order first.');
   }
-  if (to === 'out_for_delivery' && order.fulfilment_type !== 'delivery') throw conflict('This order is for collection, not delivery.');
+  if (to === 'out_for_delivery' && order.fulfilment_type === 'collection') throw conflict('This order is for collection, not delivery.');
   if (order.finalized_at && ['packing', 'cut', 'cutting', 'confirmed'].includes(to)) throw conflict('This order has been finalized. Use “Reopen for changes” (with a reason) first.');
-  // Release for collection/delivery only once the finalized amount has been paid (or an allowed manager override)
-  if (to === 'ready' && ['cut', 'packing', 'packed'].includes(from)) {
+  // Leaving the packing area needs the final amount. Unpaid orders can still go out, but only as a
+  // deliberate manager decision with a reason; the payment status itself never changes here.
+  let unpaidRelease: string | null = null;
+  if (['ready', 'out_for_delivery'].includes(to) && ['cut', 'packing', 'packed'].includes(from) && !order.finalized_at) throw conflict('Do the final weighing and finalize the order first.');
+  if ((to === 'ready' && ['cut', 'packing', 'packed'].includes(from)) || (to === 'out_for_delivery' && !order.released_unpaid_at)) {
     const pay = getSettings().payments;
-    if (!order.finalized_at) throw conflict('Do the final weighing and finalize the order first.');
-    if (pay.requirePaymentBeforeRelease && order.payment_state !== 'paid') {
+    if (pay.requirePaymentBeforeRelease && !['paid', 'waived'].includes(order.payment_state) && !opts.system) {
       const reason = opts.unpaidReason?.trim();
-      if (!reason) throw conflict('Payment hasn’t been confirmed yet. The order is released once the payment has reflected and been verified.');
-      if (!pay.allowUnpaidRelease) throw conflict('Releasing unpaid orders is switched off (Settings → Payments).');
+      if (!reason) throw new AppError(409, 'Payment hasn’t been confirmed yet. To release this order anyway, confirm it’s going out unpaid and give a reason.', 'unpaid');
       if (!can(role, 'payments.write')) throw forbidden('Only a manager can release an unpaid order.');
-      opts = { ...opts, note: `released before payment: ${reason}` };
+      unpaidRelease = reason.slice(0, 300);
+      opts = { ...opts, note: `released before payment: ${unpaidRelease}` };
     }
   }
   // A first confirmation is a decision: the customer is told, so it needs the expected timeframe
@@ -554,6 +599,11 @@ export function transition(orderId: string, to: OrderStatus, actor: Actor, role:
       vals.push(from === 'needs_clarification' || from === 'on_hold' ? order.resume_status : EDITABLE_STATUSES.includes(from) ? from : 'confirmed');
     }
     if (from === 'needs_clarification' || from === 'on_hold') sets.push('resume_status = NULL');
+    if (unpaidRelease) {
+      sets.push('released_unpaid_at = ?', 'released_unpaid_by = ?', 'released_unpaid_reason = ?');
+      vals.push(ts, actor.userId, unpaidRelease);
+    }
+    if (to === 'out_for_delivery' && !order.fulfilment_type) sets.push("fulfilment_type = 'delivery'");
     db().prepare(`UPDATE orders SET ${sets.join(', ')} WHERE id = ?`).run(...vals, orderId);
     // Physical state follows workflow state
     if (to === 'cut') db().prepare("UPDATE order_items SET cut_at = COALESCE(cut_at, ?), cut_by = COALESCE(cut_by, ?) WHERE order_id = ? AND status = 'active'").run(ts, actor.userId, orderId);
@@ -705,6 +755,7 @@ export interface ItemPatch {
   preparation?: Record<string, string>;
   special_instructions?: string | null;
   product_id?: string;
+  weight_pref?: string | null;
 }
 
 export function updateItem(itemId: string, patch: ItemPatch, actor: Actor, ctx: AmendContext = {}): OrderItem {
@@ -720,6 +771,7 @@ export function updateItem(itemId: string, patch: ItemPatch, actor: Actor, ctx: 
     qty: patch.qty ?? before.qty,
     preparation: patch.preparation ?? (patch.product_id && patch.product_id !== before.product_id ? {} : before.preparation),
     special_instructions: patch.special_instructions !== undefined ? patch.special_instructions : before.special_instructions,
+    weight_pref: patch.weight_pref !== undefined ? patch.weight_pref : productChanged ? null : before.weight_pref?.id ?? null,
   });
   const changes: string[] = [];
   if (v.product.id !== before.product_id) changes.push(`${before.product_name} → ${v.product.canonical_name}`);
@@ -739,10 +791,10 @@ export function updateItem(itemId: string, patch: ItemPatch, actor: Actor, ctx: 
     const qt = quoteItem(v);
     const keepUnit = !productChanged && v.preparation_label === before.preparation_label && before.price_cents != null;
     const unit = keepUnit ? before.price_cents : qt.unit_price_cents;
-    const q = priceLine({ qty: v.qty, unitPriceCents: unit, priceUnit: keepUnit ? before.price_unit : qt.price_unit, saleKind: v.sale_option?.kind ?? null, pieceGrams: v.sale_option ? v.sale_option.grams : v.product.typical_piece_g });
+    const q = priceLine({ qty: v.qty, unitPriceCents: unit, priceUnit: keepUnit ? before.price_unit : qt.price_unit, saleKind: v.sale_option?.kind ?? null, pieceGrams: pieceGramsFor(v) });
     db()
-      .prepare('UPDATE order_items SET sale_option = ?, sale_option_kind = ?, product_name_snap = ?, unit_price_cents = ?, price_unit_snap = ?, surcharge_pct = ?, pricing = ?, est_cents = ? WHERE id = ?')
-      .run(v.sale_option?.label ?? null, v.sale_option?.kind ?? null, v.product.customer_name, unit, keepUnit ? before.price_unit : qt.price_unit, keepUnit ? before.surcharge_pct : qt.surcharge_pct, q.pricing, q.cents, itemId);
+      .prepare('UPDATE order_items SET sale_option = ?, sale_option_kind = ?, product_name_snap = ?, unit_price_cents = ?, price_unit_snap = ?, surcharge_pct = ?, pricing = ?, est_cents = ?, weight_pref = ? WHERE id = ?')
+      .run(v.sale_option?.label ?? null, v.sale_option?.kind ?? null, v.product.customer_name, unit, keepUnit ? before.price_unit : qt.price_unit, keepUnit ? before.surcharge_pct : qt.surcharge_pct, q.pricing, q.cents, v.weight_pref ? JSON.stringify(v.weight_pref) : null, itemId);
     recomputeTotals(order.id);
     const warn = physicalChange ? productionWarning(order) : null;
     addEvent(
@@ -833,6 +885,19 @@ export function updateOrder(orderId: string, patch: OrderPatch, actor: Actor, ro
     if ((order as any)[k] === v) continue;
     fields[k] = v;
     changes.push(`${PATCH_LABEL[k]}: ${fmt((order as any)[k])} → ${fmt(v)}`);
+    // Switching between collection and delivery keeps the delivery fee honest
+    if (k === 'fulfilment_type' && v === 'collection' && (order.delivery_fee_cents ?? 0) !== 0) {
+      fields.delivery_fee_cents = 0;
+      fields.delivery_arrangement = 'collection';
+      changes.push('Delivery fee: removed (collection)');
+    } else if (k === 'fulfilment_type' && v === 'delivery' && (!order.delivery_arrangement || order.delivery_arrangement === 'collection')) {
+      const std = standardDeliveryFeeCents();
+      if (std != null) {
+        fields.delivery_fee_cents = std;
+        fields.delivery_arrangement = 'standard';
+        changes.push(`Delivery fee: R${(std / 100).toFixed(2)}`);
+      }
+    }
     if (k === 'delivery_km') {
       const f = getSettings().fulfilment;
       fields.delivery_fee_cents = deliveryFeeCents(v, f.freeDeliveryKm, f.deliveryRatePerKmCents);
@@ -928,13 +993,10 @@ export function setItemPacked(itemId: string, packed: boolean, actor: Actor, pac
   const it = getItem(itemId);
   const o = requireOrder(it.order_id);
   if (!['cut', 'packing', 'cutting'].includes(o.status)) throw conflict('This order is not waiting to be packed.');
-  if (packedWeightG != null) throw badRequest('Weights are entered at final weighing, once the order is packed.');
+  if (packedWeightG != null && (!Number.isFinite(packedWeightG) || packedWeightG <= 0 || packedWeightG > 500000)) throw badRequest('That weight is not valid.');
   tx(() => {
-    db().prepare('UPDATE order_items SET packed_at = ?, packed_by = ?, packed_weight_g = COALESCE(?, packed_weight_g) WHERE id = ?').run(packed ? now() : null, packed ? actor.userId : null, packedWeightG ?? null, itemId);
-    if (packedWeightG != null) {
-      recomputeTotals(o.id);
-      addEvent(o.id, 'item_weighed', `${it.product_name} weighed at ${(packedWeightG / 1000).toLocaleString('en-ZA', { maximumFractionDigits: 3 })} kg`, actor, { item_id: itemId, weight_g: packedWeightG });
-    }
+    db().prepare('UPDATE order_items SET packed_at = ?, packed_by = ? WHERE id = ?').run(packed ? now() : null, packed ? actor.userId : null, itemId);
+    if (packedWeightG != null) setItemWeight(itemId, Math.round(packedWeightG), actor);
     if (packed && !it.cut_at) db().prepare('UPDATE order_items SET cut_at = ?, cut_by = ? WHERE id = ?').run(now(), actor.userId, itemId);
     const cur = requireOrder(o.id);
     if (cur.status === 'cutting' && cur.items_cut === cur.item_count) transition(o.id, 'cut', actor, null, { system: true, note: 'all items cut' });
@@ -953,12 +1015,22 @@ export function completePacking(orderId: string, actor: Actor): OrderSummary {
   return requireOrder(orderId);
 }
 
+const WEIGHABLE: OrderStatus[] = ['cutting', 'cut', 'packing', 'packed', 'ready'];
+
+/** About how much this line should weigh, from what the customer asked for. */
+export function expectedGrams(it: OrderItem): number | null {
+  if (it.qty.kind === 'weight') return it.qty.weight_g;
+  if (it.qty.kind === 'portions') return (it.qty.count ?? 0) * (it.qty.weight_g ?? 0) || null;
+  const per = it.weight_pref?.min_g && it.weight_pref.max_g ? (it.weight_pref.min_g + it.weight_pref.max_g) / 2 : null;
+  return per && it.qty.count ? Math.round(per * it.qty.count) : null;
+}
+
 /** Records (or corrects) the actual weight of a weighed item, which sets its final price. */
 export function setItemWeight(itemId: string, weightG: number | null, actor: Actor) {
   const it = getItem(itemId);
   const o = requireOrder(it.order_id);
-  if (o.status !== 'packed') throw conflict('Weights are entered at final weighing, once the order is packed.');
-  if (o.finalized_at) throw conflict('This order has been finalized. Use “Reopen for changes” (with a reason) to correct a weight.');
+  // Weights can be entered or corrected at any point from cutting until the order goes out
+  if (!WEIGHABLE.includes(o.status)) throw conflict('Weights can be entered once cutting has started, until the order goes out.');
   if (it.status !== 'active') throw conflict('That item has been removed.');
   if (weightG != null && (!Number.isFinite(weightG) || weightG <= 0 || weightG > 500000)) throw badRequest('That weight is not valid.');
   if ((it.packed_weight_g ?? null) === weightG) return it;
@@ -967,6 +1039,15 @@ export function setItemWeight(itemId: string, weightG: number | null, actor: Act
     recomputeTotals(o.id);
     addEvent(o.id, 'item_weighed', weightG ? `${it.product_name} weighed at ${(weightG / 1000).toLocaleString('en-ZA', { maximumFractionDigits: 3 })} kg${it.packed_weight_g ? ` (was ${(it.packed_weight_g / 1000).toLocaleString('en-ZA', { maximumFractionDigits: 3 })} kg)` : ''}` : `${it.product_name}: weight cleared`, actor, { item_id: itemId, before: it.packed_weight_g, after: weightG });
   });
+  // Already finalized: write a new version so the customer is never left with an out-of-date total
+  if (o.finalized_at) refreshFinalization(o.id, actor, `${it.product_name} weight ${it.packed_weight_g ? `${(it.packed_weight_g / 1000).toFixed(3)} → ` : ''}${weightG ? `${(weightG / 1000).toFixed(3)} kg` : 'cleared'}`);
+  // A weight far from what was ordered is worth a second look (typo on the scale, wrong item)
+  if (weightG) {
+    const expected = expectedGrams(it);
+    if (expected && Math.abs(weightG - expected) / expected > 0.35)
+      raiseException({ type: 'weight_check', severity: 'warning', title: `Check the weight of ${it.product_name} on #${o.order_number}`, detail: `Entered ${(weightG / 1000).toFixed(3)} kg; about ${(expected / 1000).toFixed(2)} kg was expected for ${it.qty_label}${it.weight_pref?.label ? ` (${it.weight_pref.label} each)` : ''}. If it's right, dismiss this.`, order_id: o.id, dedupe_key: `weight:${itemId}` });
+    else db().prepare("UPDATE exceptions SET status = 'resolved', resolution = 'weight ok', resolved_at = ? WHERE dedupe_key = ? AND status = 'open'").run(now(), `weight:${itemId}`);
+  }
   publish(['orders'], { orderId: o.id });
   return getItem(itemId);
 }

@@ -57,8 +57,9 @@ describe('state machine', () => {
     setItemPacked(items[0].id, true, STAFF);
     expect(requireOrder(o.id).status).toBe('packing');
     expect(() => completePacking(o.id, STAFF)).toThrow(/Tick every item/);
-    expect(() => setItemPacked(items[1].id, true, STAFF, 2080)).toThrow(/final weighing/);
-    setItemPacked(items[1].id, true, STAFF);
+    // A weight can be entered at any production stage (here while packing) without moving the order on
+    setItemPacked(items[1].id, true, STAFF, 2080);
+    expect(getItems(o.id).find((i) => i.id === items[1].id)!.packed_weight_g).toBe(2080);
     // Packed is the final-weighing stage: not released until weighed, finalized and paid
     expect(completePacking(o.id, STAFF).status).toBe('packed');
     expect(() => transition(o.id, 'ready', STAFF, 'staff')).toThrow(/final weighing/);
