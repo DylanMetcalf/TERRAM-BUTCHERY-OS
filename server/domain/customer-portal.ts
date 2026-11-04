@@ -25,11 +25,11 @@ export type Stage = 'received' | 'confirmed' | 'preparing' | 'weighing' | 'payme
 const STAGES: { key: Stage; label: string }[] = [
   { key: 'received', label: 'Received' },
   { key: 'confirmed', label: 'Confirmed' },
-  { key: 'preparing', label: 'Being prepared' },
+  { key: 'preparing', label: 'Processing' },
   { key: 'weighing', label: 'Final weighing' },
   { key: 'payment', label: 'Payment' },
   { key: 'ready', label: 'Ready' },
-  { key: 'completed', label: 'Completed' },
+  { key: 'completed', label: 'Delivered' },
 ];
 
 export function stageOf(status: OrderStatus, o?: { finalized_at?: string | null; payment_state?: string | null }): Stage {
@@ -130,7 +130,7 @@ export function customerOrderView(orderId: string) {
   const pay = paymentSummary(orderId, { forCustomer: true });
   const pending = amendments.filter((a) => a.status === 'proposed' && a.requires_approval).length;
   const stage = stageOf(o.status, o);
-  const steps = (o.fulfilment_type === 'delivery' ? [...STAGES.slice(0, 6), { key: 'on_the_way' as Stage, label: 'On the way' }, STAGES[6]] : STAGES).map((x) => x);
+  const steps = (o.fulfilment_type === 'delivery' ? [...STAGES.slice(0, 6), { key: 'on_the_way' as Stage, label: 'Out for delivery' }, STAGES[6]] : o.fulfilment_type === 'collection' ? [...STAGES.slice(0, 6), { key: 'completed' as Stage, label: 'Collected' }] : STAGES).map((x) => x);
   const idx = steps.findIndex((x) => x.key === stage);
   const methods = paymentMethods();
   const showPay = !!pay.request && o.payment_state !== 'paid';

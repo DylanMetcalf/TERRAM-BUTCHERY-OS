@@ -42,7 +42,7 @@ interface NavItem {
 const PRIMARY: NavItem[] = [
   { to: '/', label: 'Today', icon: Home },
   { to: '/orders', label: 'Orders', icon: ClipboardList, badge: 'review' },
-  { to: '/cutting', label: 'Cutting', icon: Scissors },
+  { to: '/cutting', label: 'Processing', icon: Scissors },
   { to: '/packing', label: 'Packing', icon: Package },
   { to: '/fulfilment', label: 'Fulfilment', icon: Truck },
 ];
@@ -220,7 +220,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 <Plus className="size-7" strokeWidth={2.4} />
               </button>
             ) : (
-              <BottomLink to="/cutting" icon={Scissors} label="Cutting" />
+              <BottomLink to="/cutting" icon={Scissors} label="Processing" />
             )}
           </div>
           <BottomLink to="/exceptions" icon={AlertCircle} label="Attention" count={counts?.attention} />

@@ -28,7 +28,7 @@ export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {
   requested: 'Payment requested',
   pending: 'Online payment in progress',
   proof_submitted: 'Awaiting verification',
-  rejected: 'Payment not confirmed',
+  rejected: 'Payment not received',
   waived: 'Payment waived',
   partially_paid: 'Partly paid',
   paid: 'Paid',
@@ -400,4 +400,68 @@ export function sendPaymentReviewEmail(orderId: string, x: { key: string; amount
     links: x.proofFileId ? [{ label: 'Open the proof of payment (sign in required)', url: `${siteUrl()}/api/files/${x.proofFileId}?inline=1` }] : [],
   });
   notify({ key: x.key, kind: 'staff_payment_review', audience: 'staff', to, ...e, orderId });
+}
+
+// ── One payment check for everything the customer has sent ────
+
+/** What the customer has told us and is waiting on our bank check (declarations and proofs). */
+export function pendingPaymentClaims(orderId: string) {
+  const declarations = db().prepare("SELECT id, amount_cents, paid_on, payer_reference, note, created_at FROM payment_declarations WHERE order_id = ? AND status = 'submitted' ORDER BY created_at").all(orderId) as any[];
+  const proofs = db().prepare("SELECT p.id, p.file_id, p.amount_claimed_cents, p.note, p.created_at, f.filename FROM payment_proofs p JOIN files f ON f.id = p.file_id WHERE p.order_id = ? AND p.status = 'submitted' ORDER BY p.created_at").all(orderId) as any[];
+  return { declarations, proofs };
+}
+
+/**
+ * The admin has checked the bank for an order whose customer says they've paid.
+ * - confirmed: one verified payment of the amount that arrived; every pending claim is closed.
+ * - not_received: claims are kept as "not verified" with an internal note; the balance stays owed.
+ *   The customer is only emailed if the admin chooses to; a new payment request is a separate, deliberate action.
+ * Never sends a payment request.
+ */
+export function settlePaymentCheck(
+  orderId: string,
+  input: { result: 'confirmed'; amount_cents: number; paid_on?: string | null; reference?: string | null; note?: string | null } | { result: 'not_received'; note?: string | null; notify_customer?: boolean; message?: string | null },
+  actor: Actor,
+) {
+  const o = requireOrder(orderId);
+  const { declarations, proofs } = pendingPaymentClaims(orderId);
+  if (!declarations.length && !proofs.length) throw conflict('There is nothing waiting to be checked on this order.');
+  const keys = [...declarations.map((d) => `declared:${d.id}`), ...proofs.map((p) => `proof:${p.id}`)];
+  const closeExceptions = (resolution: string) => {
+    for (const k of keys) db().prepare("UPDATE exceptions SET status = 'resolved', resolution = ?, resolved_by = ?, resolved_at = ? WHERE dedupe_key = ? AND status = 'open'").run(resolution, actor.userId, now(), k);
+  };
+  if (input.result === 'confirmed') {
+    if (!Number.isInteger(input.amount_cents) || input.amount_cents <= 0 || input.amount_cents > 100_000_000) throw badRequest('Enter the amount that arrived in the bank.');
+    if (input.paid_on && !/^\d{4}-\d{2}-\d{2}$/.test(input.paid_on)) throw badRequest('Check the date.');
+    const note = input.note?.trim().slice(0, 500) || 'Checked in the bank';
+    const res = tx(() => {
+      const r = recordVerifiedPayment(orderId, { method: 'eft', amount_cents: input.amount_cents, request_id: openRequest(orderId)?.id ?? null, proof_id: proofs[0]?.id ?? null, note, paid_on: input.paid_on ?? null, reference: input.reference?.trim() || null }, actor, 'staff');
+      db().prepare(`UPDATE payment_declarations SET status = 'accepted', reviewed_by = ?, reviewed_at = ? WHERE order_id = ? AND status = 'submitted'`).run(actor.userId, now(), orderId);
+      db().prepare(`UPDATE payment_proofs SET status = 'accepted', reviewed_by = ?, reviewed_at = ? WHERE order_id = ? AND status = 'submitted'`).run(actor.userId, now(), orderId);
+      closeExceptions('verified');
+      recomputePayment(orderId);
+      return r;
+    });
+    publish(['orders', 'exceptions'], { orderId });
+    return res.payment;
+  }
+  const note = input.note?.trim().slice(0, 500) || 'Not found in the bank yet';
+  if (input.notify_customer && !(input.message ?? '').trim()) throw badRequest('Write the message the customer will see.');
+  tx(() => {
+    db().prepare(`UPDATE payment_declarations SET status = 'rejected', reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE order_id = ? AND status = 'submitted'`).run(actor.userId, now(), input.notify_customer ? input.message!.trim().slice(0, 500) : null, orderId); // internal notes stay in the history, never on the customer's page
+    db().prepare(`UPDATE payment_proofs SET status = 'rejected', reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE order_id = ? AND status = 'submitted'`).run(actor.userId, now(), input.notify_customer ? input.message!.trim().slice(0, 500) : null, orderId); // internal notes stay in the history, never on the customer's page
+    addEvent(orderId, 'payment_not_received', `Payment not received yet (checked the bank): ${note}`, actor, { note, declarations: declarations.length, proofs: proofs.length, customer_told: !!input.notify_customer });
+    audit(actor, 'payment.not_received', 'order', orderId, `#${o.order_number}: payment not found in the bank (${note})`);
+    closeExceptions('not_received');
+    recomputePayment(orderId);
+  });
+  const c = customerContact(orderId);
+  if (input.notify_customer && c.email) {
+    const req = openRequest(orderId);
+    const n = (db().prepare("SELECT COUNT(*) n FROM order_events WHERE order_id = ? AND type = 'payment_not_received'").get(orderId) as { n: number }).n;
+    const e = layout({ subject: `About your payment for order #${o.order_number}`, preheader: 'We couldn’t find the payment yet.', greeting: `Hi ${c.firstName},`, intro: [`We haven’t been able to find your payment for order #${o.order_number} in our bank account yet.`], blocks: [{ facts: [['From us', input.message!.trim().slice(0, 500)]] }], cta: req ? { label: 'Open my payment page', url: orderUrl(orderId, '#pay') } : undefined, closing: ['If you think this is a mistake, please reply to this email or call us.', ...signOff()] });
+    notify({ key: `payment_not_received:${orderId}:${n}`, kind: 'declaration_rejected', audience: 'customer', to: [c.email], ...e, orderId, customerId: c.customerId });
+  }
+  publish(['orders', 'exceptions'], { orderId });
+  return null;
 }

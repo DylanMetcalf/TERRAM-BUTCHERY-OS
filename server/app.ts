@@ -143,7 +143,7 @@ export function buildApp(opts: { staticDir?: string | null } = {}) {
             ],
         shortcuts: [
           { name: 'Paste orders', url: '/import' },
-          { name: 'Cutting', url: '/cutting' },
+          { name: 'Processing', url: '/cutting' },
           { name: 'Packing', url: '/packing' },
         ],
       },

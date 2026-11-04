@@ -1,31 +1,37 @@
 import { StorageBadge } from '../components/FinalWeighing';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, CheckCircle2, MapPin, MessageCircle, Phone, Printer, Store, Truck } from 'lucide-react';
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Check, CheckCircle2, History, MapPin, MessageCircle, Phone, Printer, Search, Store, Truck } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { StatusPill } from '../components/order-bits';
-import { Badge, Button, Card, cx, EmptyState, ErrorState, LoadingBlock, PageHeader, SectionTitle, Segmented, useToast } from '../components/ui';
+import { Badge, Button, Card, cx, EmptyState, ErrorState, Input, LoadingBlock, PageHeader, SectionTitle, Segmented, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
-import { friendlyDate, readyMessage, timeAgo, todayYmd, waLink } from '../lib/format';
+import { dateTime, formatMoney, friendlyDate, readyMessage, timeAgo, todayYmd, waLink } from '../lib/format';
 import type { OrderItem, OrderSummary } from '../lib/types';
 
 type FOrder = OrderSummary & { items: OrderItem[] };
 
 export default function Fulfilment() {
-  const [tab, setTab] = useState<'collection' | 'delivery'>('collection');
+  const [params, setParams] = useSearchParams();
+  const tab = (['collection', 'delivery', 'history'].includes(params.get('tab') ?? '') ? params.get('tab') : 'delivery') as 'collection' | 'delivery' | 'history';
+  const setTab = (t: string) => setParams({ tab: t }, { replace: true });
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['fulfilment'], queryFn: () => api.get<{ date: string; ready: FOrder[]; not_ready_today: FOrder[]; completed_today: FOrder[] }>('/api/production/fulfilment') });
   const today = todayYmd();
   const of = (list: FOrder[] = []) => list.filter((o) => (tab === 'delivery' ? o.fulfilment_type === 'delivery' : o.fulfilment_type !== 'delivery'));
   const ready = of(data?.ready);
   const pending = of(data?.not_ready_today);
   const done = of(data?.completed_today);
-  const count = (t: 'collection' | 'delivery') => (data?.ready ?? []).filter((o) => (t === 'delivery' ? o.fulfilment_type === 'delivery' : o.fulfilment_type !== 'delivery')).length;
+  const count = (t: 'collection' | 'delivery' | 'history') => (data?.ready ?? []).filter((o) => (t === 'delivery' ? o.fulfilment_type === 'delivery' : o.fulfilment_type !== 'delivery')).length;
   return (
     <div className="animate-rise">
-      <PageHeader title="Fulfilment" subtitle="Ready orders, collections and deliveries." actions={<Link to="/print/ready" target="_blank"><Button icon={<Printer className="size-4" />}>Print ready list</Button></Link>} />
-      <Segmented size="lg" value={tab} onChange={setTab} className="mb-5" options={[{ value: 'collection', label: <><Store className="size-4" />Collections</>, count: count('collection') }, { value: 'delivery', label: <><Truck className="size-4" />Deliveries</>, count: count('delivery') }]} />
-      {error ? (
+      <PageHeader title="Fulfilment" subtitle="Ready orders, deliveries, collections and the history of delivered orders." actions={<Link to="/print/ready" target="_blank"><Button icon={<Printer className="size-4" />}>Print ready list</Button></Link>} />
+      <div className="-mx-4 mb-5 overflow-x-auto px-4 scrollbar-none sm:mx-0 sm:px-0">
+        <Segmented size="lg" value={tab} onChange={setTab} options={[{ value: 'delivery', label: <><Truck className="size-4" />Deliveries</>, count: count('delivery') }, { value: 'collection', label: <><Store className="size-4" />Collections</>, count: count('collection') }, { value: 'history', label: <><History className="size-4" />History</> }]} />
+      </div>
+      {tab === 'history' ? (
+        <OrderHistory />
+      ) : error ? (
         <ErrorState error={error} retry={refetch} />
       ) : isLoading ? (
         <LoadingBlock rows={4} />
@@ -149,5 +155,73 @@ function ReadyCard({ o, today }: { o: FOrder; today: string }) {
         </div>
       )}
     </Card>
+  );
+}
+
+/** Delivered (and collected) orders: searchable by name, number, phone, email or product. Money owed stays visible. */
+function OrderHistory() {
+  const [q, setQ] = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [unpaidOnly, setUnpaidOnly] = useState(false);
+  const [page, setPage] = useState(0);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  useEffect(() => setPage(0), [debounced, unpaidOnly]);
+  const limit = 50;
+  const view = unpaidOnly ? 'delivered_unpaid' : 'history';
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['orders', view, debounced, page],
+    queryFn: () => api.get<{ orders: OrderSummary[]; total: number }>(`/api/orders?view=${view}&limit=${limit}&offset=${page * limit}${debounced ? `&q=${encodeURIComponent(debounced)}` : ''}`),
+  });
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative sm:w-96">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, order number, phone, email or product" className="pl-9" aria-label="Search delivered orders" />
+        </div>
+        <Segmented size="sm" value={unpaidOnly ? 'unpaid' : 'all'} onChange={(v) => setUnpaidOnly(v === 'unpaid')} options={[{ value: 'all', label: 'All delivered' }, { value: 'unpaid', label: 'Not paid' }]} />
+      </div>
+      {error ? (
+        <ErrorState error={error} retry={refetch} />
+      ) : isLoading || !data ? (
+        <LoadingBlock rows={4} />
+      ) : !data.orders.length ? (
+        <EmptyState icon={<History className="size-6" />} title={debounced ? `No delivered orders match “${debounced}”` : unpaidOnly ? 'No unpaid delivered orders' : 'No delivered orders yet'}>Delivered and collected orders appear here.</EmptyState>
+      ) : (
+        <>
+          <Card className="divide-y divide-line">
+            {data.orders.map((o) => {
+              const total = o.final_total_cents ?? o.confirmed_total_cents ?? o.estimated_total_cents ?? null;
+              const owed = total != null && !['paid', 'waived'].includes(o.payment_state ?? '') ? Math.max(0, total - (o.amount_paid_cents ?? 0)) : 0;
+              return (
+                <Link key={o.id} to={`/orders/${o.id}`} className="flex items-start gap-3 px-4 py-3 hover:bg-surface-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline gap-x-2"><span className="font-semibold">{o.customer_name}</span><span className="text-[13px] text-ink-3">#{o.order_number}</span></div>
+                    <div className="truncate text-[13px] text-ink-2">{o.items_preview}</div>
+                    <div className="text-[12.5px] text-ink-3">{o.fulfilment_type === 'collection' ? 'Collected' : 'Delivered'} {o.completed_at ? dateTime(o.completed_at) : ''}{o.contact_phone ? ` · ${o.contact_phone}` : ''}</div>
+                  </div>
+                  <div className="shrink-0 text-right text-[13px]">
+                    {total != null && <div className="font-semibold tabular">{formatMoney(total)}</div>}
+                    {owed > 0 ? <div className="font-semibold text-ochre">Owes {formatMoney(owed)}</div> : o.payment_state === 'waived' ? <div className="text-ink-3">Waived</div> : total != null ? <div className="text-field">Paid</div> : null}
+                  </div>
+                </Link>
+              );
+            })}
+          </Card>
+          {data.total > limit && (
+            <div className="flex items-center justify-between text-[14px] text-ink-2">
+              <span>{page * limit + 1}–{Math.min((page + 1) * limit, data.total)} of {data.total}</span>
+              <div className="flex gap-2">
+                <Button size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+                <Button size="sm" disabled={(page + 1) * limit >= data.total} onClick={() => setPage((p) => p + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }

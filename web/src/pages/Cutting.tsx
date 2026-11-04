@@ -93,7 +93,7 @@ export default function Cutting() {
   return (
     <div className="animate-rise">
       <PageHeader
-        title="Cutting"
+        title="Processing"
         subtitle={data ? `${data.order_count} order${data.order_count === 1 ? '' : 's'} · ${doneLines} of ${lines.length} lines done` : ' '}
         actions={<Link to={`/print/cutting${qs({ range })}`} target="_blank"><Button icon={<Printer className="size-4" />}>Print sheet</Button></Link>}
       />

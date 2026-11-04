@@ -1,31 +1,58 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, ArrowRight, CalendarDays, CheckCircle2, ClipboardCheck, Package, Scissors, Store, Truck, Inbox, Sparkles } from 'lucide-react';
+import { ArrowRight, CheckCircle2, ClipboardCheck, Inbox, Landmark, MapPin, Package, Phone, Scissors, Sparkles, Truck } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { OrderRow } from '../components/OrderRow';
-import { Button, Card, cx, EmptyState, ErrorState, LoadingBlock, SectionTitle } from '../components/ui';
+import { Button, Card, cx, ErrorState, LoadingBlock, SectionTitle } from '../components/ui';
 import { api } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
-import { friendlyDate, greeting, longDate, timeAgo, weekdayShort } from '../lib/format';
-import type { OrderSummary } from '../lib/types';
+import { formatMoney, friendlyDate, greeting, longDate, timeAgo, weekdayShort } from '../lib/format';
 
+/**
+ * The dashboard answers, at a glance: what's just come in, what's confirmed, what's being processed,
+ * what's packed and ready, what's out for delivery, and which payments need checking. Delivered orders
+ * live in Fulfilment → History. Payment never decides where an order shows; it's shown alongside.
+ */
+interface DashOrder {
+  id: string;
+  order_number: number;
+  customer_name: string;
+  status: string;
+  created_at: string;
+  confirmed_at: string | null;
+  requested_date: string | null;
+  fulfilment_type: string | null;
+  delivery_address: string | null;
+  delivery_notes: string | null;
+  contact_phone: string | null;
+  payment_state: string;
+  payment_label: string | null;
+  finalized: boolean;
+  released_unpaid: boolean;
+  total_cents: number | null;
+  total_exact: boolean;
+  balance_cents: number | null;
+  reason: string | null;
+  paid_claim: { at: string; kind: 'proof' | 'declared'; amount_cents: number | null } | null;
+}
+interface Section { key: string; label: string; n: number; orders: DashOrder[] }
 interface Dash {
   today: string;
   counts: Record<string, number>;
-  queues?: Record<string, number>;
-  exceptions: { total: number; blocking: number };
-  due_today: OrderSummary[];
-  overdue: OrderSummary[];
-  to_review: OrderSummary[];
+  sections: Section[];
+  payments: { n: number; orders: DashOrder[] };
   week: { date: string; orders: number; collections: number; deliveries: number }[];
   undated: number;
   activity: any[];
   top_exceptions: any[];
-  stages: { key: string; label: string; n: number; sub: string | null }[];
   waiting: { key: string; label: string; n: number; to: string }[];
   attention: { key: string; label: string; n: number; to: string }[];
 }
 
-const STAGE_ICON: Record<string, any> = { new: ClipboardCheck, cutting: Scissors, packing: Package, packed: CheckCircle2, out: Truck, delivered: Store };
+const SUB: Record<string, string> = {
+  cutting: 'Cutting', cut: 'Cut · to pack', packing: 'Packing',
+  packed: 'Packed · final weighing & payment', ready: 'Ready to go out',
+};
+const money = (o: DashOrder) => (o.total_cents != null ? `${o.total_exact ? '' : '≈ '}${formatMoney(o.total_cents)}` : null);
+const unpaid = (o: DashOrder) => !['paid', 'waived'].includes(o.payment_state) && (o.balance_cents ?? 0) > 0;
 
 export default function Today() {
   const me = useMe();
@@ -39,6 +66,8 @@ export default function Today() {
   const canPay = can('payments.write');
   const attention = (data.attention ?? []).filter((a) => a.key !== 'emails' || can('system.health')).filter((a) => a.key !== 'products' || can('settings.write'));
   const waiting = (data.waiting ?? []).filter((w) => w.key !== 'invoice' || canPay);
+  const sec = (k: string) => data.sections.find((x) => x.key === k)!;
+  const fresh = sec('new');
 
   return (
     <div className="animate-rise space-y-7">
@@ -57,66 +86,93 @@ export default function Today() {
         )}
       </header>
 
-      {/* 1. Where things are: every open order in exactly one stage */}
-      <section aria-labelledby="where">
-        <SectionTitle><span id="where">Where things are</span></SectionTitle>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-          {data.stages.map((st) => {
-            const Icon = STAGE_ICON[st.key] ?? Package;
-            return (
-              <Link key={st.key} to={`/orders?view=stage_${st.key}`} className="group min-w-0">
-                <Card className="h-full p-4 transition group-hover:-translate-y-0.5 group-hover:shadow-float">
-                  <div className="flex items-center justify-between">
-                    <span className={cx('flex size-9 items-center justify-center rounded-xl', st.key === 'delivered' ? 'bg-field-soft text-field' : st.n ? 'bg-brand-soft text-brand' : 'bg-sunken text-ink-3')}>
-                      <Icon className="size-[18px]" />
-                    </span>
-                    <ArrowRight className="size-4 text-ink-3 opacity-0 transition group-hover:opacity-100" />
-                  </div>
-                  <div className="mt-3 font-display text-[36px] font-semibold leading-none tabular">{st.n}</div>
-                  <div className="mt-1.5 text-[14.5px] font-medium leading-snug text-ink">{st.label}</div>
-                  {st.sub && <div className="text-[12.5px] text-ink-3">{st.sub}</div>}
-                </Card>
-              </Link>
-            );
-          })}
-        </div>
-      </section>
+      {/* At a glance: one count per live stage */}
+      <nav aria-label="Where things are" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {data.sections.map((x) => (
+          <a key={x.key} href={`#stage-${x.key}`} className={cx('rounded-2xl border px-3 py-2.5 transition hover:shadow-card', x.key === 'new' && x.n ? 'border-brand bg-brand text-brand-ink' : 'border-line bg-surface')}>
+            <div className="font-display text-[26px] font-semibold leading-none tabular">{x.n}</div>
+            <div className={cx('mt-1 text-[13px] font-medium leading-tight', x.key === 'new' && x.n ? '' : 'text-ink-2')}>{x.label}</div>
+          </a>
+        ))}
+        <a href="#stage-payments" className={cx('rounded-2xl border px-3 py-2.5 transition hover:shadow-card', data.payments.n ? 'border-ochre bg-ochre-soft text-ochre-soft-ink' : 'border-line bg-surface')}>
+          <div className="font-display text-[26px] font-semibold leading-none tabular">{data.payments.n}</div>
+          <div className="mt-1 text-[13px] font-medium leading-tight">Payments to check</div>
+        </a>
+      </nav>
 
       <div className="grid grid-cols-1 gap-7 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <section className="min-w-0">
-          <SectionTitle action={<Link to="/orders?view=today" className="text-[13px] font-medium text-brand hover:underline">All of today</Link>}>
-            Due today · {c.due_today}
-          </SectionTitle>
-          <div className="mb-3 flex flex-wrap gap-2">
-            <Pill icon={<Store className="size-3.5" />} label={`${c.collections_today} collection${c.collections_today === 1 ? '' : 's'}`} />
-            <Pill icon={<Truck className="size-3.5" />} label={`${c.deliveries_today} deliver${c.deliveries_today === 1 ? 'y' : 'ies'}`} />
-            <Pill icon={<CheckCircle2 className="size-3.5" />} label={`${c.completed_today} done`} />
-          </div>
-          {data.due_today.length ? (
-            <Card className="overflow-hidden">
-              {data.due_today.map((o) => (
-                <OrderRow key={o.id} o={o} today={data.today} />
-              ))}
+        <div className="min-w-0 space-y-7">
+          {/* A. New / needs review — the first thing to deal with */}
+          <section id="stage-new" className="scroll-mt-4">
+            <Card className={cx('overflow-hidden', fresh.n ? 'border-2 border-brand' : '')}>
+              <div className={cx('flex items-center justify-between gap-3 px-4 py-3 sm:px-5', fresh.n ? 'bg-brand text-brand-ink' : 'bg-surface-2')}>
+                <h2 className="flex items-center gap-2 font-display text-[20px] font-semibold"><ClipboardCheck className="size-5" />New orders · needs review <span className="tabular">({fresh.n})</span></h2>
+                {fresh.n > fresh.orders.length && <Link to="/orders?view=stage_new" className="text-[13px] font-semibold underline">All</Link>}
+              </div>
+              {fresh.orders.length ? (
+                <ul className="divide-y divide-line">
+                  {fresh.orders.map((o) => (
+                    <li key={o.id}>
+                      <Link to={`/orders/${o.id}`} className="flex items-start gap-3 px-4 py-3 hover:bg-surface-2 sm:px-5">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-baseline gap-x-2"><span className="font-semibold">{o.customer_name}</span><span className="text-[13px] text-ink-3">#{o.order_number} · received {timeAgo(o.created_at)}</span></div>
+                          {o.reason && <div className={cx('mt-0.5 text-[13.5px]', o.status === 'review' && !o.reason.startsWith('Waiting') ? 'font-medium text-brand' : 'text-ink-2')}>{o.reason}</div>}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          {money(o) && <div className="text-[14px] font-semibold tabular">{money(o)}</div>}
+                          <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-brand">Review <ArrowRight className="size-3.5" /></span>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="flex items-center gap-2 px-5 py-4 text-[14.5px] text-ink-2"><CheckCircle2 className="size-5 text-field" />No new orders waiting for review.</p>
+              )}
             </Card>
-          ) : (
-            <EmptyState icon={<CalendarDays className="size-6" />} title="Nothing due today">
-              No collections or deliveries are booked for today.
-            </EmptyState>
+          </section>
+
+          {/* Payments to check — customers who say they've paid */}
+          {data.payments.n > 0 && (
+            <section id="stage-payments" className="scroll-mt-4">
+              <SectionTitle>Payments to check · {data.payments.n}</SectionTitle>
+              <Card className="overflow-hidden border-ochre/50">
+                <ul className="divide-y divide-line">
+                  {data.payments.orders.map((o) => (
+                    <li key={o.id}>
+                      <Link to={`/orders/${o.id}#payment-check`} className="flex items-start gap-3 px-4 py-3 hover:bg-surface-2 sm:px-5">
+                        <Landmark className="mt-0.5 size-4 shrink-0 text-ochre" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-baseline gap-x-2"><span className="font-semibold">{o.customer_name}</span><span className="text-[13px] text-ink-3">#{o.order_number}</span></div>
+                          <div className="text-[13.5px] text-ink-2">{o.paid_claim?.kind === 'proof' ? 'Sent proof of payment' : 'Says they’ve paid'}{o.paid_claim ? ` ${timeAgo(o.paid_claim.at)}` : ''}{o.paid_claim?.amount_cents ? ` · ${formatMoney(o.paid_claim.amount_cents)}` : ''} — check the bank</div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          {o.balance_cents != null && <div className="text-[14px] font-semibold tabular">{formatMoney(o.balance_cents)}</div>}
+                          <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-brand">{canPay ? 'Confirm' : 'Open'} <ArrowRight className="size-3.5" /></span>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            </section>
           )}
-          {/* 3. Waiting on us: work only we can move forward */}
-          <div className="mt-7">
-            <SectionTitle>Waiting on us</SectionTitle>
-            {waiting.length ? (
+
+          <StageSection s={sec('confirmed')} icon={<CheckCircle2 className="size-4" />} empty="Nothing confirmed and waiting to start." detail={(o) => [o.confirmed_at ? `Confirmed ${friendlyDate(o.confirmed_at.slice(0, 10), data.today)}` : null, o.requested_date ? `wanted ${friendlyDate(o.requested_date, data.today)}` : null].filter(Boolean).join(' · ')} action="Start processing" />
+          <StageSection s={sec('processing')} icon={<Scissors className="size-4" />} empty="Nothing being processed right now." detail={(o) => [SUB[o.status], o.requested_date ? `for ${friendlyDate(o.requested_date, data.today)}` : null].filter(Boolean).join(' · ')} />
+          <StageSection s={sec('packed')} icon={<Package className="size-4" />} empty="Nothing packed and waiting." detail={(o) => [SUB[o.status], o.status === 'packed' && !o.finalized ? 'needs final weights' : null, o.requested_date ? `for ${friendlyDate(o.requested_date, data.today)}` : null].filter(Boolean).join(' · ')} />
+          <OutSection s={sec('out')} today={data.today} />
+
+          {waiting.length > 0 && (
+            <section>
+              <SectionTitle>Waiting on us</SectionTitle>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {waiting.map((r) => <QueueCard key={r.key} n={r.n} label={r.label} to={r.to} />)}
               </div>
-            ) : (
-              <Card className="flex items-center gap-3 p-4 text-[14.5px] text-ink-2"><CheckCircle2 className="size-5 text-field" />Nothing is waiting on us right now.</Card>
-            )}
-          </div>
+            </section>
+          )}
 
-          {/* 4. Attention: real problems that are still open */}
-          <div className="mt-7">
+          <section>
             <SectionTitle>Attention</SectionTitle>
             {attention.length ? (
               <Card className="overflow-hidden border-brand/20">
@@ -138,27 +194,11 @@ export default function Today() {
                 )}
               </Card>
             ) : (
-              <Card className="flex items-center gap-4 p-4">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-field-soft text-field"><CheckCircle2 className="size-5" /></span>
-                <div>
-                  <h3 className="font-semibold">Everything is under control</h3>
-                  <p className="text-[14px] text-ink-2">No open problems.</p>
-                </div>
-              </Card>
+              <Card className="flex items-center gap-3 p-4 text-[14.5px] text-ink-2"><CheckCircle2 className="size-5 text-field" />No open problems.</Card>
             )}
-          </div>
-
-          {data.overdue.length > 0 && (
-            <div className="mt-7">
-              <SectionTitle>Overdue · {data.overdue.length}</SectionTitle>
-              <Card className="overflow-hidden border-danger/25">
-                {data.overdue.map((o) => (
-                  <OrderRow key={o.id} o={o} today={data.today} />
-                ))}
-              </Card>
-            </div>
-          )}
-        </section>
+          </section>
+          <p className="text-[13.5px] text-ink-3">Delivered orders are in <Link to="/fulfilment?tab=history" className="font-semibold text-brand hover:underline">Fulfilment → History</Link>{c.completed_today ? ` (${c.completed_today} today)` : ''}.</p>
+        </div>
 
         <aside className="space-y-7">
           <section>
@@ -208,12 +248,67 @@ export default function Today() {
   );
 }
 
-function Pill({ icon, label }: { icon: React.ReactNode; label: string }) {
+function StageSection({ s, icon, empty, detail, action }: { s: Section; icon: React.ReactNode; empty: string; detail: (o: DashOrder) => string; action?: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-[13px] font-medium text-ink-2">
-      {icon}
-      {label}
-    </span>
+    <section id={`stage-${s.key}`} className="scroll-mt-4">
+      <SectionTitle action={s.n > s.orders.length ? <Link to={`/orders?view=stage_${s.key}`} className="text-[13px] font-medium text-brand hover:underline">All {s.n}</Link> : undefined}>
+        <span className="inline-flex items-center gap-1.5">{icon}{s.label} · {s.n}</span>
+      </SectionTitle>
+      {s.orders.length ? (
+        <Card className="overflow-hidden">
+          <ul className="divide-y divide-line">
+            {s.orders.map((o) => (
+              <li key={o.id}>
+                <Link to={`/orders/${o.id}`} className="flex items-start gap-3 px-4 py-3 hover:bg-surface-2 sm:px-5">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline gap-x-2"><span className="font-semibold">{o.customer_name}</span><span className="text-[13px] text-ink-3">#{o.order_number}</span></div>
+                    <div className="text-[13px] text-ink-2">{detail(o)}</div>
+                  </div>
+                  <div className="shrink-0 text-right text-[12.5px]">
+                    {money(o) && <div className="text-[14px] font-semibold tabular">{money(o)}</div>}
+                    {o.payment_label && <div className={unpaid(o) && o.payment_state !== 'not_requested' ? 'font-medium text-ochre' : 'text-ink-3'}>{o.payment_label}</div>}
+                    {action && <span className="inline-flex items-center gap-1 font-semibold text-brand">{action} <ArrowRight className="size-3.5" /></span>}
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : (
+        <p className="rounded-2xl border border-dashed border-line px-4 py-3 text-[14px] text-ink-3">{empty}</p>
+      )}
+    </section>
+  );
+}
+
+/** Out for delivery: the details you need while it's on the road. Unpaid orders stay here and are marked. */
+function OutSection({ s, today }: { s: Section; today: string }) {
+  return (
+    <section id="stage-out" className="scroll-mt-4">
+      <SectionTitle action={s.n > s.orders.length ? <Link to="/orders?view=stage_out" className="text-[13px] font-medium text-brand hover:underline">All {s.n}</Link> : undefined}>
+        <span className="inline-flex items-center gap-1.5"><Truck className="size-4" />Out for Delivery · {s.n}</span>
+      </SectionTitle>
+      {s.orders.length ? (
+        <div className="grid gap-3 xl:grid-cols-2">
+          {s.orders.map((o) => (
+            <Card key={o.id} className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <Link to={`/orders/${o.id}`} className="min-w-0 font-semibold hover:underline">{o.customer_name} <span className="font-normal text-ink-3">#{o.order_number}</span></Link>
+                {unpaid(o) ? <span className="shrink-0 rounded-full bg-ochre-soft px-2 py-0.5 text-[12px] font-semibold text-ochre-soft-ink">Unpaid {o.balance_cents != null ? formatMoney(o.balance_cents) : ''}</span> : <span className="shrink-0 text-[12.5px] text-field">{o.payment_label}</span>}
+              </div>
+              <div className="mt-2 space-y-1 text-[13.5px] text-ink-2">
+                {o.delivery_address && <div className="flex gap-1.5"><MapPin className="mt-0.5 size-3.5 shrink-0 text-ink-3" /><span className="min-w-0 break-words">{o.delivery_address}</span></div>}
+                {o.delivery_notes && <div className="pl-5 text-ink-3">{o.delivery_notes}</div>}
+                {o.contact_phone && <a href={`tel:${o.contact_phone}`} className="flex items-center gap-1.5 font-medium text-ink hover:underline"><Phone className="size-3.5 text-ink-3" />{o.contact_phone}</a>}
+                {o.requested_date && <div className="pl-5 text-ink-3">{friendlyDate(o.requested_date, today)}</div>}
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-2xl border border-dashed border-line px-4 py-3 text-[14px] text-ink-3">Nothing out for delivery.</p>
+      )}
+    </section>
   );
 }
 

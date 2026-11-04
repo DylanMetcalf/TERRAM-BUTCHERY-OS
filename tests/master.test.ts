@@ -35,7 +35,7 @@ const form = (items: any[], extra: any = {}) => ({
   items,
   delivery_address: '12 Kerk Street, Hoedspruit',
   delivery_instructions: 'Gate code 4411, house at the end',
-  requested_date: weekday(),
+  // No preferred date: it's optional, and a fixed weekday can fall on a non-delivery day
   client_ref: `master-ref-${Date.now()}-${++ref}`,
   ...extra,
 });
@@ -46,7 +46,7 @@ const mail = (subject: RegExp) => outbox.filter((m) => subject.test(m.subject));
 const mince = (count: number) => ({ product_id: productId('beef_mince_lean'), sale_option: '500g', qty: { kind: 'count', count } });
 const placed = async (extra: any = {}, items = [mince(4)]) => {
   const r = await send(form(items, extra));
-  expect(r.status).toBe(200);
+  expect(r.status, JSON.stringify(r.body)).toBe(200);
   return orderFromToken(tokenPath(r.body.order_url))!;
 };
 
@@ -304,25 +304,39 @@ describe('communications', () => {
 });
 
 describe('dashboard', () => {
-  it('counts every open order in exactly one stage, and links each to its list', async () => {
-    const mk = (status: string) => createOrder({ customer: { new: { name: `S ${status}` } }, source: 'phone', status: 'confirmed', fulfilment_type: 'collection', items: [{ product_id: productId('beef_brisket'), qty: kg(1000) }] }, STAFF);
-    const a = mk('a');
-    const b = mk('b');
-    transition(b.id, 'cutting', STAFF, 'staff');
-    await placed(); // review
+  it('puts every open order in exactly one section; counts match the database and each section’s list', async () => {
+    const mk = () => createOrder({ customer: { new: { name: `S ${Math.random()}` } }, source: 'phone', status: 'confirmed', fulfilment_type: 'collection', items: [{ product_id: productId('beef_brisket'), qty: kg(1000) }] }, STAFF);
+    mk(); // confirmed
+    const b = mk();
+    transition(b.id, 'cutting', STAFF, 'staff'); // processing
+    const p = mk();
+    transition(p.id, 'cutting', STAFF, 'staff');
+    transition(p.id, 'cut', STAFF, 'staff');
+    transition(p.id, 'packing', STAFF, 'staff'); // packing is part of Processing, not its own section
+    await placed(); // new
     const staff = await signedIn('staff');
     const d = (await staff.get('/api/production/dashboard')).body;
-    const n = (k: string) => d.stages.find((s: any) => s.key === k).n;
-    expect(n('new')).toBe(2);
-    expect(n('cutting')).toBe(1);
-    expect(n('packing') + n('packed') + n('out')).toBe(0);
-    for (const s of d.stages) {
-      const list = (await staff.get(`/api/orders?view=stage_${s.key}&limit=200`)).body;
-      expect(list.total).toBe(s.n);
-    }
-    expect(d.waiting.find((w: any) => w.key === 'confirm').n).toBe(1);
-    expect(d.waiting.find((w: any) => w.key === 'cut').n).toBe(1);
-    void a;
+    const sec = (k: string) => d.sections.find((x: any) => x.key === k);
+    expect(d.sections.map((x: any) => x.key)).toEqual(['new', 'confirmed', 'processing', 'packed', 'out']);
+    expect([sec('new').n, sec('confirmed').n, sec('processing').n, sec('packed').n, sec('out').n]).toEqual([1, 1, 2, 0, 0]);
+    expect(sec('processing').label).toBe('Processing');
+    const open = (db().prepare("SELECT COUNT(*) n FROM orders WHERE status NOT IN ('completed','cancelled')").get() as any).n;
+    expect(d.sections.reduce((t: number, x: any) => t + x.n, 0)).toBe(open);
+    for (const x of d.sections) expect((await staff.get(`/api/orders?view=stage_${x.key}&limit=200`)).body.total).toBe(x.n);
+    expect(sec('new').orders[0]).toMatchObject({ customer_name: 'Naledi Zulu', reason: expect.any(String), total_cents: expect.any(Number) });
+    // Confirmed orders aren't "waiting" duplicates of their own section
+    expect(d.waiting.map((w: any) => w.key)).not.toContain('confirm');
+  });
+
+  it('a delivered order leaves the active dashboard but stays in History, with money owed still visible', async () => {
+    const o = createOrder({ customer: { new: { name: 'History Hal' } }, source: 'phone', status: 'confirmed', fulfilment_type: 'collection', items: [{ product_id: productId('beef_brisket'), qty: kg(1000) }] }, STAFF);
+    db().prepare("UPDATE orders SET status = 'completed', completed_at = ? WHERE id = ?").run(new Date().toISOString(), o.id);
+    const staff = await signedIn('staff');
+    const d = (await staff.get('/api/production/dashboard')).body;
+    expect(d.sections.flatMap((x: any) => x.orders).map((x: any) => x.id)).not.toContain(o.id);
+    expect((await staff.get('/api/orders?view=history&q=History')).body.orders.map((x: any) => x.id)).toContain(o.id);
+    expect((await staff.get('/api/orders?view=history&q=brisket')).body.orders.map((x: any) => x.id)).toContain(o.id); // by product
+    expect((await staff.get('/api/orders?view=delivered_unpaid')).body.orders.map((x: any) => x.id)).toContain(o.id);
   });
 
   it('an order’s open questions close when it is cancelled', async () => {
@@ -347,5 +361,109 @@ describe('order drafts', () => {
     await me.req('PUT', '/api/public/draft', { draft: { items: [] } });
     await me.req('DELETE', '/api/public/draft');
     expect((await me.get('/api/public/draft')).body.draft).toBeNull();
+  });
+});
+
+describe('payment verification workflow', () => {
+  const bank = () => updateSettings('payments', { eftEnabled: true, accountHolder: 'Terram Farm (Pty) Ltd', bankName: 'FNB', accountNumber: '62000000001', branchCode: '250655' }, null);
+  async function requested() {
+    bank();
+    const o = createOrder({ customer: { new: { name: 'Pay Check', email: 'paycheck@example.com', phone: '0825551234' } }, source: 'phone', status: 'confirmed', customer_email: 'paycheck@example.com', fulfilment_type: 'delivery', delivery_address: '3 Bush Rd, Hoedspruit', items: [mince(4) as any] }, STAFF);
+    setItemsCut(getItems(o.id).map((i) => i.id), true, STAFF);
+    for (const i of getItems(o.id)) setItemPacked(i.id, true, STAFF);
+    completePacking(o.id, STAFF);
+    const staff = await signedIn('staff');
+    await staff.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true });
+    const pv = (await staff.get(`/api/orders/${o.id}/payment-request/preview`)).body;
+    expect((await staff.post(`/api/orders/${o.id}/payment-request/send`, { email: true })).status).toBe(200);
+    await flush();
+    return { o, tok: new URL(pv.url).pathname.replace(/^\/pay\//, ''), due: pv.request.amount_cents as number };
+  }
+  const kinds = (orderId: string) => (db().prepare('SELECT kind FROM notifications WHERE order_id = ? ORDER BY created_at').all(orderId) as any[]).map((r) => r.kind);
+
+  it('B: “I’ve paid” → awaiting verification, one alert, no new payment request; Confirm payment clears the task', async () => {
+    const { o, tok, due } = await requested();
+    const before = kinds(o.id).filter((k) => k === 'payment_requested').length;
+    expect(before).toBe(1);
+    for (let i = 0; i < 3; i++) await pub().post(`/api/public/pay/${tok}/declare`, { confirm: true, payer_reference: 'P CHECK' }); // repeated taps
+    await flush();
+    expect(requireOrder(o.id).payment_state).toBe('proof_submitted');
+    expect(kinds(o.id).filter((k) => k === 'payment_requested').length).toBe(before); // nothing re-sent
+    expect(kinds(o.id).filter((k) => k === 'order_received' || k === 'invoice_ready').length).toBe(0);
+    expect(mail(/^Payment Verification Required/)).toHaveLength(1);
+    expect(db().prepare("SELECT COUNT(*) n FROM payment_declarations WHERE order_id = ?").get(o.id)).toMatchObject({ n: 1 });
+    const manager = await signedIn('manager');
+    let d = (await manager.get('/api/production/dashboard')).body;
+    expect(d.payments.orders.map((x: any) => x.id)).toContain(o.id);
+    expect(d.payments.orders.find((x: any) => x.id === o.id).paid_claim).toMatchObject({ kind: 'declared' });
+    expect(d.attention.find((a: any) => a.key === 'exceptions')?.n ?? 0).toBe(0); // not counted twice
+    // Staff can't confirm money
+    expect((await (await signedIn('staff')).post(`/api/orders/${o.id}/payment-check`, { result: 'confirmed', amount_cents: due })).status).toBe(403);
+    const r = await manager.post(`/api/orders/${o.id}/payment-check`, { result: 'confirmed', amount_cents: due, paid_on: today(), reference: 'FNB 1' });
+    expect(r.status).toBe(200);
+    expect(requireOrder(o.id)).toMatchObject({ payment_state: 'paid' });
+    expect(db().prepare("SELECT amount_cents, paid_on, reference, verified_by FROM payments WHERE order_id = ? AND status = 'verified'").all(o.id)).toEqual([expect.objectContaining({ amount_cents: due, paid_on: today(), reference: 'FNB 1', verified_by: expect.any(String) })]);
+    d = (await manager.get('/api/production/dashboard')).body;
+    expect(d.payments.orders.map((x: any) => x.id)).not.toContain(o.id);
+    expect((db().prepare("SELECT COUNT(*) n FROM exceptions WHERE order_id = ? AND status = 'open'").get(o.id) as any).n).toBe(0);
+    expect((await manager.post(`/api/orders/${o.id}/payment-check`, { result: 'confirmed', amount_cents: due })).status).toBe(409); // nothing left to check
+  });
+
+  it('C: Payment not received keeps the balance, sends nothing unless chosen, hides the internal note; a new request is a deliberate action', async () => {
+    const { o, tok, due } = await requested();
+    await pub().post(`/api/public/pay/${tok}/declare`, { confirm: true });
+    const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(100, 32)]);
+    await pub().upload(`/api/public/pay/${tok}/proof`, { name: 'pop.pdf', bytes: pdf, type: 'application/pdf' });
+    await flush();
+    const sentBefore = outbox.length;
+    const manager = await signedIn('manager');
+    const r = await manager.post(`/api/orders/${o.id}/payment-check`, { result: 'not_received', note: 'Nothing from P Check by Wed' });
+    expect(r.status).toBe(200);
+    await flush();
+    expect(outbox.length).toBe(sentBefore); // no automatic email of any kind
+    const after = requireOrder(o.id);
+    expect(after.payment_state).toBe('rejected');
+    expect(r.body.summary.money.balance_cents).toBe(due);
+    expect(db().prepare("SELECT status FROM payment_declarations WHERE order_id = ?").all(o.id)).toEqual([{ status: 'rejected' }]); // history kept
+    expect(db().prepare("SELECT status FROM payment_proofs WHERE order_id = ?").all(o.id)).toEqual([{ status: 'rejected' }]);
+    const page = (await pub().get(`/api/public/pay/${tok}`)).body.pay;
+    expect(JSON.stringify(page)).not.toContain('Nothing from P Check'); // internal note stays internal
+    expect(page.status).toBe('awaiting_payment'); // they can tell us again
+    expect((await manager.get('/api/production/dashboard')).body.payments.orders.map((x: any) => x.id)).not.toContain(o.id);
+    expect((db().prepare("SELECT summary FROM order_events WHERE order_id = ? AND type = 'payment_not_received'").get(o.id) as any).summary).toMatch(/Nothing from P Check/);
+    // Sending the request again needs an explicit resend
+    expect((await manager.post(`/api/orders/${o.id}/payment-request/send`, { email: true })).status).toBe(409);
+    expect((await manager.post(`/api/orders/${o.id}/payment-request/send`, { email: true, resend: true })).status).toBe(200);
+    await flush();
+    expect(mail(/Payment for your order|payment/i).length).toBeGreaterThan(0);
+  });
+
+  it('C2: “Payment not received” can tell the customer, with the admin’s own words, once', async () => {
+    const { o, tok } = await requested();
+    await pub().post(`/api/public/pay/${tok}/declare`, { confirm: true });
+    await flush();
+    outbox.length = 0;
+    const manager = await signedIn('manager');
+    expect((await manager.post(`/api/orders/${o.id}/payment-check`, { result: 'not_received', notify_customer: true })).status).toBe(400); // message needed
+    expect((await manager.post(`/api/orders/${o.id}/payment-check`, { result: 'not_received', notify_customer: true, message: 'Please check the reference was 1001.' })).status).toBe(200);
+    await flush();
+    const m = mail(/About your payment/);
+    expect(m).toHaveLength(1);
+    expect(m[0].text).toContain('Please check the reference was 1001.');
+  });
+
+  it('D: an unpaid order is released, delivered and stays owed in History; payment never moves production', async () => {
+    const { o, due } = await requested();
+    const manager = await signedIn('manager');
+    expect((await manager.post(`/api/orders/${o.id}/transition`, { to: 'out_for_delivery', unpaid_reason: 'Regular, pays on delivery' })).status).toBe(200);
+    let d = (await manager.get('/api/production/dashboard')).body;
+    const out = d.sections.find((x: any) => x.key === 'out').orders.find((x: any) => x.id === o.id);
+    expect(out).toMatchObject({ delivery_address: '3 Bush Rd, Hoedspruit', contact_phone: expect.stringContaining('82'), released_unpaid: true, balance_cents: due });
+    expect((await manager.post(`/api/orders/${o.id}/transition`, { to: 'completed' })).status).toBe(200);
+    expect(requireOrder(o.id).payment_state).not.toBe('paid');
+    d = (await manager.get('/api/production/dashboard')).body;
+    expect(d.sections.flatMap((x: any) => x.orders).map((x: any) => x.id)).not.toContain(o.id);
+    expect((await manager.get('/api/orders?view=delivered_unpaid')).body.orders.map((x: any) => x.id)).toContain(o.id);
+    expect(d.attention.find((a: any) => a.key === 'delivered_unpaid')?.n).toBe(1);
   });
 });
