@@ -62,39 +62,41 @@ export default function About() {
         <div className="flex justify-center py-24"><Spinner className="size-6" /></div>
       ) : (
         <>
-          {/* Hero: charcoal with the brand green rising through it */}
-          <section className="relative overflow-hidden bg-charcoal text-white">
-            <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_90%_at_100%_100%,var(--brand)_0%,transparent_60%)] opacity-70" />
-            <Sprout aria-hidden className="pointer-events-none absolute -bottom-12 -right-8 size-72 text-white opacity-[0.06] sm:size-96" />
-            <div className="relative mx-auto max-w-5xl px-5 pb-14 pt-10 sm:px-8 sm:pb-20 sm:pt-16">
-              <p className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[13px] font-semibold text-white/85"><Sprout className="size-4" />About {name}</p>
-              <h1 className="mt-4 max-w-3xl font-display text-[34px] font-extrabold leading-[1.08] tracking-tight sm:text-[52px]">{headline}</h1>
-              <span aria-hidden className="mt-6 block h-1 w-16 rounded-full bg-brand" />
-              {lead.map((p, i) => (
-                <p key={i} className={i === 0 ? 'mt-6 max-w-2xl text-[17px] leading-relaxed text-white/90 sm:text-[18.5px]' : 'mt-3 max-w-2xl text-[15.5px] leading-relaxed text-white/70'}>{p}</p>
-              ))}
-              <div className="mt-8 flex flex-wrap gap-3">
-                <Link to="/order" className="inline-flex h-12 items-center gap-2 rounded-xl bg-brand px-6 text-[16px] font-semibold text-brand-ink shadow-float transition hover:bg-brand-hover">
-                  <ShoppingBag className="size-5" /> Order now
-                </Link>
-                {sections.length > 0 && <a href="#story" className="inline-flex h-12 items-center gap-2 rounded-xl border border-white/25 px-5 text-[15px] font-semibold text-white transition hover:bg-white/10">Read our story</a>}
+          {/* Hero: light and green (the home page's banner is the dark one), story left, "at a glance" right */}
+          <section className="relative overflow-hidden border-b border-brand/15 bg-brand-soft text-brand-soft-ink">
+            <Sprout aria-hidden className="pointer-events-none absolute -left-16 -top-16 size-72 text-brand opacity-[0.07]" />
+            <div className="relative mx-auto grid max-w-5xl items-center gap-8 px-5 py-12 sm:px-8 sm:py-16 lg:grid-cols-[minmax(0,7fr)_minmax(0,4fr)] lg:gap-12">
+              <div className="min-w-0">
+                <p className="inline-flex items-center gap-2 rounded-full bg-brand px-3 py-1 text-[13px] font-semibold text-brand-ink"><Sprout className="size-4" />About {name}</p>
+                <h1 className="mt-4 font-display text-[34px] font-extrabold leading-[1.08] tracking-tight text-brand sm:text-[50px]">{headline}</h1>
+                {lead.map((p, i) => (
+                  <p key={i} className={i === 0 ? 'mt-5 max-w-2xl text-[17px] leading-relaxed sm:text-[18px]' : 'mt-3 max-w-2xl text-[15.5px] leading-relaxed opacity-80'}>{p}</p>
+                ))}
+                <div className="mt-8 flex flex-wrap gap-3">
+                  <Link to="/order" className="inline-flex h-12 items-center gap-2 rounded-xl bg-brand px-6 text-[16px] font-semibold text-brand-ink shadow-float transition hover:bg-brand-hover">
+                    <ShoppingBag className="size-5" /> Order now
+                  </Link>
+                  {sections.length > 0 && <a href="#story" className="inline-flex h-12 items-center gap-2 rounded-xl border border-brand/30 bg-surface px-5 text-[15px] font-semibold text-ink transition hover:border-brand/60">Read our story</a>}
+                </div>
               </div>
+              {facts.length > 0 && (
+                <aside aria-label="At a glance" className="relative overflow-hidden rounded-3xl bg-brand p-6 text-brand-ink shadow-float sm:p-7">
+                  <Sprout aria-hidden className="pointer-events-none absolute -bottom-8 -right-8 size-40 opacity-[0.12]" />
+                  <p className="text-[12.5px] font-semibold uppercase tracking-[0.14em] opacity-75">At a glance</p>
+                  {(
+                    <ul className="relative mt-4 space-y-3">
+                      {facts.map((f) => (
+                        <li key={f.text} className="flex items-center gap-3">
+                          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand-ink/15"><f.icon className="size-5" /></span>
+                          <span className="text-[15.5px] font-semibold">{f.text}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </aside>
+              )}
             </div>
           </section>
-
-          {/* What the introduction promises, as a green strip */}
-          {facts.length > 0 && (
-            <section aria-label="At a glance" className="bg-brand text-brand-ink">
-              <ul className="mx-auto grid max-w-5xl gap-px px-5 sm:grid-cols-3 sm:px-8">
-                {facts.map((f) => (
-                  <li key={f.text} className="flex items-center gap-3 py-4 sm:justify-center sm:py-5">
-                    <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand-ink/15"><f.icon className="size-5" /></span>
-                    <span className="text-[15px] font-semibold">{f.text}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
 
           {/* The farm's sections: alternating full-width bands */}
           <div id="story" className="scroll-mt-4">

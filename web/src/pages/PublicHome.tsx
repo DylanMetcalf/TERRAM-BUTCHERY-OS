@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Beef, CalendarCheck, ListChecks, MapPin, Carrot, CreditCard, Egg, ExternalLink, MessageCircle, PackageCheck, Scale, ShoppingBag, Snowflake, Sprout, Star, Truck, UtensilsCrossed } from 'lucide-react';
+import { ArrowRight, Beef, CalendarCheck, ListChecks, MapPin, Carrot, CreditCard, Egg, ExternalLink, MessageCircle, PackageCheck, Scale, ShoppingBag, Snowflake, Star, Truck, UtensilsCrossed } from 'lucide-react';
 import { useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { BackToTop } from '../components/BackToTop';
@@ -7,7 +7,7 @@ import { SiteFooter, SiteHeader, usePublicInfo } from '../components/SiteChrome'
 import { InstagramCard, ReviewBubble } from '../components/Social';
 import { api } from '../lib/api';
 import { formatMoney } from '../lib/format';
-import { highlights, paras, splitHeadline } from '../lib/story';
+import { paras } from '../lib/story';
 import { FaqItem, groupFaq, type Faq } from './Help';
 import { SignIn } from './CustomerAccount';
 
@@ -72,8 +72,6 @@ export default function PublicHome() {
   });
   const faqPreview: Faq[] = groupFaq(info?.help?.faq ?? []).flatMap((g) => g.items.slice(0, 1)).slice(0, 5);
   const aboutSections: { title: string; body: string }[] = info?.content?.aboutSections ?? [];
-  const story = info?.content?.aboutIntro ? splitHeadline(info.content.aboutIntro, 'From our farm to your table') : null;
-  const facts = highlights(info?.content?.aboutIntro);
 
   return (
     <div className="min-h-dvh bg-bg">
@@ -109,35 +107,6 @@ export default function PublicHome() {
           ))}
         </div>
       </nav>
-
-      {/* Our story: the farm's own introduction, on the brand green */}
-      {story && (
-        <section aria-labelledby="story-title" className="relative overflow-hidden bg-brand text-brand-ink">
-          <Sprout aria-hidden className="pointer-events-none absolute -right-10 -top-10 size-64 opacity-[0.07] sm:size-80" />
-          <div className="relative mx-auto grid max-w-5xl gap-8 px-5 py-12 sm:px-8 sm:py-16 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] md:gap-12">
-            <div>
-              <p className="text-[13px] font-semibold uppercase tracking-[0.14em] opacity-75">Our story</p>
-              <h2 id="story-title" className="mt-3 font-display text-[30px] font-extrabold leading-[1.1] sm:text-[38px]">{story.headline}</h2>
-              <span aria-hidden className="mt-5 block h-1 w-14 rounded-full bg-current opacity-40" />
-            </div>
-            <div className="min-w-0">
-              {story.rest.map((p, i) => (
-                <p key={i} className={i === 0 ? 'text-[16.5px] leading-relaxed sm:text-[17.5px]' : 'mt-4 text-[15.5px] leading-relaxed opacity-85'}>{p}</p>
-              ))}
-              {facts.length > 0 && (
-                <ul className="mt-6 flex flex-wrap gap-2">
-                  {facts.map((f) => (
-                    <li key={f.text} className="inline-flex items-center gap-2 rounded-full bg-brand-ink/15 px-3.5 py-1.5 text-[13.5px] font-semibold">
-                      <f.icon className="size-4" />{f.text}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <Link to="/about" className="mt-7 inline-flex h-11 items-center gap-2 rounded-xl bg-brand-ink px-5 text-[15px] font-semibold text-brand shadow-card transition hover:opacity-90">More about us <ArrowRight className="size-4" /></Link>
-            </div>
-          </div>
-        </section>
-      )}
 
       <main className="mx-auto max-w-5xl space-y-14 px-5 py-12 sm:px-8 sm:py-16 [&>section]:scroll-mt-16">
 
