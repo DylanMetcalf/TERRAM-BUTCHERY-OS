@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, CalendarCheck, CreditCard, ExternalLink, MessageCircle, PackageCheck, Scale, ShoppingBag, Snowflake, Star, Truck } from 'lucide-react';
+import { ArrowRight, Beef, CalendarCheck, ListChecks, MapPin, Carrot, CreditCard, Egg, ExternalLink, MessageCircle, PackageCheck, Scale, ShoppingBag, Snowflake, Star, Truck, UtensilsCrossed } from 'lucide-react';
 import { useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { BackToTop } from '../components/BackToTop';
@@ -7,6 +7,7 @@ import { SiteFooter, SiteHeader, usePublicInfo } from '../components/SiteChrome'
 import { InstagramCard, ReviewBubble } from '../components/Social';
 import { api } from '../lib/api';
 import { formatMoney } from '../lib/format';
+import { paras } from '../lib/story';
 import { FaqItem, groupFaq, type Faq } from './Help';
 import { SignIn } from './CustomerAccount';
 
@@ -18,6 +19,16 @@ import { SignIn } from './CustomerAccount';
 interface CatProduct { id: string; name: string; category: string; description: string | null; out_of_stock?: boolean; variant_of?: string | null }
 
 const topLevel = (c: string) => c.split(/\s+[–-]\s+/)[0];
+
+/** An icon per range on the home page cards. */
+function rangeIcon(group: string) {
+  const g = group.toLowerCase();
+  const cls = 'size-5';
+  if (/egg/.test(g)) return <Egg className={cls} />;
+  if (/veg|fruit|herb/.test(g)) return <Carrot className={cls} />;
+  if (/beef|lamb|pork|meat|mince|wors|sausage|biltong/.test(g)) return <Beef className={cls} />;
+  return <UtensilsCrossed className={cls} />;
+}
 
 const SECTIONS = [
   { id: 'products', label: 'Products' },
@@ -98,12 +109,6 @@ export default function PublicHome() {
       </nav>
 
       <main className="mx-auto max-w-5xl space-y-14 px-5 py-12 sm:px-8 sm:py-16 [&>section]:scroll-mt-16">
-        {/* Intro */}
-        {info?.content?.aboutIntro && (
-          <section aria-label="Introduction">
-            <p className="max-w-3xl font-display text-[21px] leading-relaxed text-ink sm:text-[24px]">{info.content.aboutIntro}</p>
-          </section>
-        )}
 
         {/* What we sell */}
         <section id="products">
@@ -111,11 +116,13 @@ export default function PublicHome() {
           {groups.length > 0 ? (
             <div className="mt-5 grid gap-4 sm:grid-cols-3">
               {groups.map((g) => (
-                <Link key={g.group} to="/order" className="group rounded-2xl border border-line bg-surface p-5 shadow-card transition hover:shadow-float">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <h3 className="font-display text-[20px] font-bold">{g.group}</h3>
-                    {g.count > 1 && <span className="text-[13px] text-ink-3">{g.count} products</span>}
+                <Link key={g.group} to="/order" className="group relative overflow-hidden rounded-2xl border border-line bg-surface p-5 pt-6 shadow-card transition hover:-translate-y-0.5 hover:shadow-float">
+                  <span aria-hidden className="absolute inset-x-0 top-0 h-1.5 bg-brand" />
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex size-11 items-center justify-center rounded-xl bg-brand-soft text-brand">{rangeIcon(g.group)}</span>
+                    {g.count > 1 && <span className="rounded-full bg-brand-soft px-2.5 py-0.5 text-[12.5px] font-semibold text-brand-soft-ink">{g.count} products</span>}
                   </div>
+                  <h3 className="mt-3 font-display text-[21px] font-bold">{g.group}</h3>
                   <p className="mt-2 text-[14.5px] text-ink-2">{g.text}</p>
                   <span className="mt-4 inline-flex items-center gap-1 text-[14px] font-semibold text-brand">See prices &amp; order <ArrowRight className="size-4 transition group-hover:translate-x-0.5" /></span>
                 </Link>
@@ -176,10 +183,12 @@ export default function PublicHome() {
           <h2 className="font-display text-[26px] font-bold">About {name}</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-3">
             {aboutSections.filter((s) => s.title || s.body).slice(0, 3).map((s, i) => (
-              <div key={i} className="rounded-2xl bg-surface-2 p-5">
-                {s.title && <h3 className="font-semibold">{s.title}</h3>}
-                {s.body && <p className="mt-1 line-clamp-5 text-[14.5px] text-ink-2">{s.body}</p>}
-              </div>
+              <Link key={i} to="/about" className="group rounded-2xl border border-line bg-surface p-5 shadow-card transition hover:-translate-y-0.5 hover:shadow-float">
+                <span className="flex size-10 items-center justify-center rounded-xl bg-brand text-brand-ink">{[<Beef key="a" className="size-5" />, <ListChecks key="b" className="size-5" />, <MapPin key="c" className="size-5" />][i]}</span>
+                {s.title && <h3 className="mt-3 font-display text-[19px] font-bold">{s.title}</h3>}
+                {paras(s.body)[0] && <p className="mt-1 line-clamp-4 text-[14.5px] text-ink-2">{paras(s.body)[0]}</p>}
+                <span className="mt-3 inline-flex items-center gap-1 text-[13.5px] font-semibold text-brand">Read more <ArrowRight className="size-3.5 transition group-hover:translate-x-0.5" /></span>
+              </Link>
             ))}
           </div>
           <Link to="/about" className="mt-4 inline-flex items-center gap-1 text-[15px] font-semibold text-brand">More about us <ArrowRight className="size-4" /></Link>

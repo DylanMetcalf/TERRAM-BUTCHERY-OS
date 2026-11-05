@@ -26,7 +26,8 @@ for (const w of widths) {
         if (bx.width === 0) continue;
         // ignore things inside horizontal scrollers
         let s = el.parentElement, scrolled = false;
-        while (s) { const cs = getComputedStyle(s); if (/(auto|scroll)/.test(cs.overflowX) && s.scrollWidth > s.clientWidth - 1) { scrolled = true; break; } s = s.parentElement; }
+        // inside a horizontal scroller, or clipped on purpose (e.g. a truncated line with an ellipsis): not an overflow
+        while (s) { const cs = getComputedStyle(s); if ((/(auto|scroll)/.test(cs.overflowX) && s.scrollWidth > s.clientWidth - 1) || (/(hidden|clip)/.test(cs.overflowX) && s.getBoundingClientRect().right <= w + 1)) { scrolled = true; break; } s = s.parentElement; }
         if (!scrolled && bx.right > w + 1) out.push(`${el.tagName}.${(el.className?.toString?.() ?? '').slice(0, 60)} right=${Math.round(bx.right)}`);
       }
       return { sw: document.documentElement.scrollWidth, out: out.slice(0, 4) };
