@@ -519,3 +519,26 @@ describe('scenario A: one order through every section', () => {
     expect(steps).toEqual(expect.arrayContaining(['Processing', 'Out for delivery', 'Delivered']));
   });
 });
+
+describe('payment check after paying another way (review finding)', () => {
+  it('a proof still waiting is settled when the order is paid in full, so it can’t be confirmed twice', async () => {
+    updateSettings('payments', { eftEnabled: true, accountHolder: 'Terram Farm (Pty) Ltd', bankName: 'FNB', accountNumber: '62000000001', branchCode: '250655' }, null);
+    const o = createOrder({ customer: { new: { name: 'Twice Paid', email: 'twice@example.com' } }, source: 'phone', status: 'confirmed', customer_email: 'twice@example.com', fulfilment_type: 'delivery', delivery_address: '1 Road', items: [mince(4) as any] }, STAFF);
+    setItemsCut(getItems(o.id).map((i) => i.id), true, STAFF);
+    for (const i of getItems(o.id)) setItemPacked(i.id, true, STAFF);
+    completePacking(o.id, STAFF);
+    const staff = await signedIn('staff');
+    await staff.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true });
+    const pv = (await staff.get(`/api/orders/${o.id}/payment-request/preview`)).body;
+    const tok = new URL(pv.url).pathname.replace(/^\/pay\//, '');
+    const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(100, 32)]);
+    await pub().upload(`/api/public/pay/${tok}/proof`, { name: 'pop.pdf', bytes: pdf, type: 'application/pdf' });
+    const manager = await signedIn('manager');
+    await manager.post(`/api/orders/${o.id}/payments`, { method: 'cash', amount_cents: pv.request.amount_cents }); // paid another way
+    expect(requireOrder(o.id).payment_state).toBe('paid');
+    expect(db().prepare('SELECT status FROM payment_proofs WHERE order_id = ?').all(o.id)).toEqual([{ status: 'accepted' }]);
+    expect((db().prepare("SELECT COUNT(*) n FROM exceptions WHERE order_id = ? AND status = 'open' AND dedupe_key LIKE 'proof:%'").get(o.id) as any).n).toBe(0);
+    expect((await manager.post(`/api/orders/${o.id}/payment-check`, { result: 'confirmed', amount_cents: pv.request.amount_cents })).status).toBe(409);
+    expect((db().prepare("SELECT COUNT(*) n FROM payments WHERE order_id = ? AND status = 'verified'").get(o.id) as any).n).toBe(1);
+  });
+});

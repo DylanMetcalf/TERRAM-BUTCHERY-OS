@@ -166,7 +166,7 @@ export function PaymentPanel({ orderId, payment, declarations = [], finalized, c
   if (!payment) return null;
   const pendingProofs = payment.proofs.filter((p: any) => p.status === 'submitted');
   const pendingDecl = declarations.filter((d: any) => d.status === 'submitted');
-  const awaitingCheck = pendingProofs.length + pendingDecl.length > 0;
+  const awaitingCheck = pendingProofs.length + pendingDecl.length > 0 && !['paid', 'waived'].includes(payment.state);
   const doneDecl = declarations.filter((d: any) => d.status !== 'submitted');
   return (
     <section>

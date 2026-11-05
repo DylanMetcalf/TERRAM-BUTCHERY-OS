@@ -206,6 +206,11 @@ export function recordVerifiedPayment(orderId: string, input: RecordPaymentInput
     void state;
   });
   db().prepare("UPDATE payment_declarations SET status = 'accepted', reviewed_by = ?, reviewed_at = ? WHERE order_id = ? AND status = 'submitted'").run(actor.userId, now(), orderId);
+  // Paid in full (however it was paid): any proof still waiting is settled too, so nobody is asked to confirm it again
+  if (recomputePayment(orderId) === 'paid') {
+    db().prepare("UPDATE payment_proofs SET status = 'accepted', reviewed_by = ?, reviewed_at = ? WHERE order_id = ? AND status = 'submitted'").run(actor.userId, now(), orderId);
+    resolveOrderExceptions(orderId, { keyPrefixes: ['proof:', 'declared:'] }, 'paid');
+  }
   recomputePayment(orderId);
   // Paid in full and already packed & finalized: it's ready to go out (one email covers both)
   let released = false;
@@ -424,6 +429,8 @@ export function settlePaymentCheck(
   actor: Actor,
 ) {
   const o = requireOrder(orderId);
+  if (o.status === 'cancelled') throw conflict('This order is cancelled.');
+  if (input.result === 'confirmed' && ['paid', 'waived'].includes(o.payment_state)) throw conflict('This order is already settled. Record any extra money with “Record a payment”.');
   const { declarations, proofs } = pendingPaymentClaims(orderId);
   if (!declarations.length && !proofs.length) throw conflict('There is nothing waiting to be checked on this order.');
   const keys = [...declarations.map((d) => `declared:${d.id}`), ...proofs.map((p) => `proof:${p.id}`)];

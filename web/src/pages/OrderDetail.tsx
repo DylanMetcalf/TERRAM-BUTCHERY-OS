@@ -175,7 +175,7 @@ export default function OrderDetail() {
   const secondary = data.transitions.filter((t) => t !== next?.to);
   const today = todayYmd();
   /** The customer says they've paid (or sent proof): the next step is checking the bank, not asking again. */
-  const awaitingCheck = (data.declarations ?? []).some((d: any) => d.status === 'submitted') || (data.payment?.proofs ?? []).some((p: any) => p.status === 'submitted');
+  const awaitingCheck = !['paid', 'waived'].includes(data.order.payment_state ?? '') && ((data.declarations ?? []).some((d: any) => d.status === 'submitted') || (data.payment?.proofs ?? []).some((p: any) => p.status === 'submitted'));
   const total: number | null = data.money?.final_cents != null ? data.money.final_cents - (data.money.delivery_fee_cents ?? 0) : active.reduce<number | null>((sum, i) => {
     const p = i.final_cents ?? i.est_cents ?? estimateLinePrice(i.qty, i.price_cents, i.price_unit);
     return sum == null || p == null ? null : sum + p;
