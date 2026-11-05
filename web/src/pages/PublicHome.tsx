@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { BackToTop } from '../components/BackToTop';
 import { SiteFooter, SiteHeader, usePublicInfo } from '../components/SiteChrome';
-import { InstagramCard } from '../components/Social';
+import { InstagramCard, ReviewBubble } from '../components/Social';
 import { api } from '../lib/api';
 import { formatMoney } from '../lib/format';
 import { FaqItem, groupFaq, type Faq } from './Help';
@@ -245,6 +245,7 @@ export default function PublicHome() {
       </main>
 
       <BackToTop />
+      <ReviewBubble url={info?.business.googleReviewUrl} name={name} />
       <SiteFooter />
     </div>
   );

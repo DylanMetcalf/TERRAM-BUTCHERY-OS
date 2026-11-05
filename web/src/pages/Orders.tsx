@@ -11,12 +11,12 @@ import type { OrderSummary } from '../lib/types';
 
 const VIEWS = [
   { value: 'open', label: 'Open' },
-  { value: 'review', label: 'To review' },
+  { value: 'review', label: 'New' },
   { value: 'today', label: 'Today' },
-  { value: 'production', label: 'In production' },
+  { value: 'production', label: 'Processing' },
   { value: 'ready', label: 'Ready' },
   { value: 'overdue', label: 'Overdue' },
-  { value: 'completed', label: 'Completed' },
+  { value: 'completed', label: 'Delivered' },
   { value: 'cancelled', label: 'Cancelled' },
   { value: 'weighing', label: 'Final weighing' },
   { value: 'to_request', label: 'Payment not requested' },
@@ -27,8 +27,10 @@ const VIEWS = [
 
 /** Lists the dashboard opens that aren't tabs here. */
 const EXTRA_VIEWS: Record<string, string> = {
-  stage_new: 'New / Confirmed',
-  stage_cutting: 'Cutting',
+  stage_new: 'New / Needs review',
+  stage_confirmed: 'Confirmed',
+  stage_processing: 'Processing',
+  stage_cutting: 'Processing',
   stage_packing: 'Packing',
   stage_packed: 'Packed & Ready',
   stage_out: 'Out for Delivery',
@@ -44,9 +46,9 @@ const EXTRA_VIEWS: Record<string, string> = {
 
 /** Open orders grouped by where they are in production (same groups as the dashboard). */
 const STAGE_GROUPS: { label: string; statuses: string[] }[] = [
-  { label: 'New / Confirmed', statuses: ['review', 'needs_clarification', 'confirmed', 'on_hold'] },
-  { label: 'Cutting', statuses: ['cutting', 'cut'] },
-  { label: 'Packing', statuses: ['packing'] },
+  { label: 'New / Needs review', statuses: ['review', 'needs_clarification', 'on_hold'] },
+  { label: 'Confirmed', statuses: ['confirmed'] },
+  { label: 'Processing', statuses: ['cutting', 'cut', 'packing'] },
   { label: 'Packed & Ready', statuses: ['packed', 'ready'] },
   { label: 'Out for Delivery', statuses: ['out_for_delivery'] },
   { label: 'Delivered', statuses: ['completed'] },

@@ -20,7 +20,7 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   payment_requested: 'Payment request',
   payment_received: 'Payment received',
   invoice_ready: 'Invoice notification',
-  declaration_rejected: 'Payment not confirmed',
+  declaration_rejected: 'Payment not received',
   proof_rejected: 'Proof not accepted',
   status_changed: 'Status update',
   timeframe_changed: 'Timeframe changed',

@@ -199,7 +199,10 @@ describe('received, then confirmed by a person', () => {
     const staff = await signedIn('staff');
     // The old "move to confirmed" path can't skip the timeframe
     expect((await staff.post(`/api/orders/${o.id}/transition`, { to: 'confirmed' })).status).toBe(409);
-    // Address-only orders need collection or delivery decided first
+    // Online orders with an address arrive as deliveries (they carry the delivery fee)
+    expect(requireOrder(o.id).fulfilment_type).toBe('delivery');
+    // An order with neither decided (e.g. typed in by staff) must be decided before confirming
+    db().prepare('UPDATE orders SET fulfilment_type = NULL WHERE id = ?').run(o.id);
     const blocked = await staff.post(`/api/orders/${o.id}/confirm`, { expected_from: weekday() });
     expect(blocked.status).toBe(409);
     expect(blocked.body.error).toMatch(/collection or delivery/);

@@ -162,8 +162,12 @@ export function PaymentPanel({ orderId, payment, declarations = [], finalized, c
   const [sending, setSending] = useState(false);
   const reverse = useMutation({ mutationFn: (v: { id: string; reason: string }) => api.post(`/api/payments/${v.id}/reverse`, { reason: v.reason }), onSuccess: () => a.done('Payment reversed'), onError: a.fail });
   const waive = useMutation({ mutationFn: (v: { undo: boolean; reason: string }) => api.post(`/api/orders/${orderId}/payment-waive`, v), onSuccess: (_r, v) => a.done(v.undo ? 'Waiver removed' : 'Payment waived'), onError: a.fail });
+  const [checking, setChecking] = useState(false);
   if (!payment) return null;
   const pendingProofs = payment.proofs.filter((p: any) => p.status === 'submitted');
+  const pendingDecl = declarations.filter((d: any) => d.status === 'submitted');
+  const awaitingCheck = pendingProofs.length + pendingDecl.length > 0 && !['paid', 'waived'].includes(payment.state);
+  const doneDecl = declarations.filter((d: any) => d.status !== 'submitted');
   return (
     <section>
       <SectionTitle>Payment</SectionTitle>
@@ -174,28 +178,46 @@ export function PaymentPanel({ orderId, payment, declarations = [], finalized, c
         </div>
         <MoneyCard money={payment.money} />
         {payment.method_problems?.length > 0 && <p className="rounded-xl bg-ochre-soft px-3 py-2 text-[13px] text-ochre-soft-ink">{payment.method_problems.join(' ')}</p>}
-        {canWrite && payment.state !== 'paid' && (
+        {awaitingCheck && (
+          <div className="rounded-xl border-2 border-ochre/50 bg-ochre-soft/40 p-3 text-[14px]" id="payment-check">
+            <div className="font-semibold">Customer says they’ve paid — check the bank</div>
+            <ul className="mt-1 space-y-1 text-ink-2">
+              {pendingDecl.map((d: any) => (
+                <li key={d.id}>Tapped “I’ve paid” {dateTime(d.created_at)}{d.amount_cents ? ` · ${formatMoney(d.amount_cents)}` : ''}{d.paid_on ? ` · paid ${longDate(d.paid_on)}` : ''}{d.payer_reference ? <> · statement shows <b>{d.payer_reference}</b></> : null}{d.note ? ` · “${d.note}”` : ''}</li>
+              ))}
+              {pendingProofs.map((p: any) => (
+                <li key={p.id} className="flex flex-wrap items-center gap-x-2">
+                  <span>Proof of payment {dateTime(p.created_at)}{p.amount_claimed_cents ? ` · ${formatMoney(p.amount_claimed_cents)}` : ''}</span>
+                  {p.file_id && <a href={`/api/files/${p.file_id}?inline=1`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-brand hover:underline"><ExternalLink className="size-3.5" />Open file</a>}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-[13px] text-ink-3">Outstanding: <b>{formatMoney(payment.money.balance_cents ?? 0)}</b>. Nothing has been marked paid yet.</p>
+            {canPay ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button variant="success" icon={<Check className="size-4" />} onClick={() => setChecking(true)}>Confirm payment…</Button>
+                <Button variant="ghost" onClick={() => setChecking(true)}>Payment not received…</Button>
+              </div>
+            ) : (
+              <p className="mt-2 text-[13px] text-ink-3">A manager confirms payments.</p>
+            )}
+          </div>
+        )}
+        {canWrite && !['paid', 'waived'].includes(payment.state) && (
           finalized && !payment.blocker ? (
-            <Button full variant={payment.request ? 'secondary' : 'primary'} icon={payment.request ? <Mail className="size-4" /> : <Send className="size-4" />} onClick={() => setSending(true)}>{payment.request ? 'Payment request & history…' : 'Send payment request…'}</Button>
+            awaitingCheck ? (
+              <button type="button" className="text-[13px] font-medium text-ink-2 underline-offset-2 hover:underline" onClick={() => setSending(true)}>Payment request history / send again…</button>
+            ) : (
+              <Button full variant={payment.request ? 'secondary' : 'primary'} icon={payment.request ? <Mail className="size-4" /> : <Send className="size-4" />} onClick={() => setSending(true)}>{payment.request ? 'Payment request & history…' : 'Send payment request…'}</Button>
+            )
           ) : payment.blocker ? (
             <p className="text-[13px] text-ink-3">Payment request: {payment.blocker}</p>
           ) : null
         )}
-        <DeclarationsList orderId={orderId} declarations={declarations} due={payment.money.balance_cents} canPay={canPay} />
-        {pendingProofs.length > 0 && (
-          <div className="space-y-2">
-            {pendingProofs.map((p: any) => (
-              <div key={p.id} className="rounded-xl border-2 border-ochre/50 bg-ochre-soft/40 p-3 text-[14px]">
-                <div className="font-semibold">Proof of payment to check</div>
-                <div className="text-ink-2">{p.amount_claimed_cents ? `Customer says ${formatMoney(p.amount_claimed_cents)} · ` : ''}{dateTime(p.created_at)}</div>
-                {p.note && <div className="text-ink-2">“{p.note}”</div>}
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <a href={`/api/files/${p.file_id ?? ''}`} onClick={(e) => { if (!p.file_id) e.preventDefault(); }} target="_blank" rel="noreferrer" className={cx(!p.file_id && 'hidden')}><Button size="sm" icon={<ExternalLink className="size-3.5" />}>Open file</Button></a>
-                  {canPay && <Button size="sm" variant="primary" onClick={() => setReviewing(p)}>Check & verify…</Button>}
-                </div>
-              </div>
-            ))}
-          </div>
+        {doneDecl.length > 0 && (
+          <ul className="text-[12.5px] text-ink-3">
+            {doneDecl.map((d: any) => <li key={d.id}>“I’ve paid” {dateTime(d.created_at)}: {d.status === 'accepted' ? 'confirmed' : 'not received'}{d.reviewed_by_name ? ` by ${d.reviewed_by_name}` : ''}{d.reviewed_at ? ` · ${dateTime(d.reviewed_at)}` : ''}</li>)}
+          </ul>
         )}
         {payment.payments.length > 0 && (
           <ul className="divide-y divide-line text-[14px]">
@@ -225,8 +247,53 @@ export function PaymentPanel({ orderId, payment, declarations = [], finalized, c
       </Card>
       {recording && <RecordPaymentSheet orderId={orderId} due={payment.money.balance_cents} onClose={() => setRecording(false)} />}
       {reviewing && <ReviewProofSheet orderId={orderId} proof={reviewing} due={payment.money.balance_cents} onClose={() => setReviewing(null)} />}
+      {checking && <PaymentCheckSheet orderId={orderId} due={payment.money.balance_cents} claimed={pendingDecl[0]?.amount_cents ?? pendingProofs[0]?.amount_claimed_cents ?? null} paidOn={pendingDecl[0]?.paid_on ?? null} reference={pendingDecl[0]?.payer_reference ?? null} onClose={() => setChecking(false)} />}
       <PaymentRequestSheet orderId={orderId} open={sending} onClose={() => setSending(false)} />
     </section>
+  );
+}
+
+/** The bank check: confirm what arrived, or record that it hasn't (no email unless you choose). Never sends a payment request. */
+function PaymentCheckSheet({ orderId, due, claimed, paidOn, reference, onClose }: { orderId: string; due: number | null; claimed: number | null; paidOn: string | null; reference: string | null; onClose: () => void }) {
+  const a = useOrderAction(orderId);
+  const [amount, setAmount] = useState((((claimed ?? due) ?? 0) / 100).toFixed(2));
+  const [date, setDate] = useState(paidOn ?? todayYmd());
+  const [ref, setRef] = useState(reference ?? '');
+  const [checked, setChecked] = useState(false);
+  const [note, setNote] = useState('');
+  const [tell, setTell] = useState(false);
+  const [message, setMessage] = useState('We can’t see your payment in our account yet. Please check the reference and amount, or reply with your proof of payment.');
+  const go = useMutation({
+    mutationFn: (result: 'confirmed' | 'not_received') =>
+      api.post(`/api/orders/${orderId}/payment-check`, result === 'confirmed' ? { result, amount_cents: toCents(amount), paid_on: ymdOk(date) ? date : null, reference: ref.trim() || null, note: note.trim() || null } : { result, note: note.trim() || null, notify_customer: tell, message: tell ? message : null }),
+    onSuccess: (_r, result) => { a.done(result === 'confirmed' ? 'Payment confirmed' : tell ? 'Marked not received — the customer was emailed' : 'Marked not received — nothing was sent to the customer'); onClose(); },
+    onError: a.fail,
+  });
+  const cents = toCents(amount);
+  return (
+    <Sheet open onClose={onClose} title="Check the payment" subtitle={due != null ? `Outstanding ${formatMoney(due)}` : undefined}>
+      <div className="space-y-5 text-[14.5px]">
+        <div className="space-y-3 rounded-xl border border-line p-3">
+          <div className="font-semibold">Found it in the bank</div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Amount received (R)"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+            <Field label="Date received"><Input type="date" max={todayYmd()} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+          </div>
+          <Field label="Bank reference" optional><Input value={ref} onChange={(e) => setRef(e.target.value)} maxLength={80} /></Field>
+          {due != null && cents > 0 && cents < due && <p className="rounded-xl bg-ochre-soft px-3 py-2 text-[13.5px] text-ochre-soft-ink">Part payment: {formatMoney(due - cents)} will still be outstanding.</p>}
+          <label className="flex items-start gap-2"><input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} className="mt-0.5 size-5 shrink-0 accent-[var(--brand)]" />I’ve checked the bank account and this money has arrived.</label>
+          <Button full variant="success" icon={<Check className="size-4" />} disabled={!checked || !(cents > 0)} loading={go.isPending && go.variables === 'confirmed'} onClick={() => go.mutate('confirmed')}>Confirm payment</Button>
+        </div>
+        <div className="space-y-3 rounded-xl border border-line p-3">
+          <div className="font-semibold">Payment not received</div>
+          <Field label="Internal note" optional hint="Only staff see this."><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Nothing from this name by 4 Nov" /></Field>
+          <label className="flex items-start gap-2"><input type="checkbox" checked={tell} onChange={(e) => setTell(e.target.checked)} className="mt-0.5 size-5 shrink-0 accent-[var(--brand)]" />Email the customer about it</label>
+          {tell && <Field label="Message the customer sees"><Textarea rows={3} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={500} /></Field>}
+          <Button full variant="danger" icon={<X className="size-4" />} disabled={tell && !message.trim()} loading={go.isPending && go.variables === 'not_received'} onClick={() => go.mutate('not_received')}>Mark payment not received</Button>
+          <p className="text-[12.5px] text-ink-3">The amount stays outstanding. To ask again, use “Send payment request” separately.</p>
+        </div>
+      </div>
+    </Sheet>
   );
 }
 

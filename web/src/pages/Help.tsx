@@ -44,7 +44,7 @@ export default function Help() {
     .map((g) => ({ ...g, items: g.items.filter((f) => words.every((w) => `${f.q} ${f.a}`.toLowerCase().includes(w))) }))
     .filter((g) => g.items.length);
   return (
-    <PublicShell subtitle="FAQs">
+    <PublicShell subtitle="FAQs" reviewBubble>
       {!info ? (
         <div className="flex justify-center py-24"><Spinner className="size-6" /></div>
       ) : (

@@ -6,7 +6,7 @@ import { db } from '../db/db.js';
 import { ORDER_STATUSES, OPEN_STATUSES, allowedTransitions, type OrderStatus } from '../../shared/workflow.js';
 import { can } from '../../shared/permissions.js';
 import { badRequest, forbidden } from '../lib/errors.js';
-import { addDays as addDaysYmd, localDate } from '../lib/time.js';
+import { addDays as addDaysYmd, localDate, localDayStartUtc } from '../lib/time.js';
 import { businessTz } from '../services/settings.js';
 import { listExceptions } from '../domain/exceptions.js';
 import { actionsFor } from '../domain/exception-actions.js';
@@ -43,7 +43,7 @@ import { INVOICE_LABEL, attachInvoiceFile, invoiceEmail, invoiceEmailRecipients,
 import { communications, recordLinkCopied, recordWhatsApp, resendOrderConfirmation, whatsappDraft } from '../domain/communications.js';
 import { onOrderReceived, customerContact } from '../domain/lifecycle.js';
 import { deliveryInfo, setDeliveryArrangement } from '../domain/delivery.js';
-import { waivePayment } from '../domain/payments.js';
+import { pendingPaymentClaims, settlePaymentCheck, waivePayment } from '../domain/payments.js';
 import { listNotifications, notificationProblemCount, retryNotification } from '../services/notify.js';
 import { orderUrl, revokeOrderLinks } from '../services/links.js';
 import { fileHeaders, readFile, storeFile } from '../services/files.js';
@@ -70,7 +70,7 @@ r.get('/', requirePerm('orders.read'), (c) => {
   else if (view === 'today') where.push("o.requested_date = ? AND o.status != 'cancelled'"), vals.push(today);
   else if (view === 'overdue') where.push("o.requested_date < ? AND o.status NOT IN ('completed','cancelled','on_hold')"), vals.push(today);
   else if (view === 'undated') where.push("o.requested_date IS NULL AND o.status NOT IN ('completed','cancelled')");
-  else if (view === 'completed') where.push("o.status = 'completed'");
+  else if (view === 'completed' || view === 'history') where.push("o.status = 'completed'");
   else if (view === 'cancelled') where.push("o.status = 'cancelled'");
   else if (view === 'weighing') where.push("o.status = 'packed' AND o.finalized_at IS NULL");
   else if (view === 'to_request') where.push("o.status = 'packed' AND o.finalized_at IS NOT NULL AND o.payment_state IN ('not_requested','failed')");
@@ -82,12 +82,13 @@ r.get('/', requirePerm('orders.read'), (c) => {
   else if (view === 'no_address') where.push("o.fulfilment_type = 'delivery' AND (o.delivery_address IS NULL OR TRIM(o.delivery_address) = '') AND o.status NOT IN ('completed','cancelled')");
   else if (view === 'unpaid_released') where.push("o.released_unpaid_at IS NOT NULL AND o.payment_state NOT IN ('paid','waived') AND o.status != 'cancelled'");
   else if (view === 'delivered_unpaid') where.push("o.status = 'completed' AND o.payment_state NOT IN ('paid','waived') AND COALESCE(o.final_total_cents, o.estimated_total_cents, 0) > o.amount_paid_cents");
-  else if (view === 'stage_new') where.push("o.status IN ('review','needs_clarification','confirmed','on_hold')");
-  else if (view === 'stage_cutting') where.push("o.status IN ('cutting','cut')");
+  else if (view === 'stage_new') where.push("o.status IN ('review','needs_clarification','on_hold')");
+  else if (view === 'stage_confirmed') where.push("o.status = 'confirmed'");
+  else if (view === 'stage_processing' || view === 'stage_cutting') where.push("o.status IN ('cutting','cut','packing')");
   else if (view === 'stage_packing') where.push("o.status = 'packing'");
   else if (view === 'stage_packed') where.push("o.status IN ('packed','ready')");
   else if (view === 'stage_out') where.push("o.status = 'out_for_delivery'");
-  else if (view === 'stage_delivered') where.push("o.status = 'completed' AND o.completed_at >= ?"), vals.push(`${addDaysYmd(today, -6)}T00:00:00`);
+  else if (view === 'stage_delivered') where.push("o.status = 'completed' AND o.completed_at >= ?"), vals.push(localDayStartUtc(addDaysYmd(today, -6), businessTz()));
   else if (view === 'awaiting_customer') where.push("EXISTS (SELECT 1 FROM order_amendments a WHERE a.order_id = o.id AND a.status = 'proposed' AND a.requires_approval = 1)");
   if (q.status && (ORDER_STATUSES as readonly string[]).includes(q.status)) where.push('o.status = ?'), vals.push(q.status);
   const from = ymdParam(q.from);
@@ -99,14 +100,15 @@ r.get('/', requirePerm('orders.read'), (c) => {
   if (q.q) {
     const s = q.q.trim();
     const n = /^#?\d+$/.test(s) ? Number(s.replace('#', '')) : -1;
-    where.push('(o.order_number = ? OR c.name LIKE ? OR o.notes LIKE ?)');
-    vals.push(n, `%${s}%`, `%${s}%`);
+    const digits = s.replace(/\D/g, '');
+    where.push("(o.order_number = ? OR c.name LIKE ? OR o.notes LIKE ? OR c.email LIKE ? OR (? != '' AND REPLACE(REPLACE(COALESCE(o.contact_phone, c.phone, ''), ' ', ''), '+', '') LIKE ?) OR EXISTS (SELECT 1 FROM order_items i JOIN products p ON p.id = i.product_id WHERE i.order_id = o.id AND i.status = 'active' AND COALESCE(i.product_name_snap, p.canonical_name) LIKE ?))");
+    vals.push(n, `%${s}%`, `%${s}%`, `%${s}%`, digits.length >= 6 ? digits : '', `%${digits.slice(-9)}%`, `%${s}%`);
   }
   const limit = Math.min(Number(q.limit) || 50, 200);
   const offset = Math.max(Number(q.offset) || 0, 0);
   const sort =
-    view === 'completed' || view === 'cancelled' || view === 'stage_delivered' || view === 'delivered_unpaid'
-      ? 'o.updated_at DESC'
+    view === 'completed' || view === 'history' || view === 'cancelled' || view === 'stage_delivered' || view === 'delivered_unpaid'
+      ? 'COALESCE(o.completed_at, o.updated_at) DESC'
       : "CASE WHEN o.requested_date IS NULL THEN 1 ELSE 0 END, o.requested_date, o.order_number";
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const total = (db().prepare(`SELECT COUNT(*) n FROM orders o JOIN customers c ON c.id = o.customer_id ${whereSql}`).get(...vals) as any).n;
@@ -464,6 +466,19 @@ staffPayments.post('/declarations/:id/review', requirePerm('payments.write'), as
   const input = await body(c, z.discriminatedUnion('accept', [z.object({ accept: z.literal(true), amount_cents: z.number().int().positive().max(100_000_000), note: z.string().max(500).nullable().optional() }), z.object({ accept: z.literal(false), reason: z.string().trim().min(1, 'Say what’s missing').max(500) })]));
   const payment = reviewDeclaration(c.req.param('id'), input as any, actorOf(c));
   return c.json({ ok: true, payment });
+});
+
+/** The bank check for everything a customer has said they've paid: confirm, or "payment not received". */
+r.post('/:id/payment-check', requirePerm('payments.write'), async (c) => {
+  const input = await body(
+    c,
+    z.discriminatedUnion('result', [
+      z.object({ result: z.literal('confirmed'), amount_cents: z.number().int().positive().max(100_000_000), paid_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), reference: z.string().trim().max(80).nullable().optional(), note: z.string().max(500).nullable().optional() }),
+      z.object({ result: z.literal('not_received'), note: z.string().max(500).nullable().optional(), notify_customer: z.boolean().default(false), message: z.string().max(500).nullable().optional() }),
+    ]),
+  );
+  const payment = settlePaymentCheck(c.req.param('id'), input as any, actorOf(c));
+  return c.json({ ok: true, payment, summary: paymentSummary(c.req.param('id')) });
 });
 
 staffPayments.post('/payments/:id/reverse', requirePerm('payments.write'), async (c) => {

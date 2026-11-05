@@ -230,7 +230,8 @@ r.post('/orders', rateLimit('public-order', 8, 10 * 60_000), async (c) => {
   // Products are frozen. Delivery: the standard flat fee, stored on the order now (later fee changes never touch it)
   const std = standardDeliveryFeeCents();
   const arrangement = fulfilmentType === 'collection' ? 'collection' : 'standard';
-  db().prepare("UPDATE orders SET storage = 'frozen', delivery_arrangement = ?, delivery_fee_cents = ? WHERE id = ?").run(arrangement, arrangement === 'collection' ? 0 : std, order.id);
+  // An address with the delivery fee is a delivery (staff can still switch it to collection, which removes the fee)
+  db().prepare("UPDATE orders SET storage = 'frozen', delivery_arrangement = ?, delivery_fee_cents = ?, fulfilment_type = COALESCE(fulfilment_type, ?) WHERE id = ?").run(arrangement, arrangement === 'collection' ? 0 : std, arrangement === 'collection' ? 'collection' : 'delivery', order.id);
   recomputeTotals(order.id);
   deleteDraft(c);
   if (special) {

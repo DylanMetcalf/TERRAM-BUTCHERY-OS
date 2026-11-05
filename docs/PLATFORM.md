@@ -56,11 +56,18 @@ Weighed items can get a final weight while **cutting, packing, packed or ready**
 
 ## Payments
 
-- States: not requested, requested, customer said paid / proof sent (awaiting verification), part paid, paid, payment not confirmed (rejected), waived.
+- States: not requested, payment requested, **awaiting verification** (the customer tapped "Already paid?" or sent proof), part paid, paid, **payment not received** (checked, not found), waived. Payment never decides where an order is in production or delivery.
 - The customer taps **Already paid?** on their **payment page** (never from the email), optionally adds a proof, and sees a **thank-you page** once. The payment page stays the permanent place to come back to.
-- Each "I've paid" or proof sends **"Payment Verification Required — Terram Farm — #N"** to the payment reviewers (*Settings → Emails & reminders → Who checks the bank*, default Sharonm@Imagine.co.za), once per declaration or proof. It links to the order; nothing in the email marks anything paid.
-- Managers can record full or part payments with the **date received** and **bank reference**, waive a payment (with a reason), or reject a declaration or proof.
-- **Unpaid release**: a manager can send an unpaid order out (*More → Send out for delivery unpaid…*) after a warning, a confirmation and a reason. Their name, the time and the reason are recorded. The payment status doesn't change, and it stays on the dashboard as owed.
+- Each new "I've paid" or proof sends **"Payment Verification Required — Terram Farm — #N"** to the payment reviewers (*Settings → Emails & reminders → Who checks the bank*, default Sharonm@Imagine.co.za). Repeat taps while one is pending don't create another alert. Nothing is sent to the customer except a short "thanks, we'll check" acknowledgement, and **no payment request is re-sent**.
+- On the order, the next step is **Check payment** (it also appears on the dashboard under **Payments to check**):
+  - **Confirm payment**: enter the amount that arrived, the date and bank reference. One payment is recorded with your name, the balance updates and the task disappears.
+  - **Payment not received**: add an internal note (staff only). The balance stays owed, the history is kept, and the customer is **only emailed if you tick it and write the message**. To ask again, use **Send payment request** separately: it shows the recipient and amount first and needs "Send again".
+- Managers can also record full or part payments with date and reference, or waive a payment with a reason.
+- **Unpaid release**: a manager can send an unpaid order out (*More → Send out for delivery unpaid…*) after a warning, a confirmation and a reason. Their name, the time and the reason are recorded. The payment stays owed and shows in Out for Delivery, and after delivery in *Fulfilment → History → Not paid* and *Attention → Delivered · not paid*.
+
+## Dashboard
+
+Top to bottom: **New orders · needs review** (most prominent, with the reason), **Payments to check**, **Confirmed**, **Processing** (cutting and packing), **Packed & Ready**, **Out for Delivery** (address, instructions, phone, unpaid marked), then **Waiting on us** (only staff tasks not already shown above) and **Attention** (open problems). Delivered orders are in **Fulfilment → History**, searchable by name, number, phone, email or product, with a "Not paid" filter. "Cutting" is now shown as **Processing** everywhere; the cutting list page is under *Processing* in the menu.
 
 ## Invoices
 

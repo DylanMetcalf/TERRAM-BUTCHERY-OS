@@ -19,16 +19,16 @@ export const ORDER_STATUSES = [
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 export const STATUS_LABEL: Record<OrderStatus, string> = {
-  review: 'To review',
+  review: 'New',
   needs_clarification: 'Needs clarification',
   confirmed: 'Confirmed',
-  cutting: 'Cutting',
-  cut: 'Cut',
-  packing: 'Packing',
+  cutting: 'Processing',
+  cut: 'Processing · cut',
+  packing: 'Processing · packing',
   packed: 'Packed',
-  ready: 'Ready',
+  ready: 'Ready for delivery',
   out_for_delivery: 'Out for delivery',
-  completed: 'Completed',
+  completed: 'Delivered',
   on_hold: 'On hold',
   cancelled: 'Cancelled',
 };
@@ -107,9 +107,9 @@ export function primaryNextStep(status: OrderStatus, fulfilment: 'collection' | 
     case 'needs_clarification':
       return null;
     case 'confirmed':
-      return { to: 'cutting', label: 'Start cutting' };
+      return { to: 'cutting', label: 'Start processing' };
     case 'cutting':
-      return { to: 'cut', label: 'Mark cut' };
+      return { to: 'cut', label: 'Cutting done' };
     case 'cut':
       return { to: 'packing', label: 'Start packing' };
     case 'packing':

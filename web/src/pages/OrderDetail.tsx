@@ -17,8 +17,8 @@ import {
   Trash2,
   User,
 } from 'lucide-react';
-import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { primaryNextStep, SOURCE_LABEL, STATUS_LABEL, type OrderStatus } from '../../../shared/workflow';
 import { ExceptionCard } from '../components/ExceptionCard';
 import { AmendmentsPanel, ConfirmSheet, CustomerLinkCard, ExpectedRow, InvoiceNotifySheet, InvoicePanel, NotificationList, PaymentPanel, TimeframeSheet } from '../components/OrderPlatform';
@@ -76,6 +76,7 @@ export default function OrderDetail() {
   const toast = useToast();
   const can = useCan();
   const navigate = useNavigate();
+  const location = useLocation();
   const { ask, node: confirmNode } = useConfirm();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['order', id], queryFn: () => api.get<Detail>(`/api/orders/${id}`) });
   const [editing, setEditing] = useState<OrderItem | null>(null);
@@ -150,6 +151,16 @@ export default function OrderDetail() {
     onError: onErr,
   });
 
+  // Links like /orders/:id#payment-check (from the dashboard) land on that part of the page
+  const hash = location.hash;
+  const loaded = !!data;
+  useEffect(() => {
+    if (!loaded || !hash) return;
+    const t = setTimeout(() => {
+      document.getElementById(hash.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 150);
+    return () => clearTimeout(t);
+  }, [loaded, hash]);
   if (error) return <ErrorState error={error} retry={refetch} />;
   if (isLoading || !data) return <LoadingBlock rows={5} />;
   const { order: o, items, events, messages, exceptions } = data;
@@ -163,6 +174,8 @@ export default function OrderDetail() {
   const blocked = openEx.some((e) => e.severity === 'blocking');
   const secondary = data.transitions.filter((t) => t !== next?.to);
   const today = todayYmd();
+  /** The customer says they've paid (or sent proof): the next step is checking the bank, not asking again. */
+  const awaitingCheck = !['paid', 'waived'].includes(data.order.payment_state ?? '') && ((data.declarations ?? []).some((d: any) => d.status === 'submitted') || (data.payment?.proofs ?? []).some((p: any) => p.status === 'submitted'));
   const total: number | null = data.money?.final_cents != null ? data.money.final_cents - (data.money.delivery_fee_cents ?? 0) : active.reduce<number | null>((sum, i) => {
     const p = i.final_cents ?? i.est_cents ?? estimateLinePrice(i.qty, i.price_cents, i.price_unit);
     return sum == null || p == null ? null : sum + p;
@@ -266,8 +279,10 @@ export default function OrderDetail() {
             {o.status === 'packed' && (canWrite || canProduce) ? (
               !o.finalized_at ? (
                 <Button variant="primary" size="lg" icon={<Check className="size-5" />} className="sm:min-w-52" onClick={() => setWeighing(true)}>Final weighing</Button>
-              ) : o.payment_state !== 'paid' ? (
-                <Button variant="primary" size="lg" icon={<Check className="size-5" />} className="sm:min-w-52" onClick={() => setRequesting(true)}>{o.payment_state === 'not_requested' || o.payment_state === 'failed' ? 'Send payment request' : 'Payment request'}</Button>
+              ) : awaitingCheck ? (
+                <Button variant="primary" size="lg" icon={<Check className="size-5" />} className="sm:min-w-52" onClick={() => document.getElementById('payment-check')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>Check payment</Button>
+              ) : o.payment_state === 'not_requested' || o.payment_state === 'failed' ? (
+                <Button variant="primary" size="lg" icon={<Check className="size-5" />} className="sm:min-w-52" onClick={() => setRequesting(true)}>Send payment request</Button>
               ) : null
             ) : next && nextAllowed && (
               <Button variant={o.status === 'ready' || o.status === 'out_for_delivery' ? 'success' : 'primary'} size="lg" loading={move.isPending} disabled={blocked && ['confirmed', 'cutting'].includes(next.to)} onClick={() => (o.status === 'packing' || o.status === 'cut' ? navigate('/packing') : next.to === 'confirmed' && !o.confirmed_at ? setConfirming(true) : move.mutate({ to: next.to }))} icon={<Check className="size-5" />} className="sm:min-w-52">
@@ -278,7 +293,7 @@ export default function OrderDetail() {
           {blocked && <p className="mt-3 text-[13.5px] text-brand">Answer the question{openEx.length > 1 ? 's' : ''} below before this order can be confirmed or cut.</p>}
           {o.status === 'needs_clarification' && !blocked && <p className="mt-3 text-[13.5px] text-ink-2">All questions are answered. Move it back to review when ready.</p>}
           {o.status === 'packed' && !o.finalized_at && <p className="mt-3 text-[13.5px] text-ink-2">Packed. Next: final weighing — enter the actual weights, check the packs, then finalize the amount.</p>}
-          {o.status === 'packed' && o.finalized_at && o.payment_state !== 'paid' && <p className="mt-3 text-[13.5px] text-ink-2">{o.payment_state === 'proof_submitted' ? 'The customer has paid or sent proof — check the bank, then confirm the payment below.' : 'Finalized. The order is released for ' + (o.fulfilment_type === 'collection' ? 'collection' : 'delivery') + ' once payment is confirmed.'}</p>}
+          {o.status === 'packed' && o.finalized_at && o.payment_state !== 'paid' && <p className="mt-3 text-[13.5px] text-ink-2">{awaitingCheck ? 'The customer says they’ve paid — check the bank, then use Confirm payment or Payment not received below.' : 'Finalized. The order is released for ' + (o.fulfilment_type === 'collection' ? 'collection' : 'delivery') + ' once payment is confirmed.'}</p>}
         </Card>
       )}
       {o.status === 'on_hold' && <Card className="mb-5 bg-sunken p-4 text-[14.5px] text-ink-2">This order is on hold. Use “More” to put it back into the workflow.</Card>}
@@ -416,7 +431,7 @@ export default function OrderDetail() {
             </Card>
           </section>
 
-          <CommunicationsPanel orderId={o.id} canWrite={canWrite} canPay={can('payments.write')} hasInvoice={!!data.invoice?.file} invoiceSent={!!data.invoice?.sent_at} paymentReady={!!o.finalized_at && !['paid', 'waived'].includes(o.payment_state ?? '')} onInvoiceNotify={() => setInvoiceNotify(true)} />
+          <CommunicationsPanel orderId={o.id} canWrite={canWrite} canPay={can('payments.write')} hasInvoice={!!data.invoice?.file} invoiceSent={!!data.invoice?.sent_at} paymentReady={!!o.finalized_at && !['paid', 'waived'].includes(o.payment_state ?? '')} awaitingCheck={awaitingCheck} onInvoiceNotify={() => setInvoiceNotify(true)} />
 
           {can('system.health') && (data.notifications ?? []).length > 0 && (
             <details className="group">

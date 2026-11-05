@@ -3,7 +3,9 @@ import { addDays, localDate } from '../lib/time.js';
 import { audit, CUSTOMER, type Actor } from '../services/audit.js';
 import { businessTz } from '../services/settings.js';
 import { createCustomer } from '../domain/customers.js';
-import { completePacking, createOrder, getItems, markCustomerNotified, requireOrder, setItemPacked, setItemsCut, transition, updateOrder } from '../domain/orders.js';
+import { completePacking, createOrder, expectedGrams, getItems, markCustomerNotified, orderMoney, requireOrder, setItemPacked, setItemWeight, setItemsCut, transition, updateOrder } from '../domain/orders.js';
+import { finalizeOrder } from '../domain/finalize.js';
+import { recordVerifiedPayment } from '../domain/payments.js';
 import { listProducts } from '../domain/products.js';
 import { analyseImport, commitBatch, getBatch } from '../intelligence/imports.js';
 
@@ -148,10 +150,16 @@ export async function loadSampleData(actor: Actor) {
     setItemPacked(items[0].id, true, actor);
     if (to === 'packing') return;
     for (const it of items) setItemPacked(it.id, true, actor);
-    completePacking(orderId, actor);
+    completePacking(orderId, actor); // → Packed (final weighing is next)
     if (to === 'ready') return;
+    // Past orders: weigh at the usual weight, finalize, and mark it paid, as the family would have
+    for (const it of getItems(orderId)) if ((it.pricing === 'by_weight' || it.pricing === 'estimate') && !it.packed_weight_g) setItemWeight(it.id, expectedGrams(it) ?? 1000, actor);
+    finalizeOrder(orderId, actor, { packsConfirmed: true });
+    const due = orderMoney(orderId).balance_cents ?? 0;
+    if (due > 0) recordVerifiedPayment(orderId, { method: 'eft', amount_cents: due, note: 'Sample payment' }, actor, 'staff');
+    if (requireOrder(orderId).status === 'packed') transition(orderId, 'ready', actor, 'admin', { system: true }); // paying usually releases it already
     if (to === 'out_for_delivery') {
-      transition(orderId, 'out_for_delivery', actor, 'admin');
+      transition(orderId, 'out_for_delivery', actor, 'admin', { system: true });
       return;
     }
     markCustomerNotified(orderId, actor);
