@@ -110,7 +110,7 @@ function ReadyCard({ o, today }: { o: FOrder; today: string }) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <Link to={`/orders/${o.id}`} className="text-[18px] font-semibold hover:underline">{o.customer_name}</Link>
-            <span className="ml-2 align-middle"><StorageBadge storage={o.storage} size="sm" /></span>
+            {o.storage === 'fresh' && <span className="ml-2 align-middle"><StorageBadge storage={o.storage} size="sm" /></span>}
             <div className="text-[13.5px] text-ink-3">#{o.order_number} · <span className={cx(overdue && 'font-semibold text-danger')}>{friendlyDate(o.requested_date, today)}</span>{o.time_window ? ` · ${o.time_window}` : ''}</div>
           </div>
           <div className="flex flex-col items-end gap-1">

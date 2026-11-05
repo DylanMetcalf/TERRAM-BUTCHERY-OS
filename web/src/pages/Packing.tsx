@@ -49,9 +49,9 @@ export default function Packing() {
               const toWeigh = o.items.filter((i) => i.status === 'active' && (i.pricing === 'by_weight' || i.pricing === 'estimate'));
               const left = toWeigh.filter((i) => !i.packed_weight_g).length;
               return (
-                <Card key={o.id} className="flex items-center gap-3 p-4">
+                <Card key={o.id} className="flex min-w-0 items-center gap-3 p-4">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2"><Link to={`/orders/${o.id}`} className="truncate font-semibold hover:underline">{o.customer_name}</Link><StorageBadge storage={o.storage} size="sm" /></div>
+                    <div className="flex min-w-0 items-center gap-2"><Link to={`/orders/${o.id}`} className="min-w-0 truncate font-semibold hover:underline">{o.customer_name}</Link>{o.storage === 'fresh' && <StorageBadge storage={o.storage} size="sm" />}</div>
                     <div className="text-[13px] text-ink-3">#{o.order_number} · {toWeigh.length ? (left ? `${left} of ${toWeigh.length} to weigh` : 'All weighed') : 'Fixed packs only'}</div>
                   </div>
                   {can('orders.write') && <Button variant="primary" icon={<Scale className="size-4" />} onClick={() => setWeighing(o)}>Weigh</Button>}
@@ -126,7 +126,7 @@ function PackCard({ o }: { o: PackOrder }) {
           <Link to={`/orders/${o.id}`} className="font-display text-[19px] font-semibold leading-tight tracking-tight hover:underline">{o.customer_name}</Link>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[13.5px] text-ink-2">
             <span className="tabular">#{o.order_number}</span>
-            <StorageBadge storage={o.storage} size="sm" />
+            {o.storage === 'fresh' && <StorageBadge storage={o.storage} size="sm" />}
             <span className="inline-flex items-center gap-1">{o.fulfilment_type === 'delivery' ? <Truck className="size-4" /> : <Store className="size-4" />}{o.fulfilment_type === 'delivery' ? 'Delivery' : 'Collection'} · {friendlyDate(o.requested_date, todayYmd())}{o.time_window ? ` · ${o.time_window}` : ''}</span>
           </div>
         </div>
