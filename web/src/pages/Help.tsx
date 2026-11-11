@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PublicShell } from '../components/PublicShell';
 import { usePublicInfo } from '../components/SiteChrome';
+import { CommunityCard } from '../components/Social';
 import { cx, Spinner } from '../components/ui';
 
 /** The order categories are shown first, in this order; anything else the farm adds follows. */
@@ -80,6 +81,7 @@ export default function Help() {
               <span className="min-w-0"><span className="block font-semibold">Still have a question? Chat to us on WhatsApp</span><span className="block text-[13.5px] text-ink-2">{info.business.phone}</span></span>
             </a>
           )}
+          <CommunityCard note={info.content?.communityNote} phone={info.business.phone} name={info.business.name} />
           <div className="flex flex-wrap gap-2">
             <Link to="/order" className="inline-flex h-12 items-center rounded-xl bg-brand px-6 text-[16px] font-semibold text-brand-ink">Order now</Link>
             <Link to="/" className="inline-flex h-12 items-center rounded-xl border border-line-strong bg-surface px-5 text-[15px] font-semibold">Back to home</Link>

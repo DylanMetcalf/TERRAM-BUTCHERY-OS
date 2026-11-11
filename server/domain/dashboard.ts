@@ -5,6 +5,7 @@ import { openExceptionCount } from './exceptions.js';
 import { getOrderSummary, orderMoney } from './orders.js';
 import { PAYMENT_STATE_LABEL } from './payments.js';
 import { notificationProblemCount } from '../services/notify.js';
+import { reminderDueIds } from './reminders.js';
 
 /** Payment checks are shown in "Payments to check", so they aren't counted again as questions. */
 const NOT_PAYMENT_CHECK = "COALESCE(e.dedupe_key,'') NOT LIKE 'declared:%' AND COALESCE(e.dedupe_key,'') NOT LIKE 'proof:%'";
@@ -107,9 +108,11 @@ export function dashboard() {
   // Kept for older screens that read them
   const stages = sections.map((x) => ({ key: x.key, label: x.label, n: x.n, sub: null as string | null }));
   /** Work only we can move forward, not already shown as a section above. Customers who simply haven't paid yet are not here. */
+  const reminderDue = reminderDueIds();
   const waiting = [
     { key: 'weigh', label: 'Packed · enter final weights', n: count("SELECT COUNT(*) n FROM orders WHERE status = 'packed' AND finalized_at IS NULL"), to: '/orders?view=weighing' },
     { key: 'request', label: 'Finalized · payment request not sent yet', n: queues.finalized_not_requested, to: '/orders?view=to_request' },
+    { key: 'remind', label: 'Payment reminders due · follow up', n: reminderDue.length, to: '/orders?view=remind' },
     { key: 'invoice', label: 'Invoices to upload', n: count("SELECT COUNT(*) n FROM orders WHERE invoice_status IN ('requested','in_progress') AND invoice_file_id IS NULL AND status != 'cancelled'"), to: '/invoices' },
     { key: 'arrange', label: 'Deliveries to arrange separately', n: count("SELECT COUNT(*) n FROM orders WHERE delivery_arrangement = 'separate' AND status NOT IN ('completed','cancelled')"), to: '/orders?view=arrange' },
   ].filter((w) => w.n > 0);

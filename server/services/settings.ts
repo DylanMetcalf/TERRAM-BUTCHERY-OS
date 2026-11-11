@@ -29,6 +29,8 @@ export interface BusinessSettings {
     collectionPlace: string;
     collectionAddress: string;
     deliveryNotes: string;
+    /** Which days Hoedspruit deliveries usually happen, and that we'll be in touch if it changes. Shown at checkout, in emails and on the order page. */
+    deliveryDayNote: string;
     /** Deliveries within this distance of the shop are free… */
     freeDeliveryKm: number;
     /** Customers choose collection or delivery on the form. Off: they give an address and the family arranges it. */
@@ -77,18 +79,20 @@ export interface BusinessSettings {
     allowUnpaidRelease: boolean;
     /** How long a payment-page link in an email keeps working. */
     linkDays: number;
+    /** Days after a payment request before staff are reminded to follow up (0 = off). Nothing is sent automatically. */
+    reminderDays: number;
   };
   /** Questions and answers on the FAQ page, in categories. Edited in Settings. */
   help: { faq: { q: string; a: string; category?: string }[] };
   /** Editable website text (About page). Only what the farm says about itself — nothing is invented. */
-  content: { aboutIntro: string; aboutSections: { title: string; body: string }[] };
+  content: { aboutIntro: string; aboutSections: { title: string; body: string }[]; /** The “share the love” note: reuse our boxes for compost, share photos, tag us. */ communityNote: string };
   /** Reorder reminders and feedback after an order is completed. */
   retention: { remindersEnabled: boolean; reminderDays: number; feedbackEnabled: boolean };
   /** Who is told what (customer emails are always the essential ones; these are optional extras). */
   notifications: { staffEmails: string[]; notifyPreparation: boolean; invoiceReadyEmail: boolean; /** Who checks the bank when a customer says they've paid. */ paymentReviewEmails: string[] };
   /** Stock section housekeeping (starter items are added once). */
   stock: { seeded: boolean };
-  customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean; terms: string; /** Shown when choosing a date. */ noticeNote: string; /** Who gets an email for every online order. */ notifyEmails: string[]; /** Email the customer a copy of their order when they give an address. */ emailCustomer: boolean };
+  customerForm: { enabled: boolean; intro: string; confirmationMessage: string; showPrices: boolean; terms: string; /** Shown when choosing a date. */ noticeNote: string; /** Who gets an email for every online order. */ notifyEmails: string[]; /** Email the customer a copy of their order when they give an address. */ emailCustomer: boolean; /** Tells customers that order updates come by email and delivery is arranged on WhatsApp. */ emailNote: string };
   /** Brand kit: logo (data URL), generated square app icons, and the main brand colour. */
   brand: { logo: string | null; icon192: string | null; icon512: string | null; primary: string; showName: boolean; version: number };
 }
@@ -125,6 +129,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     collectionHours: '08:00 – 17:00',
     collectionPlace: 'our shop',
     collectionAddress: '',
+    deliveryDayNote: 'We usually deliver Hoedspruit orders on a Monday or Tuesday. If that changes, we will be in touch to let you know.',
     deliveryNotes: 'We deliver in Pretoria and surrounds. A delivery fee may apply depending on distance; we’ll confirm it with you.',
     freeDeliveryKm: 60,
     deliveryRatePerKmCents: 0,
@@ -133,7 +138,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     freshMaxHours: 2,
     deliveryPricing: 'flat',
     flatDeliveryFeeCents: 15000,
-    deliveryAreaText: 'We deliver within our regular local delivery area: the local town and the areas around the farmhouse shop and Hoodspruit Wildlife Estates. Other locations can be arranged separately.',
+    deliveryAreaText: 'We deliver within our regular local delivery area: the local town and the areas around the farmhouse shop and Hoedspruit Wildlife Estates. Other locations can be arranged separately.',
     deliveryPolicyText: 'We will contact you to confirm the delivery arrangements for your order.',
   },
   ai: { enabled: true, model: 'claude-opus-5', effort: 'low', learningThreshold: 2 },
@@ -155,6 +160,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     requirePaymentBeforeRelease: true,
     allowUnpaidRelease: false,
     linkDays: 30,
+    reminderDays: 7,
   },
   help: {
     faq: [
@@ -185,8 +191,9 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     aboutSections: [
       { title: 'What we offer', body: 'Farm-raised beef and farm-raised lamb, cut to order and vacuum-packed. Some cuts are sold in fixed packs (like our 500 g mince packets) and others are weighed, so the final price follows the actual weight.' },
       { title: 'How it works', body: 'You order online, we confirm your order, then cut, pack and weigh it. Once the final amount is known we send you a secure payment page, and we arrange delivery or collection with you.' },
-      { title: 'Where we are', body: 'Our farmhouse shop serves the local town and the surrounding areas, including Hoodspruit Wildlife Estates.' },
+      { title: 'Where we are', body: 'Our farmhouse shop serves the local town and the surrounding areas, including Hoedspruit Wildlife Estates.' },
     ],
+    communityNote: 'We would love our customers to reuse our boxes for compost, and to share their photos with us: when your order arrives, or while you are braaiing or enjoying a meal. WhatsApp your photos to us with your social media handle if you would like to be tagged when we share them.',
   },
   stock: { seeded: false },
   customerForm: {
@@ -196,6 +203,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     showPrices: true,
     notifyEmails: ['dylan@meacreo.co.za', 'Sharonm@imagine.co.za'],
     emailCustomer: true,
+    emailNote: 'Most of our order updates (your confirmation, payment details and invoice) are sent by email, so please use an email address you check. We will contact you on WhatsApp about your delivery.',
     noticeNote: 'We recommend ordering 7–14 days ahead. Sooner dates depend on what we have in stock; we’ll confirm with you.',
     terms: [
       'We recommend placing orders 7–14 days in advance. Sooner orders depend on stock, and we’ll confirm what we can do.',
@@ -244,6 +252,7 @@ export function updateSettings(section: keyof BusinessSettings, value: unknown, 
 const REWORDED: [section: keyof BusinessSettings, key: string, old: string[]][] = [
   ['customerForm', 'terms', ["Please place orders at least 2 weeks to 1 month in advance, so we can prepare your order to the highest standard.\nPrices are per kg and subject to change. Your final price is based on the actual packed weight.\nLimited to stock availability.\nDry-aged beef is available only for Rump, Sirloin, T-Bone and Rib-Eye. It is aged for up to 30 days, carries a 25% surcharge on the normal price, and must be confirmed by Terram Farm before processing.\nDelivery fees apply to deliveries."]],
   ['customerForm', 'intro', ['Farm-raised beef and lamb. Orders are subject to processing time and stock availability. Your order is confirmed once Terram Farm accepts it.']],
+  ['fulfilment', 'deliveryAreaText', ['We deliver within our regular local delivery area: the local town and the areas around the farmhouse shop and Hoodspruit Wildlife Estates. Other locations can be arranged separately.']],
   ['fulfilment', 'deliveryNotes', ['Delivery can be arranged. Delivery fees apply.', 'We deliver in Pretoria. Delivery fees apply.', 'Deliveries within the local area only.']],
 ];
 export function refreshDefaultWording() {

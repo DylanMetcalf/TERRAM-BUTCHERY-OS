@@ -200,6 +200,18 @@ export function invoiceEmailRecipients(orderId: string): string[] {
   return [...new Set([d?.billing_email, c.email].filter(Boolean).map((x) => x!.toLowerCase()))];
 }
 
+/** The WhatsApp text for sending the invoice: a secure link to the customer's order page, where the file downloads. */
+export function invoiceWhatsApp(orderId: string) {
+  const o = requireOrder(orderId);
+  const c = customerContact(orderId);
+  const s = getSettings();
+  return [
+    `Hi ${c.firstName}, here is your ${s.business.name} invoice for order #${o.order_number}${o.invoice_ref ? ` (invoice ${o.invoice_ref})` : ''}.`,
+    `You can view and download it securely here: ${orderUrl(orderId, '#invoice')}`,
+    'Thank you!',
+  ].join('\n\n');
+}
+
 export function invoiceEmail(orderId: string) {
   const o = requireOrder(orderId);
   const d = json<InvoiceRequestDetails | null>((db().prepare('SELECT invoice_details FROM orders WHERE id = ?').get(orderId) as any)?.invoice_details, null);

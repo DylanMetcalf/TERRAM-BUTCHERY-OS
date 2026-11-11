@@ -94,6 +94,7 @@ export function onOrderReceived(orderId: string, opts: { special: string | null;
         ...(items.length ? [{ heading: 'What you ordered', lines: items.map((i) => lineFor(i)), paragraphs: [totalLine(orderId)].filter(Boolean) as string[] }] : []),
         ...(opts.special ? [{ note: `Special request: ${opts.special}\nWe'll confirm availability and price with you before anything is prepared.` }] : []),
         { heading: 'When', paragraphs: [`${lead} We'll confirm your expected timeframe once your order has been reviewed.`] },
+        { heading: 'How we will be in touch', paragraphs: [o.fulfilment_type === 'collection' ? s.customerForm.emailNote.split(/(?<=[.!?])\s+/).filter((x) => !/deliver/i.test(x)).join(' ') : s.customerForm.emailNote, ...(o.fulfilment_type === 'collection' ? [] : [s.fulfilment.deliveryDayNote])].filter(Boolean) },
         { heading: 'What happens next', paragraphs: ['1. We check your order and confirm it with you.', '2. We cut, weigh and pack it. Weighed items are priced on their final weight.', '3. We send you the final amount with our banking details. Pay by EFT and tap "Already paid?" on your payment page.', '4. We deliver on your delivery day (or you collect).'] },
       ],
       cta: { label: 'View my order', url: orderUrl(orderId) },
@@ -155,7 +156,7 @@ export function onOrderConfirmed(orderId: string, actor: Actor) {
     blocks: [
       { heading: 'Order reference', paragraphs: [`#${o.order_number}`] },
       { heading: 'Confirmed products', lines: items.map((i) => lineFor(i)), paragraphs: [totalLine(orderId)].filter(Boolean) as string[] },
-      { heading: 'Collection or delivery', facts: fulfilmentFacts(o) },
+      { heading: 'Collection or delivery', facts: fulfilmentFacts(o), ...(o.fulfilment_type === 'collection' ? {} : { paragraphs: [getSettings().fulfilment.deliveryDayNote, 'We will contact you on WhatsApp about your delivery.'].filter(Boolean) }) },
       { heading: 'Expected timeframe', paragraphs: [when ?? "We'll let you know the expected date shortly."] },
     ],
     closing: [

@@ -3,7 +3,7 @@ import { useEffect, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { BackToTop } from '../components/BackToTop';
 import { SiteFooter, SiteHeader, usePublicInfo } from '../components/SiteChrome';
-import { GoogleReviewCard, InstagramCard, ReviewBubble } from '../components/Social';
+import { CommunityCard, GoogleReviewCard, InstagramCard, ReviewBubble } from '../components/Social';
 import { cx, Spinner } from '../components/ui';
 import { highlights, paras, splitHeadline } from '../lib/story';
 
@@ -132,6 +132,7 @@ export default function About() {
                 </div>
               </div>
             </section>
+            <CommunityCard note={info.content?.communityNote} phone={info.business.phone} name={name} />
             {(info.business.googleReviewUrl || info.business.instagramUrl) && (
               <div className="grid items-start gap-4 sm:grid-cols-2">
                 <GoogleReviewCard url={info.business.googleReviewUrl} name={name} lead={`Ordered from ${name}? Tell others what you thought`} />

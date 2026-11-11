@@ -200,6 +200,7 @@ export function customerOrderView(orderId: string) {
     feedback: s.retention.feedbackEnabled && o.status === 'completed' ? { given: fb ? { rating: fb.rating, comment: fb.comment } : null } : null,
     contact: { phone: s.business.phone, email: s.business.email, name: s.business.name },
     // Google review invitation only once this customer has actually received an order from us
+    notes: { community: s.content.communityNote || null, delivery_day: s.fulfilment.deliveryDayNote || null },
     social: {
       instagram: s.business.instagramUrl || null,
       review: s.business.googleReviewUrl && (o.status === 'completed' || isReturningCustomer(o.customer_id, orderId)) ? s.business.googleReviewUrl : null,

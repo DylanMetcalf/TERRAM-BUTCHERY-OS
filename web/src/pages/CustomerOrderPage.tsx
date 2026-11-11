@@ -8,7 +8,7 @@ import { Button, Card, cx, Field, Input, Sheet, Spinner, Textarea } from '../com
 import { api, ApiError } from '../lib/api';
 import { dateTime, formatMoney, longDate } from '../lib/format';
 import { REORDER_KEY, rememberOrder } from '../lib/customer';
-import { GoogleReviewCard, InstagramCard } from '../components/Social';
+import { CommunityCard, GoogleReviewCard, InstagramCard } from '../components/Social';
 
 /**
  * The customer's own order page, opened from the signed link in their emails. It shows where the
@@ -128,7 +128,7 @@ export default function CustomerOrderPage() {
           </Row>
           {o.fulfilment.type !== 'collection' && o.fulfilment.instructions && <Row label="Delivery instructions">{o.fulfilment.instructions}</Row>}
           {o.fulfilment.type !== 'collection' && <Row label="Delivery fee">{o.fulfilment.arrangement === 'separate' ? 'Arranged separately' : o.fulfilment.delivery_fee_cents != null ? formatMoney(o.fulfilment.delivery_fee_cents, cur) : 'To be confirmed'}</Row>}
-          {o.fulfilment.type !== 'collection' && <p className="text-[13.5px] text-ink-3">We will contact you to confirm the delivery arrangements.</p>}
+          {o.fulfilment.type !== 'collection' && <p className="text-[13.5px] text-ink-3">{[o.notes?.delivery_day, 'We will contact you on WhatsApp to confirm the delivery arrangements.'].filter(Boolean).join(' ')}</p>}
         </Card>
 
         {o.amendments.some((a: any) => a.needs_answer) && <Amendments o={o} token={token} onDone={setOrder} />}
@@ -205,6 +205,7 @@ export default function CustomerOrderPage() {
 
         {o.status === 'completed' && <GoogleReviewCard url={o.social?.review} name={o.contact.name} lead={`Thank you for supporting ${o.contact.name}!`} />}
         {o.feedback && <Feedback o={o} token={token} onDone={setOrder} />}
+        <CommunityCard note={o.notes?.community} phone={o.contact.phone} name={o.contact.name} reference={o.order_number} />
         <InstagramCard url={o.social?.instagram} name={o.contact.name} />
 
         <div className="flex flex-wrap gap-2">

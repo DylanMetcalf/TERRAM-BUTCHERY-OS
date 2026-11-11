@@ -296,7 +296,7 @@ function Review({ batchId }: { batchId: string }) {
       </div>
 
       {!committed && (
-        <div className="safe-bottom fixed inset-x-0 bottom-[68px] z-20 border-t border-line bg-surface/95 backdrop-blur lg:bottom-0 lg:left-[256px]">
+        <div className="fixed inset-x-0 bottom-[var(--nav-h)] z-20 border-t border-line bg-surface/95 backdrop-blur lg:bottom-0 lg:left-[256px]">
           <div className="mx-auto flex max-w-[1280px] flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:px-6 lg:px-8">
             <p className="flex-1 text-[14px] text-ink-2">
               <b className="text-ink">{readyOrders} order{readyOrders === 1 ? '' : 's'}</b>

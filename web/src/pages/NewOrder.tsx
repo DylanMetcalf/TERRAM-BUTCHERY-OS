@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Pencil, Plus, Store, Trash2, Truck, UserRound, X } from 'lucide-react';
+import { Mail, Pencil, Plus, Store, Trash2, Truck, UserRound, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ItemEditor, type ItemDraft } from '../components/ItemEditor';
@@ -118,7 +118,7 @@ export default function NewOrder() {
   const set = (patch: Partial<Draft>) => setD((s) => ({ ...s, ...patch }));
 
   return (
-    <div className="animate-rise pb-24 lg:pb-0">
+    <div className="animate-rise pb-28 lg:pb-0">
       <PageHeader
         title="New order"
         subtitle="For phone calls, walk-ins and anything typed by hand."
@@ -157,6 +157,12 @@ export default function NewOrder() {
                 <span className="flex size-10 items-center justify-center rounded-xl bg-sunken text-ink-2"><UserRound className="size-5" /></span>
                 <span><span className="block font-semibold">Choose a customer</span><span className="text-[13.5px] text-ink-3">Search by name or phone, or add someone new</span></span>
               </button>
+            )}
+            {((d.customer && !d.customer.email) || (d.newCustomer && !d.newCustomer.email.trim())) && (
+              <p className="mt-2 flex gap-2 rounded-xl bg-ochre-soft px-3 py-2.5 text-[13.5px] text-ochre-soft-ink" role="note">
+                <Mail className="mt-0.5 size-4 shrink-0" />
+                <span><b>No email address yet.</b> Order confirmations, payment requests and invoices go out by email, so ask for one if you can. Without it you’ll need to send those by WhatsApp yourself. Delivery is always arranged on WhatsApp.</span>
+              </p>
             )}
             {history?.frequent?.length > 0 && (
               <div className="mt-3">
@@ -259,7 +265,7 @@ export default function NewOrder() {
       </div>
 
       {/* Mobile sticky action bar */}
-      <div className="safe-bottom fixed inset-x-0 bottom-[68px] z-20 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur lg:hidden">
+      <div className="fixed inset-x-0 bottom-[var(--nav-h)] z-20 border-t border-line bg-surface/95 px-4 py-3 shadow-[0_-6px_16px_rgb(0_0_0/0.05)] backdrop-blur lg:hidden">
         {error && <p className="mb-2 text-[13px] text-danger">{error}</p>}
         <div className="flex gap-2">
           <Button className="flex-1" disabled={!canSubmit} onClick={() => create.mutate('review')} loading={create.isPending && create.variables === 'review'}>For review</Button>

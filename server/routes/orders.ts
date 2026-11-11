@@ -40,6 +40,7 @@ import { finalizationHistory, finalizationProblems, finalizeOrder, latestFinaliz
 import { paymentRequestPreview, recordWhatsAppHandoff, reviewDeclaration, sendPaymentRequest } from '../domain/pay-page.js';
 import { createPaymentRequest, openRequest, paymentSummary, reversePayment, reviewProof, recordVerifiedPayment, sendPaymentRequestEmail } from '../domain/payments.js';
 import { INVOICE_LABEL, attachInvoiceFile, invoiceEmail, invoiceEmailRecipients, invoiceFileInfo, listInvoiceRequests, removeInvoiceFile, requestInvoice, sendInvoiceNotification, updateInvoiceRequest } from '../domain/invoices.js';
+import { reminderDraft, reminderDueIds, reminderState, recordReminderWhatsApp, sendPaymentReminder, snoozeReminder } from '../domain/reminders.js';
 import { communications, recordLinkCopied, recordWhatsApp, resendOrderConfirmation, whatsappDraft } from '../domain/communications.js';
 import { onOrderReceived, customerContact } from '../domain/lifecycle.js';
 import { deliveryInfo, setDeliveryArrangement } from '../domain/delivery.js';
@@ -75,7 +76,10 @@ r.get('/', requirePerm('orders.read'), (c) => {
   else if (view === 'weighing') where.push("o.status = 'packed' AND o.finalized_at IS NULL");
   else if (view === 'to_request') where.push("o.status = 'packed' AND o.finalized_at IS NOT NULL AND o.payment_state IN ('not_requested','failed')");
   else if (view === 'requested') where.push("o.status = 'packed' AND o.payment_state IN ('requested','pending','partially_paid')");
-  else if (view === 'verify') where.push("o.status != 'cancelled' AND o.payment_state NOT IN ('paid','waived') AND (EXISTS (SELECT 1 FROM payment_proofs p WHERE p.order_id = o.id AND p.status = 'submitted') OR EXISTS (SELECT 1 FROM payment_declarations d WHERE d.order_id = o.id AND d.status = 'submitted'))");
+  else if (view === 'remind') {
+    const ids = reminderDueIds();
+    where.push(`o.id IN (${ids.length ? ids.map(() => '?').join(',') : "''"})`), vals.push(...ids);
+  } else if (view === 'verify') where.push("o.status != 'cancelled' AND o.payment_state NOT IN ('paid','waived') AND (EXISTS (SELECT 1 FROM payment_proofs p WHERE p.order_id = o.id AND p.status = 'submitted') OR EXISTS (SELECT 1 FROM payment_declarations d WHERE d.order_id = o.id AND d.status = 'submitted'))");
   else if (view === 'awaiting_payment') where.push("o.payment_state IN ('requested','pending','partially_paid','failed') AND o.status != 'cancelled'");
   else if (view === 'proofs') where.push("EXISTS (SELECT 1 FROM payment_proofs p WHERE p.order_id = o.id AND p.status = 'submitted')");
   else if (view === 'arrange') where.push("o.delivery_arrangement = 'separate' AND o.status NOT IN ('completed','cancelled')");
@@ -217,6 +221,7 @@ r.get('/:id', requirePerm('orders.read'), (c) => {
     release: { require_payment: getSettings().payments.requirePaymentBeforeRelease, allow_unpaid: can(role, 'payments.write'), released_unpaid_at: order.released_unpaid_at, released_unpaid_reason: order.released_unpaid_reason },
     delivery: deliveryInfo(),
     communications: communications(order.id),
+    payment_reminder: can(role, 'orders.read') ? reminderState(order.id) : null,
     feedback,
   });
 });
@@ -356,12 +361,28 @@ r.post('/:id/invoice/notify', requirePerm('payments.write'), rateLimit('invoice-
 r.get('/:id/communications', requirePerm('orders.read'), (c) => {
   const id = c.req.param('id');
   const preview = onOrderReceived(id, { special: null, notes: null, preview: true });
-  return c.json({ history: communications(id), whatsapp: whatsappDraft(id), confirmation: { to: customerContact(id).email, ...(preview || { subject: null, text: null }) } });
+  return c.json({ history: communications(id), whatsapp: whatsappDraft(id), whatsapp_invoice: invoiceFileInfo(id) ? whatsappDraft(id, 'invoice') : null, confirmation: { to: customerContact(id).email, ...(preview || { subject: null, text: null }) } });
 });
 r.post('/:id/communications/confirmation', requirePerm('orders.write'), rateLimit('confirm-resend', 20, 10 * 60_000), (c) => c.json({ history: resendOrderConfirmation(c.req.param('id'), actorOf(c)) }));
 r.post('/:id/communications/whatsapp', requirePerm('orders.write'), async (c) => {
+  const { text, kind } = await body(c, z.object({ text: z.string().trim().min(1).max(2000), kind: z.enum(['message', 'invoice']).default('message') }));
+  return c.json({ history: recordWhatsApp(c.req.param('id'), text, actorOf(c), kind) });
+});
+
+// ── Payment reminder (a person chooses; nothing is sent automatically) ──
+r.get('/:id/payment-reminder', requirePerm('orders.read'), (c) => {
+  const id = c.req.param('id');
+  const state = reminderState(id);
+  return c.json({ state, draft: state.eligible && can(roleOf(c), 'payments.write') ? (({ email: _e, customerId: _c, ...d }) => d)(reminderDraft(id)) : null });
+});
+r.post('/:id/payment-reminder/send', requirePerm('payments.write'), rateLimit('payment-reminder', 20, 10 * 60_000), (c) => c.json({ state: sendPaymentReminder(c.req.param('id'), actorOf(c)) }));
+r.post('/:id/payment-reminder/whatsapp', requirePerm('payments.write'), async (c) => {
   const { text } = await body(c, z.object({ text: z.string().trim().min(1).max(2000) }));
-  return c.json({ history: recordWhatsApp(c.req.param('id'), text, actorOf(c)) });
+  return c.json({ state: recordReminderWhatsApp(c.req.param('id'), text, actorOf(c)) });
+});
+r.post('/:id/payment-reminder/snooze', requirePerm('payments.write'), async (c) => {
+  const { days } = await body(c, z.object({ days: z.number().int().min(1).max(30).default(3) }));
+  return c.json({ state: snoozeReminder(c.req.param('id'), days, actorOf(c)) });
 });
 r.post('/:id/communications/link-copied', requirePerm('orders.write'), (c) => c.json({ history: recordLinkCopied(c.req.param('id'), actorOf(c)) }));
 

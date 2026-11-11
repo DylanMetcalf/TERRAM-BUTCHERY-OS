@@ -39,6 +39,7 @@ const EXTRA_VIEWS: Record<string, string> = {
   no_address: 'Deliveries with no address',
   unpaid_released: 'Sent out before payment · still unpaid',
   delivered_unpaid: 'Delivered · not paid',
+  remind: 'Payment reminders due',
   awaiting_payment: 'Awaiting payment',
   proofs: 'Proofs to check',
   undated: 'No date yet',
