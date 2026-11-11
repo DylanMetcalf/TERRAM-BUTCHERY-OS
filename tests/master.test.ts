@@ -613,6 +613,8 @@ describe('payment follow-up and the invoice on WhatsApp', () => {
     expect((await manager.post(`/api/orders/${o.id}/payment-reminder/snooze`, { days: 3 })).body.state).toMatchObject({ due: false });
     ago(o.id, 20);
     expect((await manager.get(`/api/orders/${o.id}/payment-reminder`)).body.state).toMatchObject({ due: false }); // still snoozed
+    const un = (await manager.post(`/api/orders/${o.id}/payment-reminder/snooze`, { days: 1 })).body.state; // a later, shorter snooze replaces it
+    expect(Date.parse(un.due_at) - Date.now()).toBeLessThan(2 * 86400_000);
     const wa = await manager.post(`/api/orders/${o.id}/payment-reminder/whatsapp`, { text: 'Hi, friendly reminder' });
     expect(wa.status).toBe(200);
     expect(db().prepare("SELECT COUNT(*) n FROM order_events WHERE order_id = ? AND type = 'payment_reminder_whatsapp'").get(o.id)).toMatchObject({ n: 1 });
@@ -732,5 +734,18 @@ describe('email is the main channel, WhatsApp is for delivery', () => {
     await flush();
     expect(outbox.filter((m) => (m.to ?? []).some((a: string) => /walk/i.test(a)))).toHaveLength(0);
     expect(db().prepare("SELECT COUNT(*) n FROM notifications WHERE order_id = ? AND audience = 'customer' AND status = 'sent'").get(o.id)).toMatchObject({ n: 0 });
+  });
+});
+
+describe('saved wording and snooze (follow-ups)', () => {
+  it('fixes the old “Hoodspruit” spelling only where it is still the untouched default', async () => {
+    const { refreshDefaultWording, getSettings } = await import('../server/services/settings');
+    const OLD = 'Our farmhouse shop serves the local town and the surrounding areas, including Hoodspruit Wildlife Estates.';
+    const own = 'Visit us — we love Hoodspruit and its people.';
+    updateSettings('content', { aboutSections: [{ title: 'Where we are', body: OLD }, { title: 'Our words', body: own }] }, null);
+    refreshDefaultWording();
+    const s = getSettings().content.aboutSections;
+    expect(s[0].body).toMatch(/Hoedspruit Wildlife Estates/);
+    expect(s[1].body).toBe(own); // their own wording is never touched
   });
 });

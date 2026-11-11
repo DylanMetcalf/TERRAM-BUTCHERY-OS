@@ -77,7 +77,7 @@ export function reminderState(orderId: string, nowMs = Date.now()): ReminderStat
   for (const s of snoozes) {
     try {
       const u = JSON.parse(s.data)?.until;
-      if (typeof u === 'string' && (!snoozedUntil || u > snoozedUntil)) snoozedUntil = u;
+      if (typeof u === 'string') snoozedUntil = u; // the latest snooze wins, so staff can shorten one
     } catch {
       /* ignore a malformed snooze */
     }

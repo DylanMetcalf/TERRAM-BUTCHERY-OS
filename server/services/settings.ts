@@ -264,6 +264,16 @@ export function refreshDefaultWording() {
     stored[key] = (DEFAULT_SETTINGS[section] as any)[key];
     db().prepare('UPDATE settings SET value = ?, updated_at = ? WHERE key = ?').run(JSON.stringify(stored), now(), section);
   }
+  // The About page's old "Where we are" default spelled the estate "Hoodspruit": fix it only where it is still the untouched default
+  const row = db().prepare("SELECT value FROM settings WHERE key = 'content'").get() as { value: string } | undefined;
+  if (row) {
+    const stored = json<any>(row.value, {});
+    const OLD = 'Our farmhouse shop serves the local town and the surrounding areas, including Hoodspruit Wildlife Estates.';
+    if (Array.isArray(stored.aboutSections) && stored.aboutSections.some((x: any) => x?.body === OLD)) {
+      stored.aboutSections = stored.aboutSections.map((x: any) => (x?.body === OLD ? { ...x, body: OLD.replace('Hoodspruit', 'Hoedspruit') } : x));
+      db().prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'content'").run(JSON.stringify(stored), now());
+    }
+  }
   cache = null;
 }
 
