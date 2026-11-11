@@ -163,3 +163,12 @@ How the details are protected:
 - **Refunds** are recorded by hand: "Reverse" on a payment. PayFast refunds are made in the PayFast dashboard.
 - **Invoices** are prepared in your accounting software. Terram stores the uploaded file and sends the notification.
 - Order history sign-in uses a 6-digit email code, so it needs working email.
+
+## Follow-ups, invoice on WhatsApp and customer messaging (latest round)
+
+- **Payment reminder** (`server/domain/reminders.ts`): `Settings → Payments → remind us after (days)`, default 7, 0 = off. The clock starts when the payment request is *sent* (email, or WhatsApp opened) and restarts on each reminder; a snooze hides it for a while. Orders that are due appear on the dashboard under "Payment reminders due" (`/orders?view=remind`) and on the order page as "Remind for payment…" (email preview + send, or an editable WhatsApp message, or snooze). **Nothing is ever sent automatically.** Not eligible: cancelled, paid/waived, customer says they've paid, no sent request. A reminder needs a day since the request and never changes payment status. Needs `payments.write`.
+- **Invoice on WhatsApp**: Communications → "Send invoice on WhatsApp…" opens an editable message with the secure order-page link (`#invoice`); recorded as a handoff, delivery isn't tracked, nothing about the invoice or payment changes.
+- **Email is the main channel**: the order form requires an email (a returning customer without one on file gives it and it is saved). Editable notes: `customerForm.emailNote`, `fulfilment.deliveryDayNote` (Hoedspruit: usually Monday/Tuesday, we'll be in touch if it changes) and `content.communityNote` (reuse boxes for compost, share photos on WhatsApp with a social handle). Shown at checkout, on the confirmation screen, in the order emails, on the order page, About and FAQs. Staff see a warning when an order has no email.
+- **Phones**: `normalisePhone` accepts `+27 (0) 82…`, `+270…`, `270…` and bare 9-digit mobiles. Public-form errors are plain words.
+- **Layout**: the phone bottom bars use `--nav-h` (menu height + home-indicator inset), so the New order / Import buttons are never hidden behind the menu. Public Continue/Send buttons are always tappable and explain what is missing.
+- **Back arrow** in the public header on every page except Home.

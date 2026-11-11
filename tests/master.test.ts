@@ -89,7 +89,7 @@ describe('delivery fee', () => {
   it('a standard delivery is the flat R150 stored on the order; collection is free; changing the setting never touches existing orders', async () => {
     const q = await pub().post('/api/public/quote', { items: [mince(4)] });
     expect(q.body.delivery).toMatchObject({ method: 'flat', fee_cents: 15000 });
-    expect(q.body.delivery.area).toMatch(/Hoodspruit Wildlife Estates/);
+    expect(q.body.delivery.area).toMatch(/Hoedspruit Wildlife Estates/);
     const id = await placed();
     expect(requireOrder(id)).toMatchObject({ delivery_fee_cents: 15000, delivery_arrangement: 'standard', estimated_total_cents: 25000 + 15000 });
     updateSettings('fulfilment', { customerChooses: true }, null);
@@ -540,5 +540,212 @@ describe('payment check after paying another way (review finding)', () => {
     expect((db().prepare("SELECT COUNT(*) n FROM exceptions WHERE order_id = ? AND status = 'open' AND dedupe_key LIKE 'proof:%'").get(o.id) as any).n).toBe(0);
     expect((await manager.post(`/api/orders/${o.id}/payment-check`, { result: 'confirmed', amount_cents: pv.request.amount_cents })).status).toBe(409);
     expect((db().prepare("SELECT COUNT(*) n FROM payments WHERE order_id = ? AND status = 'verified'").get(o.id) as any).n).toBe(1);
+  });
+});
+
+describe('phone numbers as people really type them', () => {
+  it('accepts the common South African formats and still rejects things that are not mobiles', () => {
+    for (const ok of ['082 123 4567', '0821234567', '+27 82 123 4567', '27821234567', '0027821234567', '+27 (0) 82 123 4567', '+27 (0)82 123 4567', '+270821234567', '270821234567', '82 123 4567', '(082) 123-4567', '+27-82-123-4567', '‪+27 82 123 4567‬', '0821234567 (Jane)'])
+      expect(validMobile(ok), ok).toBe('+27821234567');
+    for (const bad of ['', '12345', '012 345 6789', '082 123 456', '0821234567/0831234567', '+27 12 345 6789', 'not a number']) expect(validMobile(bad), bad).toBeNull();
+    expect(validMobile('+44 (0)7700 900123')).toBe('+447700900123');
+    expect(validMobile('44 7700 900123')).toBeNull(); // another country needs a + or 00
+  });
+});
+
+describe('payment follow-up and the invoice on WhatsApp', () => {
+  async function awaitingPayment() {
+    updateSettings('payments', { eftEnabled: true, accountHolder: 'Terram Farm (Pty) Ltd', bankName: 'FNB', accountNumber: '62000000001', branchCode: '250655', reminderDays: 7 }, null);
+    const o = createOrder({ customer: { new: { name: 'Late Payer', email: 'late@example.com', phone: '0825559876' } }, source: 'phone', status: 'confirmed', customer_email: 'late@example.com', fulfilment_type: 'delivery', delivery_address: '3 Bush Rd, Hoedspruit', items: [mince(4) as any] }, STAFF);
+    setItemsCut(getItems(o.id).map((i) => i.id), true, STAFF);
+    for (const i of getItems(o.id)) setItemPacked(i.id, true, STAFF);
+    completePacking(o.id, STAFF);
+    const manager = await signedIn('manager');
+    await manager.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true });
+    const pv = (await manager.get(`/api/orders/${o.id}/payment-request/preview`)).body;
+    expect((await manager.post(`/api/orders/${o.id}/payment-request/send`, { email: true })).status).toBe(200);
+    await flush();
+    return { o, manager, tok: new URL(pv.url).pathname.replace(/^\/pay\//, '') };
+  }
+  const ago = (orderId: string, days: number) => {
+    const t = new Date(Date.now() - days * 86400_000).toISOString();
+    db().prepare("UPDATE order_events SET created_at = ? WHERE order_id = ? AND type IN ('payment_requested','payment_request_sent')").run(t, orderId);
+  };
+  const reminders = (orderId: string) => (db().prepare("SELECT recipient, subject, body FROM notifications WHERE order_id = ? AND kind = 'payment_reminder'").all(orderId) as any[]);
+
+  it('a week after the request the order is flagged, but nothing is ever sent by itself', async () => {
+    const { o, manager } = await awaitingPayment();
+    expect((await manager.get(`/api/orders/${o.id}/payment-reminder`)).body.state).toMatchObject({ eligible: true, due: false, days: 7 });
+    expect((await manager.get('/api/production/dashboard')).body.waiting.some((w: any) => w.key === 'remind')).toBe(false);
+    ago(o.id, 8);
+    expect((await manager.get(`/api/orders/${o.id}/payment-reminder`)).body.state).toMatchObject({ eligible: true, due: true, days_waiting: 8 });
+    const dash = (await manager.get('/api/production/dashboard')).body;
+    expect(dash.waiting.find((w: any) => w.key === 'remind')).toMatchObject({ n: 1, to: '/orders?view=remind' });
+    const list = (await manager.get('/api/orders?view=remind')).body;
+    expect((list.orders ?? list).map((x: any) => x.id)).toContain(o.id);
+    await flush();
+    expect(reminders(o.id)).toHaveLength(0);
+  });
+
+  it('“Remind for payment” emails the right person once, with the payment link, and restarts the clock', async () => {
+    const { o, manager } = await awaitingPayment();
+    ago(o.id, 8);
+    const staff = await signedIn('staff');
+    expect((await staff.post(`/api/orders/${o.id}/payment-reminder/send`, {})).status).toBe(403);
+    const draft = (await manager.get(`/api/orders/${o.id}/payment-reminder`)).body.draft;
+    expect(draft).toMatchObject({ to: 'late@example.com' });
+    expect(draft.text).toMatch(/\/pay\//);
+    const [a, b] = await Promise.all([manager.post(`/api/orders/${o.id}/payment-reminder/send`, {}), manager.post(`/api/orders/${o.id}/payment-reminder/send`, {})]);
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+    await flush();
+    expect(reminders(o.id)).toHaveLength(1);
+    expect(reminders(o.id)[0].recipient).toBe('late@example.com');
+    expect(reminders(o.id)[0].body).toMatch(/R\s?\d/);
+    expect((await manager.post(`/api/orders/${o.id}/payment-reminder/send`, {})).status).toBe(409); // not again straight away
+    expect((await manager.get(`/api/orders/${o.id}/payment-reminder`)).body.state).toMatchObject({ due: false, reminders_sent: 1 });
+    expect((await manager.get(`/api/orders/${o.id}`)).body.communications.some((h: any) => h.kind === 'payment_reminder' && h.status === 'sent')).toBe(true);
+    expect(requireOrder(o.id).payment_state).toBe('requested'); // a reminder never changes the payment
+  });
+
+  it('snooze hides it; WhatsApp is recorded as a handoff and restarts the clock; a claim of payment stops reminders', async () => {
+    const { o, manager, tok } = await awaitingPayment();
+    ago(o.id, 8);
+    expect((await manager.post(`/api/orders/${o.id}/payment-reminder/snooze`, { days: 3 })).body.state).toMatchObject({ due: false });
+    ago(o.id, 20);
+    expect((await manager.get(`/api/orders/${o.id}/payment-reminder`)).body.state).toMatchObject({ due: false }); // still snoozed
+    const un = (await manager.post(`/api/orders/${o.id}/payment-reminder/snooze`, { days: 1 })).body.state; // a later, shorter snooze replaces it
+    expect(Date.parse(un.due_at) - Date.now()).toBeLessThan(2 * 86400_000);
+    const wa = await manager.post(`/api/orders/${o.id}/payment-reminder/whatsapp`, { text: 'Hi, friendly reminder' });
+    expect(wa.status).toBe(200);
+    expect(db().prepare("SELECT COUNT(*) n FROM order_events WHERE order_id = ? AND type = 'payment_reminder_whatsapp'").get(o.id)).toMatchObject({ n: 1 });
+    expect(reminders(o.id)).toHaveLength(0);
+    expect((await manager.get(`/api/orders/${o.id}`)).body.communications.some((h: any) => h.channel === 'whatsapp' && h.kind_label === 'Payment reminder')).toBe(true);
+    await pub().post(`/api/public/pay/${tok}/declare`, { confirm: true, payer_reference: 'LATE' });
+    expect((await manager.get(`/api/orders/${o.id}/payment-reminder`)).body.state).toMatchObject({ eligible: false });
+    expect((await manager.post(`/api/orders/${o.id}/payment-reminder/send`, {})).status).toBe(409);
+  });
+
+  it('the clock only starts once the request has actually gone out, and a reminder needs a day first', async () => {
+    updateSettings('payments', { eftEnabled: true, accountHolder: 'Terram Farm (Pty) Ltd', bankName: 'FNB', accountNumber: '62000000001', branchCode: '250655', reminderDays: 7 }, null);
+    const o = createOrder({ customer: { new: { name: 'Not Sent', email: 'ns@example.com', phone: '0825557777' } }, source: 'phone', status: 'confirmed', customer_email: 'ns@example.com', fulfilment_type: 'delivery', delivery_address: '3 Bush Rd, Hoedspruit', items: [mince(2) as any] }, STAFF);
+    setItemsCut(getItems(o.id).map((i) => i.id), true, STAFF);
+    for (const i of getItems(o.id)) setItemPacked(i.id, true, STAFF);
+    completePacking(o.id, STAFF);
+    const manager = await signedIn('manager');
+    await manager.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true });
+    await manager.get(`/api/orders/${o.id}/payment-request/preview`); // opening the sheet creates the request but sends nothing
+    const old = new Date(Date.now() - 30 * 86400_000).toISOString();
+    db().prepare("UPDATE order_events SET created_at = ? WHERE order_id = ?").run(old, o.id);
+    expect((await manager.get(`/api/orders/${o.id}/payment-reminder`)).body.state).toMatchObject({ eligible: false, due: false });
+    expect((await manager.post(`/api/orders/${o.id}/payment-reminder/send`, {})).status).toBe(409);
+    await manager.post(`/api/orders/${o.id}/payment-request/send`, { email: true });
+    expect((await manager.post(`/api/orders/${o.id}/payment-reminder/send`, {})).status).toBe(409); // asked for today: too soon
+    const staff = await signedIn('staff');
+    expect((await staff.get(`/api/orders/${o.id}/payment-reminder`)).body.draft ?? null).toBeNull(); // no pay link for people who can't send it
+  });
+
+  it('can be switched off in Settings', async () => {
+    const { o, manager } = await awaitingPayment();
+    ago(o.id, 30);
+    updateSettings('payments', { reminderDays: 0 }, null);
+    expect((await manager.get(`/api/orders/${o.id}/payment-reminder`)).body.state).toMatchObject({ eligible: false, due: false });
+    expect((await manager.get('/api/production/dashboard')).body.waiting.some((w: any) => w.key === 'remind')).toBe(false);
+  });
+
+  it('the uploaded invoice can be sent on WhatsApp: secure link, recorded handoff, nothing emailed', async () => {
+    const { o, manager } = await awaitingPayment();
+    expect((await manager.get(`/api/orders/${o.id}/communications`)).body.whatsapp_invoice).toBeNull();
+    expect((await manager.post(`/api/orders/${o.id}/communications/whatsapp`, { text: 'x', kind: 'invoice' })).status).toBe(400);
+    const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
+    expect((await manager.upload(`/api/orders/${o.id}/invoice/file`, { name: 'INV-7.pdf', bytes: pdf, type: 'application/pdf' }, { reference: 'INV-7' })).status).toBe(200);
+    await flush();
+    const before = mail(/invoice/i).length;
+    const c = (await manager.get(`/api/orders/${o.id}/communications`)).body;
+    expect(c.whatsapp_invoice.kind).toBe('invoice');
+    expect(c.whatsapp_invoice.text).toMatch(/\/o\/[^ ]+#invoice/);
+    expect(c.whatsapp_invoice.text).toMatch(/INV-7/);
+    expect(c.whatsapp_invoice.wa_phone).toBe('27825559876');
+    const r = await manager.post(`/api/orders/${o.id}/communications/whatsapp`, { text: c.whatsapp_invoice.text, kind: 'invoice' });
+    expect(r.status).toBe(200);
+    await flush();
+    expect(mail(/invoice/i).length).toBe(before);
+    expect(r.body.history.some((h: any) => h.channel === 'whatsapp' && h.kind_label === 'Invoice')).toBe(true);
+    expect(requireOrder(o.id).payment_state).toBe('requested');
+  });
+});
+
+describe('email is the main channel, WhatsApp is for delivery', () => {
+  it('the order form needs an email, in plain words, and says how we will be in touch', async () => {
+    const noEmail = form([mince(2)], { customer: { name: 'No Email', phone: '071 555 3380', email: '' } });
+    const r = await send(noEmail);
+    expect(r.status).toBe(400);
+    expect(JSON.stringify(r.body)).toMatch(/email/i);
+    expect(JSON.stringify(r.body)).not.toMatch(/customer\.email/);
+    const info = (await pub().get('/api/public/info')).body;
+    expect(info.form.emailNote).toMatch(/email/i);
+    expect(info.form.emailNote).toMatch(/WhatsApp/);
+    expect(info.form.deliveryDayNote).toMatch(/Hoedspruit.*Monday or Tuesday/);
+    expect(info.content.communityNote).toMatch(/compost/);
+    expect(info.content.communityNote).toMatch(/WhatsApp/);
+    expect(JSON.stringify(info)).not.toMatch(/Hoodspruit/);
+  });
+
+  it('a returning customer with no email on their profile gives one: it is saved and the confirmation goes there, once', async () => {
+    const existing = createOrder({ customer: { new: { name: 'Naledi Zulu', phone: '0715553380', email: null } }, source: 'phone', status: 'confirmed', fulfilment_type: 'collection', items: [mince(1) as any] }, STAFF);
+    expect(db().prepare('SELECT email FROM customers WHERE id = ?').get(existing.customer_id)).toMatchObject({ email: null });
+    outbox.length = 0;
+    const o = await placed({ customer: { name: 'Naledi Zulu', phone: '071 555 3380', email: 'naledi.new@example.com' } });
+    await flush();
+    expect(requireOrder(o).customer_id).toBe(existing.customer_id);
+    expect(db().prepare('SELECT email FROM customers WHERE id = ?').get(existing.customer_id)).toMatchObject({ email: 'naledi.new@example.com' });
+    const got = mail(/received your/i);
+    expect(got).toHaveLength(1);
+    expect(got[0].to).toEqual(['naledi.new@example.com']);
+    expect(got[0].text).toMatch(/sent by email/);
+    expect(got[0].text).toMatch(/Monday or Tuesday/);
+    expect(got[0].text).toMatch(/WhatsApp/);
+  });
+
+  it('a collection order’s confirmation does not mention delivery days', async () => {
+    const r = await send(form([mince(1)], { fulfilment_type: 'collection', delivery_address: null, delivery_instructions: null, client_ref: `col-${Date.now()}` }));
+    if (r.status !== 200) return; // the form may be in address-only mode in this build
+    await flush();
+    const got = mail(/received your/i).filter((m) => (m.to ?? []).includes('naledi@example.com')).pop();
+    expect(got?.text ?? '').not.toMatch(/Monday or Tuesday/);
+  });
+
+  it('an order typed in without an email sends nothing by email, and says so on the order', async () => {
+    updateSettings('payments', { eftEnabled: true, accountHolder: 'Terram Farm (Pty) Ltd', bankName: 'FNB', accountNumber: '62000000001', branchCode: '250655' }, null);
+    outbox.length = 0;
+    const o = createOrder({ customer: { new: { name: 'Walk In', phone: '0825550001', email: null } }, source: 'phone', status: 'confirmed', fulfilment_type: 'delivery', delivery_address: '9 Bush Rd, Hoedspruit', items: [mince(2) as any] }, STAFF);
+    setItemsCut(getItems(o.id).map((i) => i.id), true, STAFF);
+    for (const i of getItems(o.id)) setItemPacked(i.id, true, STAFF);
+    completePacking(o.id, STAFF);
+    const manager = await signedIn('manager');
+    await manager.post(`/api/orders/${o.id}/finalize`, { packs_confirmed: true });
+    await flush();
+    expect((await manager.get(`/api/orders/${o.id}/communications`)).body.confirmation.to).toBeNull();
+    expect((await manager.post(`/api/orders/${o.id}/communications/confirmation`, {})).status).toBe(400);
+    const pv = await manager.get(`/api/orders/${o.id}/payment-request/preview`);
+    expect(pv.body.blocker ?? null, JSON.stringify(pv.body)).toBeNull();
+    expect(pv.body.email.available).toBe(false);
+    expect(pv.body.whatsapp.link).toMatch(/^https:\/\/wa\.me\/27825550001/);
+    expect((await manager.post(`/api/orders/${o.id}/payment-request/send`, { email: true })).status).toBeGreaterThanOrEqual(400);
+    await flush();
+    expect(outbox.filter((m) => (m.to ?? []).some((a: string) => /walk/i.test(a)))).toHaveLength(0);
+    expect(db().prepare("SELECT COUNT(*) n FROM notifications WHERE order_id = ? AND audience = 'customer' AND status = 'sent'").get(o.id)).toMatchObject({ n: 0 });
+  });
+});
+
+describe('saved wording and snooze (follow-ups)', () => {
+  it('fixes the old “Hoodspruit” spelling only where it is still the untouched default', async () => {
+    const { refreshDefaultWording, getSettings } = await import('../server/services/settings');
+    const OLD = 'Our farmhouse shop serves the local town and the surrounding areas, including Hoodspruit Wildlife Estates.';
+    const own = 'Visit us — we love Hoodspruit and its people.';
+    updateSettings('content', { aboutSections: [{ title: 'Where we are', body: OLD }, { title: 'Our words', body: own }] }, null);
+    refreshDefaultWording();
+    const s = getSettings().content.aboutSections;
+    expect(s[0].body).toMatch(/Hoedspruit Wildlife Estates/);
+    expect(s[1].body).toBe(own); // their own wording is never touched
   });
 });

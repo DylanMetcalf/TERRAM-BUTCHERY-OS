@@ -178,6 +178,8 @@
   .font-display { font-family: var(--font-display); font-optical-sizing: auto; letter-spacing: -0.01em; }
   .tabular { font-variant-numeric: tabular-nums; }
   .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  /* The phone bottom menu: its 68px plus the home-indicator space on iPhones. Anything that sits above it must use this, never a fixed 68px. */
+  :root { --nav-h: calc(68px + env(safe-area-inset-bottom)); }
   .safe-top { padding-top: env(safe-area-inset-top); }
   .scrollbar-none::-webkit-scrollbar { display: none; }
   .scrollbar-none { scrollbar-width: none; }

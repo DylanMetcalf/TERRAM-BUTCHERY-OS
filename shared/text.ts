@@ -72,11 +72,21 @@ export function fuzzyWordEqual(a: string, b: string): boolean {
 
 export function normalisePhone(raw: string | null | undefined, defaultCountry = '27'): string | null {
   if (!raw) return null;
-  let digits = raw.replace(/[^\d+]/g, '');
+  // "+27 (0) 82 123 4567" and "+44 (0)7700…": the bracketed trunk 0 is never part of the number
+  let digits = raw.replace(/\(\s*0\s*\)/g, '').replace(/[^\d+]/g, '');
   if (!digits) return null;
-  if (digits.startsWith('+')) digits = digits.slice(1);
-  else if (digits.startsWith('00')) digits = digits.slice(2);
-  else if (digits.startsWith('0')) digits = defaultCountry + digits.slice(1);
+  let intl = false;
+  if (digits.startsWith('+')) {
+    digits = digits.slice(1);
+    intl = true;
+  } else if (digits.startsWith('00')) {
+    digits = digits.slice(2);
+    intl = true;
+  } else if (digits.startsWith('0')) digits = defaultCountry + digits.slice(1);
+  // A South African number typed with the country code and its leading 0: 270821234567 / +27 082 123 4567
+  if (digits.startsWith(defaultCountry + '0') && digits.length === defaultCountry.length + 10) digits = defaultCountry + digits.slice(defaultCountry.length + 1);
+  // A bare nine-digit SA mobile ("82 123 4567"): no 0 and no country code
+  else if (!intl && defaultCountry === '27' && /^[678]\d{8}$/.test(digits)) digits = defaultCountry + digits;
   if (digits.length < 9 || digits.length > 15) return null;
   return '+' + digits;
 }

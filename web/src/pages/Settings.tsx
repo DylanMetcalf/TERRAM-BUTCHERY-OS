@@ -163,6 +163,7 @@ function OrdersSettings({ s }: { s: any }) {
         {f.deliveryEnabled && (
           <>
             <Field label="Delivery days"><DayPicker value={f.deliveryDays} onChange={(v) => setF({ ...f, deliveryDays: v })} /></Field>
+            <Field label="Usual delivery days (shown to customers)" hint="e.g. we usually deliver Hoedspruit orders on a Monday or Tuesday, and will be in touch if that changes. Shown at checkout, in order emails and on the order page."><Textarea rows={2} value={f.deliveryDayNote ?? ''} onChange={(e) => setF({ ...f, deliveryDayNote: e.target.value })} /></Field>
             <Field label="Delivery note for customers" hint="Shown on the order form. You don’t have to mention the distance or price here."><Input value={f.deliveryNotes} onChange={(e) => setF({ ...f, deliveryNotes: e.target.value })} /></Field>
             <Field label="Delivery pricing">
               <Segmented value={f.deliveryPricing ?? 'flat'} onChange={(x) => setF({ ...f, deliveryPricing: x })} options={[{ value: 'flat', label: 'Flat fee per order' }, { value: 'per_km', label: 'Set per order by staff' }]} />
@@ -235,6 +236,7 @@ function FormSettings({ s, env }: { s: any; env: any }) {
       <Switch checked={v.showPrices} onChange={(x) => setV({ ...v, showPrices: x })} label="Show prices" description="Shown as estimates — final price depends on weight." />
       <Field label="Welcome text"><Textarea rows={3} value={v.intro} onChange={(e) => setV({ ...v, intro: e.target.value })} /></Field>
       <Field label="Message after ordering" hint="Don’t promise the order is confirmed if you still review it."><Textarea rows={2} value={v.confirmationMessage} onChange={(e) => setV({ ...v, confirmationMessage: e.target.value })} /></Field>
+      <Field label="Email and WhatsApp note" hint="Shown beside the email field, on the confirmation screen and in the order emails. Say that order updates come by email and delivery is arranged on WhatsApp."><Textarea rows={3} value={v.emailNote ?? ''} onChange={(e) => setV({ ...v, emailNote: e.target.value })} /></Field>
       <Field label="Notice note" hint="Shown when customers choose a date."><Textarea rows={2} value={v.noticeNote ?? ''} onChange={(e) => setV({ ...v, noticeNote: e.target.value })} /></Field>
       <Field label="Order terms" hint="One per line. Customers tick to accept these before sending. Leave empty to skip."><Textarea rows={6} value={v.terms} onChange={(e) => setV({ ...v, terms: e.target.value })} /></Field>
       <Switch checked={v.emailCustomer !== false} onChange={(x) => setV({ ...v, emailCustomer: x })} label="Email customers a copy of their order" description="Sent when they give an email address: what they ordered, the reference number and that you’ll confirm it. Replies come to your business email." />
@@ -576,6 +578,7 @@ function PaymentsSettings({ s, env }: { s: any; env: any }) {
         <p className="text-[13.5px] text-ink-2">After packing, staff do the final weighing and finalize the order, then send the payment request (email, or WhatsApp by hand). Customers pay by EFT on their secure payment page and upload proof or tell you they’ve paid; staff confirm once the money has reflected.</p>
         <Switch checked={!!v.requirePaymentBeforeRelease} onChange={(x) => setV({ ...v, requirePaymentBeforeRelease: x })} label="Release orders only once paid" description="An order can’t be marked ready for delivery or collection until its payment is confirmed." />
         {v.requirePaymentBeforeRelease && <p className="-mt-2 text-[13px] text-ink-3">Managers can still send an unpaid order out for an agreed exception: they confirm a warning and give a reason, which is recorded with their name. The payment status doesn’t change.</p>}
+        <Field label="Remind us to follow up on payment after (days)" hint="A week after a payment request goes out with no payment, the order shows under “Payment reminders due” so you can tap “Remind for payment”. Nothing is sent automatically. 0 switches this off."><Input type="number" min={0} max={60} value={v.reminderDays ?? 7} onChange={(e) => setV({ ...v, reminderDays: Number(e.target.value) })} className="w-28" /></Field>
         <Field label="Payment links stay valid for (days)" hint="Links in payment emails. Customers can always reach the current one from their order page."><Input type="number" min={1} max={90} value={v.linkDays ?? 30} onChange={(e) => setV({ ...v, linkDays: Number(e.target.value) })} className="w-28" /></Field>
         <Switch checked={!!v.eftEnabled} onChange={(x) => setV({ ...v, eftEnabled: x })} label="Accept EFT (bank transfer)" description={missing.length ? `Needs: ${missing.join(', ')}.` : 'Customers see the banking details below on their order page and upload proof. Staff verify it against the bank.'} />
         {pf.configured && <Switch checked={!!v.onlineEnabled} onChange={(x) => setV({ ...v, onlineEnabled: x })} disabled={!pf.configured} label="Accept online payment (PayFast)" description={pf.configured ? `PayFast is set up on the server (${pf.mode === 'live' ? 'LIVE' : 'sandbox / test'}${pf.passphrase ? ', with passphrase' : ', no passphrase'}). Paid status comes only from PayFast’s server notice.` : 'Not available yet: the PayFast merchant details must be added to the server environment (PAYFAST_MERCHANT_ID, PAYFAST_MERCHANT_KEY, PAYFAST_PASSPHRASE, PAYFAST_MODE).'} />}
@@ -677,7 +680,7 @@ function HelpSettings({ s }: { s: any }) {
 
 /** The About Us page and home-page intro: the farm's own words. Avoid claims you can't back up. */
 function WebsiteSettings({ s }: { s: any }) {
-  const [c, setC] = useState<{ aboutIntro: string; aboutSections: { title: string; body: string }[] }>(s.content ?? { aboutIntro: '', aboutSections: [] });
+  const [c, setC] = useState<{ aboutIntro: string; aboutSections: { title: string; body: string }[]; communityNote?: string }>(s.content ?? { aboutIntro: '', aboutSections: [] });
   const save = useSave('content');
   return (
     <Panel title="About page" footer={<Button variant="primary" loading={save.isPending} onClick={() => save.mutate(c)}>Save</Button>}>
@@ -695,6 +698,7 @@ function WebsiteSettings({ s }: { s: any }) {
         ))}
       </div>
       {c.aboutSections.length < 8 && <Button type="button" icon={<Plus className="size-4" />} onClick={() => setC({ ...c, aboutSections: [...c.aboutSections, { title: '', body: '' }] })}>Add a section</Button>}
+      <Field label="“Share the love” note" hint="Shown on the order confirmation, the customer’s order page, About and FAQs, with a button that opens WhatsApp so they can send photos. Leave empty to hide it."><Textarea rows={4} value={c.communityNote ?? ''} onChange={(e) => setC({ ...c, communityNote: e.target.value })} /></Field>
     </Panel>
   );
 }

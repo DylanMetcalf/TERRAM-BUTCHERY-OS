@@ -10,8 +10,8 @@ import { Button, Card, cx, Field, Input, Segmented, Sheet, Spinner, Textarea } f
 import { api, ApiError, newKey } from '../lib/api';
 import { addDays, dateTime, formatMoney, formatQty, friendlyDate, longDate } from '../lib/format';
 import { useOnline } from '../lib/realtime';
-import { REORDER_KEY, rememberOrder } from '../lib/customer';
-import { DeviceOrders, GoogleReviewCard, InstagramCard } from '../components/Social';
+import { deviceOrders, REORDER_KEY, rememberOrder } from '../lib/customer';
+import { CommunityCard, DeviceOrders, GoogleReviewCard, InstagramCard } from '../components/Social';
 import type { Qty, QuantityType } from '../lib/types';
 import { priceLine, withSurcharge, type OrderMethod, type Pricing, type WeightRange } from '../../../shared/pricing';
 import { validMobile } from '../../../shared/text';
@@ -167,8 +167,14 @@ export default function PublicOrder() {
   const [laterOpen, setLaterOpen] = useState(false);
   const [q, setQ] = useState('');
   const [cat_, setCat] = useState('All');
-  const [done, setDone] = useState<{ number: number | null; message: string; url: string | null; email: string; returning: boolean } | null>(null);
+  const [done, setDone] = useState<{ number: number | null; message: string; url: string | null; email: string; returning: boolean; collection: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** What's still missing on the step the customer tried to leave (shown beside the button, never a silent disabled button). */
+  const [hint, setHint] = useState<string | null>(null);
+  /** An order placed from this device in the last two days, so a customer who comes back to this page still sees that it went through. */
+  const [recent] = useState(() => deviceOrders().find((o) => Date.now() - new Date(o.at).getTime() < 2 * 86400_000) ?? null);
+  const termsRef = useRef<HTMLDivElement>(null);
+  const doneHeading = useRef<HTMLHeadingElement>(null);
   const [notice, setNotice] = useState<ReactNode | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   /** An unfinished order saved on the server for this device (offered when this browser has nothing). */
@@ -230,7 +236,17 @@ export default function PublicOrder() {
   };
   useEffect(() => {
     window.scrollTo({ top: 0 });
+    setHint(null);
   }, [s.step]);
+  useEffect(() => {
+    setHint(null);
+  }, [s.name, s.phone, s.email, s.address, s.instructions, s.date]);
+  // The confirmation is the most important screen: bring it into view (the page was scrolled to the bottom of a long review) and tell screen readers
+  useEffect(() => {
+    if (!done) return;
+    window.scrollTo({ top: 0 });
+    doneHeading.current?.focus({ preventScroll: true });
+  }, [done]);
   const set = (p: Partial<State>) => setS((x) => ({ ...x, ...p }));
   const products = cat?.products ?? [];
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
@@ -329,7 +345,7 @@ export default function PublicOrder() {
   const submit = useMutation({
     mutationFn: () => api.post<{ order_number: number | null; message: string; order_url?: string; returning_customer?: boolean }>('/api/public/orders', payload()),
     onSuccess: (r) => {
-      setDone({ number: r.order_number, message: r.message, url: r.order_url ?? null, email: s.email, returning: !!r.returning_customer });
+      setDone({ number: r.order_number, message: r.message, url: r.order_url ?? null, email: s.email, returning: !!r.returning_customer, collection: !!info?.fulfilment?.customerChooses && s.fulfilment === 'collection' });
       if (r.order_number && r.order_url) rememberOrder({ number: r.order_number, url: r.order_url, at: new Date().toISOString() });
       try {
         localStorage.removeItem(KEY);
@@ -358,14 +374,18 @@ export default function PublicOrder() {
       <Shell business={info.business}>
         <div className="mx-auto max-w-md animate-rise py-10 text-center">
           <span className="mx-auto flex size-16 items-center justify-center rounded-full bg-field text-white"><Check className="size-8 animate-pop" strokeWidth={3} /></span>
-          <h1 className="mt-6 font-display text-3xl font-semibold">Order received</h1>
+          <h1 ref={doneHeading} tabIndex={-1} className="mt-6 font-display text-3xl font-semibold outline-none">Order received</h1>
           {done.number && <p className="mt-1 text-[15px] text-ink-3">Reference #{done.number}</p>}
           <p className="mt-4 text-[16px] leading-relaxed text-ink-2">{done.message}</p>
           <div className="mt-5 rounded-2xl bg-surface-2 p-4 text-left text-[14.5px] text-ink-2">
             <p><b className="text-ink">What happens next:</b> we check the products, quantities and availability, then confirm your order with an expected date.</p>
             <p className="mt-2">{info.form.leadTime}</p>
           </div>
-          {done.email && <p className="mt-3 text-[14px] text-ink-3">A copy is on its way to {done.email}.</p>}
+          <div className="mt-3 rounded-2xl border border-line bg-surface p-4 text-left text-[14.5px] text-ink-2">
+            {done.email && <p>A copy is on its way to <b className="break-all text-ink">{done.email}</b>. If you can’t find it, check your spam folder.</p>}
+            {info.form.emailNote && <p className="mt-2">{info.form.emailNote}</p>}
+            {info.form.deliveryDayNote && !done.collection && <p className="mt-2">{info.form.deliveryDayNote}</p>}
+          </div>
           {done.url && (
             <Link to={done.url} className="mt-6 inline-flex h-12 items-center gap-2 rounded-xl bg-brand px-6 text-[16px] font-semibold text-brand-ink shadow-float">
               Track my order
@@ -373,6 +393,7 @@ export default function PublicOrder() {
           )}
           <div className="mt-8 space-y-3">
             {done.returning && <GoogleReviewCard url={info.business.googleReviewUrl} name={info.business.name} lead={`Thanks for coming back to ${info.business.name}!`} />}
+            <CommunityCard note={info.content?.communityNote} phone={info.business.phone} name={info.business.name} reference={done.number} />
             <InstagramCard url={info.business.instagramUrl} name={info.business.name} />
             <DeviceOrders exclude={done.number} />
             <Link to={`/account${done.email ? `?email=${encodeURIComponent(done.email)}` : ''}`} className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-surface p-4 text-left hover:shadow-card">
@@ -410,6 +431,8 @@ export default function PublicOrder() {
   const needsAddress = !chooses || s.fulfilment === 'delivery';
   const dateOk = !s.date || (s.date >= info.earliest_date && s.date <= addDays(info.today, 90) && allowedDays.includes(new Date(s.date + 'T00:00:00Z').getUTCDay()));
   const whenOk = dateOk && (!needsAddress || (s.address.trim().length >= 8 && (s.instructions ?? '').trim().length >= 3));
+  const detailBlockers = [s.name.trim().length < 2 && 'your full name', !phoneOk && 'a valid mobile number', !emailOk && 'your email address', !invoiceOk && 'the invoice details'].filter(Boolean) as string[];
+  const whenBlockers = [needsAddress && s.address.trim().length < 8 && 'your full delivery address', needsAddress && (s.instructions ?? '').trim().length < 3 && 'delivery instructions', !dateOk && 'a valid preferred date (or choose “No preference”)'].filter(Boolean) as string[];
   const steps = ['Choose', 'Your details', chooses ? 'Collection or delivery' : 'Delivery', 'Check & send'];
   const quoteProblems = quote?.lines.filter((l) => !l.ok) ?? [];
   const productsTotal = quote?.total.estimate_cents ?? (local.length ? localTotal : null);
@@ -467,6 +490,13 @@ export default function PublicOrder() {
             <Button variant="primary" onClick={() => { setS({ ...blankState(), ...found.draft, step: 0, accepted: false, invoice: { ...BLANK_INVOICE, ...(found.draft.invoice ?? {}) } }); setFound(null); }}>Continue that order</Button>
             <Button onClick={startNew}>Start a new order</Button>
           </div>
+        </div>
+      )}
+
+      {recent && s.step === 0 && !hasProgress(s) && (
+        <div className="mb-5 flex items-start gap-3 rounded-2xl border border-field/30 bg-field-soft p-4 text-[14.5px] text-field-soft-ink" role="status">
+          <Check className="mt-0.5 size-5 shrink-0" />
+          <div className="min-w-0 flex-1"><b>Your order #{recent.number} was received.</b> We’ve emailed you a copy. <Link to={recent.url} className="font-semibold underline">View my order</Link></div>
         </div>
       )}
 
@@ -605,7 +635,7 @@ export default function PublicOrder() {
             <Field label="Mobile number" hint="We’ll call or WhatsApp you if we need to check anything." error={s.phone.replace(/\D/g, '').length >= 9 && !phoneOk ? 'Please enter a valid mobile number, e.g. 071 234 5678.' : undefined}>
               <Input big type="tel" inputMode="tel" autoComplete="tel" value={s.phone} onChange={(e) => set({ phone: e.target.value })} placeholder="e.g. 071 234 5678" />
             </Field>
-            <Field label="Email" hint="For your order confirmation, payment details and updates." error={s.email && !emailOk ? 'Please enter a valid email address.' : undefined}>
+            <Field label="Email address (needed)" hint={info.form.emailNote || 'For your order confirmation, payment details and updates.'} error={s.email && !emailOk ? 'Please enter a valid email address.' : undefined}>
               <Input big type="email" autoComplete="email" value={s.email} onChange={(e) => set({ email: e.target.value })} />
             </Field>
 
@@ -665,6 +695,7 @@ export default function PublicOrder() {
             <div className="mt-4 rounded-2xl border border-line bg-surface p-4 text-[14.5px]" id="delivery-info">
               <p className="text-ink-2">{deliveryWording}</p>
               {info.delivery?.area && <p className="mt-2 text-[13.5px] text-ink-3">{info.delivery.area}</p>}
+              {info.form.deliveryDayNote && <p className="mt-2 rounded-xl bg-brand-soft px-3 py-2 text-[14px] font-medium text-brand-soft-ink">{info.form.deliveryDayNote}</p>}
               <p className="mt-3 font-semibold">{deliveryFee != null ? `Delivery fee: ${formatMoney(deliveryFee, info.currency)}` : 'We’ll confirm the delivery fee with you.'}</p>
             </div>
           )}
@@ -773,21 +804,25 @@ export default function PublicOrder() {
             <p><b className="text-ink">What happens next:</b> we review your order and confirm it with an expected date. {info.form.leadTime}</p>
           </div>
           {terms.length > 0 && (
-            <Card className="mt-4 p-4">
+            <Card ref={termsRef} className={cx('mt-4 p-4', error && terms.length > 0 && !s.accepted && 'ring-2 ring-danger')}>
               <h2 className="text-[13.5px] font-semibold text-ink-3">Order terms</h2>
               <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[14px] text-ink-2">{terms.map((t) => <li key={t}>{t}</li>)}</ul>
               <label className="mt-4 flex items-start gap-3 text-[14.5px]">
-                <input type="checkbox" checked={!!s.accepted} onChange={(e) => set({ accepted: e.target.checked })} className="mt-0.5 size-5 shrink-0 accent-[var(--brand)]" />
+                <input type="checkbox" checked={!!s.accepted} onChange={(e) => { set({ accepted: e.target.checked }); setError(null); }} className="mt-0.5 size-5 shrink-0 accent-[var(--brand)]" />
                 <span>I confirm this order is correct and understand it is only confirmed once {info.business.name} accepts it.</span>
               </label>
             </Card>
           )}
-          {error && <p className="mt-4 rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger-soft-ink" role="alert">{error}</p>}
         </div>
       )}
 
       {/* Sticky action bar (tucked away while the on-screen keyboard is up) */}
       <div className={cx('safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 backdrop-blur transition-transform duration-150', hideBar && 'pointer-events-none translate-y-full')} aria-hidden={hideBar || undefined}>
+        {(error || hint) && (
+          <div className="mx-auto max-w-5xl px-5 pt-3 sm:px-8">
+            <p className={cx('rounded-xl px-3.5 py-2.5 text-[14px] leading-snug', error ? 'bg-danger-soft text-danger-soft-ink' : 'bg-ochre-soft text-ochre-soft-ink')} role="alert">{error ?? hint}</p>
+          </div>
+        )}
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-5 py-3 sm:px-8">
           {s.step > 0 && <Button size="lg" variant="ghost" icon={<ArrowLeft className="size-4" />} onClick={() => { setError(null); set({ step: (s.step - 1) as State['step'] }); }}>Back</Button>}
           {s.step === 0 && (
@@ -801,10 +836,29 @@ export default function PublicOrder() {
               s.step === 0 ? (
                 <Button variant="primary" size="lg" icon={<ShoppingBag className="size-4" />} disabled={!cartCount} onClick={() => setCartOpen(true)}>View order</Button>
               ) : (
-                <Button variant="primary" size="lg" disabled={(s.step === 1 && (!detailsOk || !invoiceOk)) || (s.step === 2 && !whenOk)} onClick={() => set({ step: (s.step + 1) as State['step'] })}>Continue</Button>
+                <Button variant="primary" size="lg" onClick={() => {
+                  const missing = s.step === 1 ? detailBlockers : whenBlockers;
+                  if (missing.length) {
+                    setHint(`Please add ${missing.join(', ')}.`);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    return;
+                  }
+                  set({ step: (s.step + 1) as State['step'] });
+                }}>Continue</Button>
               )
             ) : (
-              <Button variant="primary" size="lg" disabled={!online || (terms.length > 0 && !s.accepted) || quoteProblems.length > 0 || priceCheck.isPending} loading={submit.isPending} onClick={() => { setError(null); submit.mutate(); }}>Send order</Button>
+              <Button variant="primary" size="lg" loading={submit.isPending} onClick={() => {
+                setError(null);
+                if (!online) return setError('You’re offline. Your order is saved on this device. Send it when you’re back online.');
+                if (priceCheck.isPending) return setError('One moment: we’re still checking today’s prices.');
+                if (quoteProblems.length) return setError('Some items can’t be ordered as they are. Please remove or change the items marked in red above.');
+                if (terms.length > 0 && !s.accepted) {
+                  setError('Please tick the box to confirm your order is correct, then tap “Send order”.');
+                  termsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  return;
+                }
+                submit.mutate();
+              }}>Send order</Button>
             )}
           </div>
         </div>

@@ -79,6 +79,7 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
     collectionPlace: z.string().trim().min(1).max(80),
     collectionAddress: z.string().max(200),
     deliveryNotes: z.string().max(500),
+    deliveryDayNote: z.string().trim().max(300),
     freeDeliveryKm: z.number().min(0).max(1000),
     customerChooses: z.boolean(),
     showDeliveryFees: z.boolean(),
@@ -115,13 +116,14 @@ const SectionSchemas: Record<keyof BusinessSettings, z.ZodTypeAny> = {
       requirePaymentBeforeRelease: z.boolean(),
       allowUnpaidRelease: z.boolean(),
       linkDays: z.number().int().min(1).max(90),
+      reminderDays: z.number().int().min(0).max(60),
     })
     .partial(),
   help: z.object({ faq: z.array(z.object({ q: z.string().trim().min(3).max(200), a: z.string().trim().min(3).max(2000), category: z.string().trim().max(40).optional() })).max(60) }),
-  content: z.object({ aboutIntro: z.string().trim().max(1500), aboutSections: z.array(z.object({ title: z.string().trim().min(1).max(80), body: z.string().trim().min(1).max(3000) })).max(12) }).partial(),
+  content: z.object({ communityNote: z.string().trim().max(800), aboutIntro: z.string().trim().max(1500), aboutSections: z.array(z.object({ title: z.string().trim().min(1).max(80), body: z.string().trim().min(1).max(3000) })).max(12) }).partial(),
   retention: z.object({ remindersEnabled: z.boolean(), reminderDays: z.number().int().min(3).max(120), feedbackEnabled: z.boolean() }).partial(),
   notifications: z.object({ staffEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), notifyPreparation: z.boolean(), invoiceReadyEmail: z.boolean(), paymentReviewEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10) }).partial(),
-  customerForm: z.object({ enabled: z.boolean(), intro: z.string().max(600), confirmationMessage: z.string().max(600), showPrices: z.boolean(), terms: z.string().max(3000), noticeNote: z.string().max(400), notifyEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), emailCustomer: z.boolean() }).partial(),
+  customerForm: z.object({ enabled: z.boolean(), intro: z.string().max(600), confirmationMessage: z.string().max(600), showPrices: z.boolean(), terms: z.string().max(3000), noticeNote: z.string().max(400), notifyEmails: z.array(z.string().trim().email('Check the email addresses — one looks wrong.')).max(10), emailCustomer: z.boolean(), emailNote: z.string().trim().max(500) }).partial(),
   brand: z
     .object({
       logo: z.string().max(1_000_000).regex(/^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/, 'Upload a PNG, JPG, WebP or SVG image.').nullable(),

@@ -110,8 +110,21 @@ export async function body<T extends z.ZodTypeAny>(c: Context, schema: T): Promi
   const r = schema.safeParse(raw);
   if (!r.success) {
     const first = r.error.issues[0];
-    const where = first?.path?.length ? ` (${first.path.join('.')})` : '';
-    throw badRequest(first?.message && !first.message.startsWith('Invalid') && !first.message.startsWith('Expected') ? first.message : `Please check the details${where}.`, r.error.issues);
+    const path = first?.path?.join('.') ?? '';
+    // Plain words for the fields people actually fill in (never a code like "customer.email" on screen)
+    const FRIENDLY: [RegExp, string][] = [
+      [/^customer\.name/, 'Please enter your name.'],
+      [/^customer\.email/, 'Please enter a valid email address.'],
+      [/^customer\.phone/, 'Please enter a valid mobile number, e.g. 082 123 4567.'],
+      [/^items/, 'Something in your order needs another look. Please go back to “Choose”, check your products and quantities, and try again.'],
+      [/^delivery_address/, 'Please enter your full delivery address.'],
+      [/^delivery_instructions/, 'Please add delivery instructions (directions, gate code or where to leave it).'],
+      [/^requested_date/, 'Please check the date you chose.'],
+      [/^invoice/, 'Please check the invoice details.'],
+    ];
+    const friendly = FRIENDLY.find(([re]) => re.test(path))?.[1];
+    const own = first?.message && !first.message.startsWith('Invalid') && !first.message.startsWith('Expected') ? first.message : null;
+    throw badRequest(own ?? friendly ?? `Please check the details${path ? ` (${path})` : ''}.`, r.error.issues);
   }
   return r.data;
 }

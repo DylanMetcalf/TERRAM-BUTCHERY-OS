@@ -340,13 +340,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = useCallback((t: Omit<ToastItem, 'id'>) => {
     const id = Date.now() + Math.random();
     setItems((s) => [...s.slice(-2), { ...t, id }]);
-    setTimeout(() => setItems((s) => s.filter((x) => x.id !== id)), t.tone === 'error' ? 6000 : 3200);
+    setTimeout(() => setItems((s) => s.filter((x) => x.id !== id)), t.tone === 'error' ? 9000 : 5500);
   }, []);
   return (
     <ToastCtx.Provider value={push}>
       {children}
       {createPortal(
-        <div className="pointer-events-none fixed inset-x-0 bottom-[calc(84px+env(safe-area-inset-bottom))] z-[80] flex flex-col items-center gap-2 px-4 lg:bottom-6 lg:items-end lg:pr-6" aria-live="polite">
+        <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--nav-h)+16px)] z-[80] flex flex-col items-center gap-2 px-4 lg:bottom-6 lg:items-end lg:pr-6" aria-live="polite">
           {items.map((t) => (
             <div
               key={t.id}

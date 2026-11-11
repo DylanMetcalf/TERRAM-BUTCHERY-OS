@@ -94,7 +94,11 @@ if (!(await c.getByText(/We deliver within our regular local delivery area/).cou
 if (!(await c.getByText(/Delivery fee: R\s?150/).count())) fail('delivery fee not shown at checkout');
 if (await c.getByRole('radio', { name: /^Fresh/ }).count()) fail('fresh/frozen choice still shown');
 await c.getByLabel('Delivery address').fill('12 Kerk Street, Hoedspruit');
-if (await c.getByRole('button', { name: 'Continue' }).isEnabled()) fail('could continue without delivery instructions');
+// The button is always tappable now: without instructions it must stay on this step and say exactly what is missing
+await c.getByRole('button', { name: 'Continue' }).click();
+if (!(await c.getByRole('alert').filter({ hasText: /delivery instructions/i }).count())) fail('no explanation shown when delivery instructions are missing');
+if (await c.getByRole('heading', { name: 'Check your order' }).count()) fail('could continue without delivery instructions');
+if (!(await c.getByText(/Monday or Tuesday/).count())) fail('Hoedspruit delivery-day note not shown at checkout');
 await c.getByLabel('Delivery instructions').fill('Gate code 4411, green gate');
 await shot(c, '03b-delivery');
 await c.getByRole('button', { name: 'Continue' }).click();
@@ -108,6 +112,12 @@ await c.getByRole('button', { name: 'Send order' }).click();
 await c.getByRole('heading', { name: 'Order received' }).waitFor();
 if (await c.getByText(/order (is|has been) confirmed/i).count()) fail('success screen says confirmed');
 await shot(c, '05-received');
+if (!(await c.getByText(/sent by email/).count())) fail('success screen does not say updates come by email');
+if (!(await c.getByText(/WhatsApp about your delivery/).count())) fail('success screen does not say delivery is arranged on WhatsApp');
+if (!(await c.getByText(/Monday or Tuesday/).count())) fail('success screen has no delivery-day note');
+if (!(await c.getByText('Share the love').count())) fail('success screen has no community note');
+if (!(await c.locator('a[href^="https://wa.me/"]').filter({ hasText: /photo on WhatsApp/ }).count())) fail('no photo-by-WhatsApp button');
+if ((await c.getByRole('heading', { name: 'Order received' }).evaluate((el) => el === document.activeElement)) !== true) fail('confirmation heading is not focused/scrolled into view');
 step('order sent from a phone: "Order received", not confirmed');
 await c.getByRole('link', { name: 'Track my order' }).click();
 await c.getByText('What’s happening').waitFor();

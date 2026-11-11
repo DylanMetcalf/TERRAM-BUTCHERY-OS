@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { Mail, Menu, MessageCircle, Phone, X } from 'lucide-react';
+import { ArrowLeft, Mail, Menu, MessageCircle, Phone, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Logo } from './order-bits';
 import { cx } from './ui';
@@ -26,13 +26,22 @@ export function SiteHeader({ subtitle, width = 'max-w-5xl', right }: { subtitle?
   const { data: info } = usePublicInfo();
   const [open, setOpen] = useState(false);
   const loc = useLocation();
+  const navigate = useNavigate();
+  /** A back arrow on every page except home: goes to the page they came from, or home if they opened this one directly. */
+  const canGoBack = loc.pathname !== '/';
+  const goBack = () => (window.history.state?.idx > 0 ? navigate(-1) : navigate('/'));
   useEffect(() => {
     setOpen(false);
   }, [loc.pathname, loc.hash]);
   const active = (to: string) => (to === '/' ? loc.pathname === '/' && !loc.hash : to.startsWith('/#') ? loc.pathname === '/' && loc.hash === to.slice(1) : loc.pathname.startsWith(to) || (to === '/faq' && loc.pathname === '/help'));
   return (
     <header className="relative z-40 bg-charcoal text-white print:hidden">
-      <div className={cx('mx-auto flex h-[72px] items-center justify-between gap-3 px-5 sm:px-8', width)}>
+      <div className={cx('mx-auto flex h-[72px] items-center justify-between gap-2 px-5 sm:gap-3 sm:px-8', width)}>
+        {canGoBack && (
+          <button type="button" onClick={goBack} className="-ml-2 flex size-11 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20" aria-label="Go back">
+            <ArrowLeft className="size-5" />
+          </button>
+        )}
         <Link to="/" className="flex min-w-0 items-center gap-3" aria-label={`${info?.business?.name ?? 'Terram Farm'} home`}>
           <Logo withWord={false} tone="light" />
           <div className="min-w-0">

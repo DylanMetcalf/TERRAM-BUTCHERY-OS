@@ -1,7 +1,8 @@
-import { ChevronRight, ExternalLink, Star, X } from 'lucide-react';
+import { Camera, ChevronRight, ExternalLink, MessageCircle, Recycle, Star, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { deviceOrders } from '../lib/customer';
+import { normalisePhone } from '../../../shared/text';
 import { dateTime } from '../lib/format';
 
 /** Instagram's mark, drawn simply (brand icons aren't in the icon set). */
@@ -26,6 +27,28 @@ export function InstagramCard({ url, name }: { url: string | null | undefined; n
       </span>
       <ExternalLink className="size-4 shrink-0 text-ink-3" />
     </a>
+  );
+}
+
+/**
+ * "Share the love": reuse our boxes for compost, and share photos (with the order, or while braaiing) over
+ * WhatsApp, with a social handle if they'd like to be tagged. The text is the farm's own (Settings → About page).
+ * The prefilled WhatsApp message carries the customer's own permission to share.
+ */
+export function CommunityCard({ note, phone, name, reference }: { note: string | null | undefined; phone: string | null | undefined; name: string; reference?: number | null }) {
+  if (!note) return null;
+  const wa = (normalisePhone(phone) ?? '').replace(/\D/g, '');
+  const text = `Hi ${name}! Here's a photo${reference ? ` from my order #${reference}` : ''}. I'm happy for you to share it on social media. My handle, if you'd like to tag me: @`;
+  return (
+    <div className="rounded-2xl border border-brand/25 bg-brand-soft p-4 text-left text-brand-soft-ink">
+      <div className="flex items-center gap-2 font-semibold"><span className="flex size-9 items-center justify-center rounded-xl bg-brand text-brand-ink"><Recycle className="size-5" /></span>Share the love</div>
+      <p className="mt-2 whitespace-pre-line text-[14.5px] leading-relaxed">{note}</p>
+      {wa.length >= 9 && (
+        <a href={`https://wa.me/${wa}?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer" className="mt-3 inline-flex h-11 items-center gap-2 rounded-xl bg-brand px-4 text-[15px] font-semibold text-brand-ink transition hover:bg-brand-hover">
+          <Camera className="size-4" /> Send us a photo on WhatsApp <MessageCircle className="size-4" />
+        </a>
+      )}
+    </div>
   );
 }
 
